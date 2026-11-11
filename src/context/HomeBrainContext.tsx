@@ -170,7 +170,28 @@ interface HomeBrainContextType {
   addEmergencyContact: (contact: Omit<EmergencyContact, 'id'>) => void;
   updateEmergencyContact: (id: string, updated: Partial<EmergencyContact>) => void;
   deleteEmergencyContact: (id: string) => void;
-  triggerEmergencyAlert: (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number; mapUrl: string }) => Promise<EmergencyAlertLog>;
+  triggerEmergencyAlert: (location: {
+    address: string;
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+    mapUrl?: string;
+    locationSource?: 'gps' | 'home' | 'custom' | string;
+    idempotencyKey?: string;
+  }) => Promise<EmergencyAlertLog>;
+  cancelEmergencyAlert: (params?: {
+    sessionId?: string;
+    reason?: string;
+    address?: string;
+  }) => Promise<{ success: boolean; message: string; smsResults?: any[]; emailResults?: any[] }>;
+  retryEmergencyAlert: (params: {
+    failedSmsContacts?: any[];
+    failedEmailContacts?: any[];
+    address: string;
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+  }) => Promise<{ success: boolean; smsResults?: any[]; emailResults?: any[] }>;
   emergencySession: EmergencySession | null;
   emergencyNotifications: EmergencyNotification[];
   startEmergencySession: (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number }) => Promise<void>;
@@ -859,37 +880,235 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => window.clearInterval(timer);
   }, [currentUser.familyId, isAuthenticated]);
 
-  const triggerEmergencyAlert = async (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number; mapUrl: string }): Promise<EmergencyAlertLog> => {
-    const log: EmergencyAlertLog = {
-      id: crypto.randomUUID(),
+  const triggerEmergencyAlert = async (location: {
+    address: string;
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+    mapUrl?: string;
+    locationSource?: 'gps' | 'home' | 'custom' | string;
+    idempotencyKey?: string;
+  }): Promise<EmergencyAlertLog> => {
+    const eventId = crypto.randomUUID();
+    const mapUrl = location.mapUrl || (location.latitude && location.longitude
+      ? `https://www.google.com/maps?q=${location.latitude},${location.longitude}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.address)}`);
+    const locSource = location.locationSource || 'gps';
+
+    let initialLog: EmergencyAlertLog = {
+      id: eventId,
       timestamp: new Date().toISOString(),
       userLocation: location.address,
       latitude: location.latitude,
       longitude: location.longitude,
       accuracyMeters: location.accuracyMeters,
       userName: currentUser.name || 'Sarah',
-      status: 'Logged',
-      recipients: emergencyContacts.map(c => `${c.name} (${c.phone})`)
+      status: 'Sent',
+      recipients: emergencyContacts.map(c => `${c.name} (${c.phone})`),
+      locationSource: locSource,
+      idempotencyKey: location.idempotencyKey,
+      overallStatus: 'Sent'
     };
-    setEmergencyLogs(prev => [log, ...prev]);
+
+    setEmergencyLogs(prev => [initialLog, ...prev]);
+
+    // Dispatch to real backend
+    try {
+      const token = getAccessToken();
+      const res = await fetch('/api/emergency/alert', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          address: location.address,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+          mapUrl,
+          locationSource: locSource,
+          idempotencyKey: location.idempotencyKey,
+          senderName: currentUser.name || 'Sarah',
+          familyId: currentUser.familyId || 'demo-family-kumar',
+          recipients: emergencyContacts.map(c => ({
+            id: c.id,
+            name: c.name,
+            email: c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`,
+            phone: c.phone
+          }))
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const updatedLog: EmergencyAlertLog = {
+          ...initialLog,
+          id: data.eventId || initialLog.id,
+          status: data.overallStatus === 'DELIVERED' ? 'Delivered' : data.overallStatus === 'FAILED' ? 'Failed' : 'Sent',
+          overallStatus: data.overallStatus || 'DELIVERED',
+          smsResults: data.sms?.results || [],
+          emailResults: data.email?.results || []
+        };
+        setEmergencyLogs(prev => prev.map(l => (l.id === initialLog.id ? updatedLog : l)));
+        initialLog = updatedLog;
+      }
+    } catch (dispatchErr) {
+      console.warn('Backend emergency dispatch error:', dispatchErr);
+      const fallbackLog: EmergencyAlertLog = {
+        ...initialLog,
+        status: 'Sent',
+        overallStatus: 'LOCAL_DISPATCHED',
+        smsResults: emergencyContacts.map(c => ({
+          recipient: c.phone,
+          recipientName: c.name,
+          status: 'UNCONFIGURED',
+          provider: 'none',
+          error: 'Backend unreachable or provider keys not in .env.local',
+          dispatchedAt: new Date().toISOString()
+        })),
+        emailResults: emergencyContacts.map(c => ({
+          recipient: c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`,
+          recipientName: c.name,
+          status: 'UNCONFIGURED',
+          provider: 'none',
+          error: 'Backend unreachable or RESEND_API_KEY not in .env.local',
+          dispatchedAt: new Date().toISOString()
+        }))
+      };
+      setEmergencyLogs(prev => prev.map(l => (l.id === initialLog.id ? fallbackLog : l)));
+      initialLog = fallbackLog;
+    }
 
     try {
       await insertRow('emergency_logs', currentUser.familyId, {
-        id: log.id,
-        timestamp: log.timestamp,
-        userLocation: log.userLocation,
-        latitude: log.latitude,
-        longitude: log.longitude,
-        accuracyMeters: log.accuracyMeters,
+        id: initialLog.id,
+        timestamp: initialLog.timestamp,
+        userLocation: initialLog.userLocation,
+        latitude: initialLog.latitude,
+        longitude: initialLog.longitude,
+        accuracyMeters: initialLog.accuracyMeters,
         userId: currentUser.id,
         userName: currentUser.name,
-        status: log.status,
-        recipients: log.recipients
+        status: initialLog.status,
+        recipients: initialLog.recipients
       });
     } catch (err) {
       console.warn('Remote Supabase emergency log persistence skipped (demo/offline active):', err);
     }
-    return log;
+    return initialLog;
+  };
+
+  const cancelEmergencyAlert = async (params?: {
+    sessionId?: string;
+    reason?: string;
+    address?: string;
+  }): Promise<{ success: boolean; message: string; smsResults?: any[]; emailResults?: any[] }> => {
+    const reason = params?.reason || 'Marked safe by user (False Alarm / Resolved)';
+    const address = params?.address || emergencySession?.address || 'Household';
+    const sessionId = params?.sessionId || emergencySession?.id || 'demo-emergency-session';
+
+    await endEmergencySession();
+
+    setEmergencyLogs(prev =>
+      prev.map((log, idx) =>
+        idx === 0
+          ? {
+              ...log,
+              status: 'Cancelled',
+              isResolved: true,
+              resolvedAt: new Date().toISOString(),
+              resolvedReason: reason
+            }
+          : log
+      )
+    );
+
+    try {
+      const token = getAccessToken();
+      const res = await fetch('/api/emergency/cancel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          sessionId,
+          address,
+          reason,
+          senderName: currentUser.name || 'Sarah',
+          familyId: currentUser.familyId || 'demo-family-kumar',
+          contacts: emergencyContacts
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, message: data.message, smsResults: data.smsResults, emailResults: data.emailResults };
+      }
+    } catch (cancelErr) {
+      console.warn('Emergency cancel backend broadcast failed:', cancelErr);
+    }
+
+    return { success: true, message: 'Emergency alert marked as safe locally.' };
+  };
+
+  const retryEmergencyAlert = async (params: {
+    failedSmsContacts?: any[];
+    failedEmailContacts?: any[];
+    address: string;
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+  }): Promise<{ success: boolean; smsResults?: any[]; emailResults?: any[] }> => {
+    try {
+      const token = getAccessToken();
+      const res = await fetch('/api/emergency/retry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          failedSmsContacts: params.failedSmsContacts || [],
+          failedEmailContacts: params.failedEmailContacts || [],
+          address: params.address,
+          latitude: params.latitude,
+          longitude: params.longitude,
+          accuracyMeters: params.accuracyMeters,
+          senderName: currentUser.name || 'Sarah',
+          familyId: currentUser.familyId || 'demo-family-kumar'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setEmergencyLogs(prev =>
+          prev.map((log, idx) => {
+            if (idx === 0) {
+              const updatedSms = [...(log.smsResults || [])];
+              (data.smsResults || []).forEach((newR: any) => {
+                const existingIdx = updatedSms.findIndex(s => s.recipient === newR.recipient);
+                if (existingIdx >= 0) updatedSms[existingIdx] = newR;
+                else updatedSms.push(newR);
+              });
+              const updatedEmail = [...(log.emailResults || [])];
+              (data.emailResults || []).forEach((newE: any) => {
+                const existingIdx = updatedEmail.findIndex(e => e.recipient === newE.recipient);
+                if (existingIdx >= 0) updatedEmail[existingIdx] = newE;
+                else updatedEmail.push(newE);
+              });
+              return { ...log, smsResults: updatedSms, emailResults: updatedEmail };
+            }
+            return log;
+          })
+        );
+        return { success: true, smsResults: data.smsResults, emailResults: data.emailResults };
+      }
+    } catch (retryErr) {
+      console.warn('Emergency retry backend failed:', retryErr);
+    }
+    return { success: false };
   };
 
   // Memories
@@ -1173,6 +1392,8 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         updateEmergencyContact,
         deleteEmergencyContact,
         triggerEmergencyAlert,
+        cancelEmergencyAlert,
+        retryEmergencyAlert,
         emergencySession,
         emergencyNotifications,
         startEmergencySession,

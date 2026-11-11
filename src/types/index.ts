@@ -163,6 +163,26 @@ export interface EmergencyContact {
   isPrimary: boolean;
 }
 
+export interface SMSDeliveryResult {
+  recipient: string;
+  recipientName: string;
+  status: 'ACCEPTED' | 'SENT' | 'DELIVERED' | 'FAILED' | 'UNCONFIGURED';
+  provider: 'twilio' | 'fast2sms' | 'none';
+  messageId?: string;
+  error?: string;
+  dispatchedAt: string;
+}
+
+export interface EmailDeliveryResult {
+  recipient: string;
+  recipientName: string;
+  status: 'ACCEPTED' | 'SENT' | 'DELIVERED' | 'FAILED' | 'UNCONFIGURED';
+  provider: 'resend' | 'none';
+  messageId?: string;
+  error?: string;
+  dispatchedAt: string;
+}
+
 export interface EmergencyAlertLog {
   id: string;
   timestamp: string;
@@ -171,8 +191,16 @@ export interface EmergencyAlertLog {
   longitude: number;
   accuracyMeters?: number;
   userName?: string;
-  status: 'Logged' | 'Sent' | 'Delivered' | 'Cancelled';
+  status: 'Logged' | 'Sent' | 'Delivered' | 'Cancelled' | 'Failed';
   recipients: string[];
+  locationSource?: 'gps' | 'home' | 'custom' | string;
+  idempotencyKey?: string;
+  smsResults?: SMSDeliveryResult[];
+  emailResults?: EmailDeliveryResult[];
+  overallStatus?: string;
+  isResolved?: boolean;
+  resolvedAt?: string;
+  resolvedReason?: string;
 }
 
 export interface EmergencySession {

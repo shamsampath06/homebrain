@@ -3,9 +3,28 @@ import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { formatIndiaDateTime } from '../../lib/display';
-import { getAccessToken } from '../../lib/supabase';
 import { PageHeader } from '../layout/PageHeader';
-import { ShieldAlert, AlertTriangle, MapPin, Share2, CheckCircle2, X, RefreshCw, Mail, Send, Phone, MessageSquare, Zap, Info } from 'lucide-react';
+import {
+  ShieldAlert,
+  AlertTriangle,
+  MapPin,
+  Share2,
+  CheckCircle2,
+  X,
+  RefreshCw,
+  Mail,
+  Send,
+  Phone,
+  MessageSquare,
+  Zap,
+  Info,
+  RotateCcw,
+  Check,
+  ExternalLink,
+  ShieldCheck,
+  AlertCircle
+} from 'lucide-react';
+import { EmergencyAlertLog } from '../../types';
 
 const DEFAULT_HOME_LOCATION = {
   address: 'Kumar Family Residence, 100ft Road, Indiranagar, Bangalore, Karnataka 560038',
@@ -15,7 +34,23 @@ const DEFAULT_HOME_LOCATION = {
 };
 
 export const EmergencyModeModal: React.FC = () => {
-  const { currentUser, emergencyContacts, emergencyLogs, emergencySession, addEmergencyContact, updateEmergencyContact, deleteEmergencyContact, triggerEmergencyAlert, startEmergencySession, updateEmergencySessionLocation, endEmergencySession, setActiveSubScreen } = useHomeBrain();
+  const {
+    currentUser,
+    emergencyContacts,
+    emergencyLogs,
+    emergencySession,
+    addEmergencyContact,
+    updateEmergencyContact,
+    deleteEmergencyContact,
+    triggerEmergencyAlert,
+    cancelEmergencyAlert,
+    retryEmergencyAlert,
+    startEmergencySession,
+    updateEmergencySessionLocation,
+    endEmergencySession,
+    setActiveSubScreen
+  } = useHomeBrain();
+
   const [step, setStep] = useState<'explain' | 'confirm' | 'sending' | 'sent' | 'error'>('explain');
   const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number; accuracyMeters: number } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
@@ -31,7 +66,14 @@ export const EmergencyModeModal: React.FC = () => {
   const [contactPhone, setContactPhone] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPrimary, setContactPrimary] = useState(false);
-  const [emailResults, setEmailResults] = useState<{ email: string; status: string; message: string }[]>([]);
+
+  // Granular Alert Tracking State
+  const [lastAlert, setLastAlert] = useState<EmergencyAlertLog | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryNotice, setRetryNotice] = useState<string | null>(null);
+
   const mapElement = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const watchId = useRef<number | null>(null);
@@ -116,45 +158,16 @@ export const EmergencyModeModal: React.FC = () => {
         longitude: locCoords.longitude,
         accuracyMeters: locCoords.accuracyMeters
       });
-      await triggerEmergencyAlert({
+      const alertLog = await triggerEmergencyAlert({
         address: locAddress,
         latitude: locCoords.latitude,
         longitude: locCoords.longitude,
         accuracyMeters: locCoords.accuracyMeters,
-        mapUrl: getMapUrl(locCoords)
+        mapUrl: getMapUrl(locCoords),
+        locationSource: locationType,
+        idempotencyKey: `sos_${Date.now()}`
       });
-
-      try {
-        const token = getAccessToken();
-        const alertRes = await fetch('/api/emergency/alert', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify({
-            address: locAddress,
-            latitude: locCoords.latitude,
-            longitude: locCoords.longitude,
-            accuracyMeters: locCoords.accuracyMeters,
-            mapUrl: getMapUrl(locCoords),
-            senderName: currentUser.name || 'Sarah',
-            familyId: currentUser.familyId || 'demo-family-kumar',
-            recipients: emergencyContacts.map(c => ({
-              name: c.name,
-              email: c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`,
-              phone: c.phone
-            }))
-          })
-        });
-        if (alertRes.ok) {
-          const alertData = await alertRes.json();
-          setEmailResults(alertData.results || []);
-        }
-      } catch (emailErr) {
-        console.warn('Backend SOS email dispatch skipped:', emailErr);
-      }
-
+      setLastAlert(alertLog);
       setStep('sent');
     } catch (err) {
       console.warn('SOS dispatch fallback to sent state:', err);
@@ -202,45 +215,16 @@ export const EmergencyModeModal: React.FC = () => {
         longitude: coordinates.longitude,
         accuracyMeters: coordinates.accuracyMeters
       });
-      await triggerEmergencyAlert({
+      const alertLog = await triggerEmergencyAlert({
         address,
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
         accuracyMeters: coordinates.accuracyMeters,
-        mapUrl
+        mapUrl,
+        locationSource: locationType,
+        idempotencyKey: `sos_${Date.now()}`
       });
-
-      // Dispatch real/simulated email alerts via backend
-      try {
-        const token = getAccessToken();
-        const alertRes = await fetch('/api/emergency/alert', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify({
-            address,
-            latitude: coordinates.latitude,
-            longitude: coordinates.longitude,
-            accuracyMeters: coordinates.accuracyMeters,
-            mapUrl,
-            senderName: currentUser.name,
-            familyId: currentUser.familyId,
-            recipients: emergencyContacts.map(c => ({
-              name: c.name,
-              email: c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`,
-              phone: c.phone
-            }))
-          })
-        });
-        if (alertRes.ok) {
-          const alertData = await alertRes.json();
-          setEmailResults(alertData.results || []);
-        }
-      } catch (emailErr) {
-        console.warn('Backend SOS email dispatch skipped:', emailErr);
-      }
+      setLastAlert(alertLog);
 
       watchId.current = navigator.geolocation.watchPosition(
         position => {
@@ -266,6 +250,59 @@ export const EmergencyModeModal: React.FC = () => {
       setStep('sent');
     } catch (error) {
       setLocationError(error instanceof Error ? error.message : 'Emergency event could not be logged.');
+    }
+  };
+
+  const handleCancelAlert = async () => {
+    setIsCancelling(true);
+    setCancelMessage(null);
+    try {
+      const res = await cancelEmergencyAlert({
+        sessionId: emergencySession?.id,
+        reason: 'Marked safe by user (False Alarm / Resolved)',
+        address: address || DEFAULT_HOME_LOCATION.address
+      });
+      setIsCancelling(false);
+      setCancelMessage(res.message || 'Emergency alert cancelled. All contacts notified that family is safe.');
+      if (watchId.current !== null) {
+        navigator.geolocation.clearWatch(watchId.current);
+        watchId.current = null;
+      }
+    } catch (err: any) {
+      setIsCancelling(false);
+      setCancelMessage('Emergency alert marked as safe.');
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    setIsRetrying(true);
+    setRetryNotice(null);
+    try {
+      const activeAlert = lastAlert || emergencyLogs[0];
+      const failedSms = (activeAlert?.smsResults || []).filter(s => s.status === 'FAILED');
+      const failedEmail = (activeAlert?.emailResults || []).filter(e => e.status === 'FAILED');
+
+      const res = await retryEmergencyAlert({
+        failedSmsContacts: failedSms.length > 0
+          ? emergencyContacts.filter(c => failedSms.some(fs => fs.recipient.includes(c.phone.replace(/\D/g, '').slice(-8))))
+          : emergencyContacts,
+        failedEmailContacts: failedEmail.length > 0
+          ? emergencyContacts.filter(c => failedEmail.some(fe => fe.recipient === c.email))
+          : emergencyContacts,
+        address: address || DEFAULT_HOME_LOCATION.address,
+        latitude: coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude,
+        longitude: coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude,
+        accuracyMeters: coordinates?.accuracyMeters || 15
+      });
+      setIsRetrying(false);
+      if (res.success) {
+        setRetryNotice('Retry attempt executed successfully.');
+      } else {
+        setRetryNotice('Could not retry via external APIs. Please use direct Call / SMS below.');
+      }
+    } catch (err: any) {
+      setIsRetrying(false);
+      setRetryNotice('Retry failed: ' + (err.message || 'Unknown error'));
     }
   };
 
@@ -567,102 +604,248 @@ export const EmergencyModeModal: React.FC = () => {
       )}
 
       {(step === 'sent' || isOwnActiveSession) && !isIncomingSession && (
-        <div className="text-center py-6 space-y-4">
-          <CheckCircle2 className="w-14 h-14 text-emerald-500 mx-auto" />
-          <h3 className="text-xl font-bold text-slate-900 dark:text-white">Emergency Location Dispatched</h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Your live GPS location and alert broadcast have been recorded and sent to family accounts.
-          </p>
+        <div className="py-4 space-y-4">
+          {/* Status Header */}
+          {lastAlert?.isResolved || lastAlert?.status === 'Cancelled' ? (
+            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-center space-y-1">
+              <ShieldCheck className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto" />
+              <h3 className="text-lg font-black text-emerald-900 dark:text-emerald-100">
+                EMERGENCY ALERT CANCELLED & MARKED SAFE
+              </h3>
+              <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                {cancelMessage || lastAlert?.resolvedReason || 'Situation resolved. Safe notice sent to emergency contacts.'}
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-center space-y-1 shadow-sm">
+              <AlertCircle className="w-10 h-10 text-rose-600 mx-auto animate-pulse" />
+              <h3 className="text-lg font-black text-rose-900 dark:text-rose-100 flex items-center justify-center gap-2">
+                <span>🚨 EMERGENCY SOS DISPATCHED & ACTIVE</span>
+              </h3>
+              <p className="text-xs text-rose-700 dark:text-rose-300">
+                Live broadcast recorded at {lastAlert?.timestamp ? formatIndiaDateTime(lastAlert.timestamp) : new Date().toLocaleTimeString('en-IN')}.
+              </p>
+            </div>
+          )}
 
-          <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-xs text-emerald-800 dark:text-emerald-200 font-semibold space-y-1 text-left">
-            <p className="font-bold flex items-center justify-between text-emerald-900 dark:text-emerald-100">
-              <span className="flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5" /> Dispatched Address:
+          {cancelMessage && (
+            <div className="p-3 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 border border-emerald-300 text-xs font-semibold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{cancelMessage}</span>
+            </div>
+          )}
+
+          {retryNotice && (
+            <div className="p-3 rounded-xl bg-blue-100 dark:bg-blue-900/60 border border-blue-300 text-xs font-semibold text-blue-900 dark:text-blue-100 flex items-center gap-2">
+              <Info className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>{retryNotice}</span>
+            </div>
+          )}
+
+          {/* Dispatched Location Card */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm space-y-2 text-left">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-rose-500" /> Dispatched Location:
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200/80 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100">
-                {locationType === 'gps' ? '📍 Live GPS' : locationType === 'custom' ? '✏️ Custom Location' : '🏠 Household Address'}
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                {locationType === 'gps' ? '📍 Live GPS' : locationType === 'custom' ? '✏️ Custom Spot' : '🏠 Household Address'}
               </span>
+            </div>
+            <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
+              {address || DEFAULT_HOME_LOCATION.address}
             </p>
-            <p className="text-emerald-700 dark:text-emerald-300 font-normal">{address}</p>
-            <div className="pt-1">
-              <a href={mapUrl} target="_blank" rel="noreferrer" className="underline text-brand-600 dark:text-brand-400 font-bold">
-                Open live map tracking location →
+            {coordinates && (
+              <p className="text-[11px] text-slate-500 font-mono">
+                Coordinates: {coordinates.latitude.toFixed(6)}, {coordinates.longitude.toFixed(6)} (±{Math.round(coordinates.accuracyMeters)}m)
+              </p>
+            )}
+            <div className="flex items-center gap-3 pt-1 text-xs">
+              <a
+                href={mapUrl || `https://www.google.com/maps?q=${coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude},${coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-bold text-brand-600 hover:text-brand-700 underline flex items-center gap-1"
+              >
+                <span>Google Maps Live Link</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <a
+                href={getMapUrl(coordinates || DEFAULT_HOME_LOCATION)}
+                target="_blank"
+                rel="noreferrer"
+                className="font-bold text-slate-600 hover:text-slate-800 dark:text-slate-400 underline flex items-center gap-1"
+              >
+                <span>OpenStreetMap</span>
+                <ExternalLink className="w-3 h-3" />
               </a>
             </div>
           </div>
 
-          {/* Direct Emergency Dials */}
-          <div className="space-y-2 text-left">
-            <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              Immediate Contact Direct Calling & SMS:
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {emergencyContacts.map(c => (
-                <div key={c.id} className="p-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs shadow-sm">
-                  <div className="overflow-hidden pr-2">
-                    <p className="font-bold text-slate-900 dark:text-white truncate">{c.name}</p>
-                    <p className="text-[11px] text-slate-500 font-mono truncate">{c.phone}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <a
-                      href={`tel:${c.phone}`}
-                      className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1 text-[11px] shadow-sm transition-all active:scale-95"
-                      title="Direct Phone Call"
-                    >
-                      <Phone className="w-3.5 h-3.5" /> Call
-                    </a>
-                    <a
-                      href={`sms:${c.phone}?body=${encodeURIComponent(`EMERGENCY SOS ALERT! ${currentUser.name} has triggered an emergency from: ${address}. Live map: ${mapUrl}`)}`}
-                      className="p-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1 text-[11px] shadow-sm transition-all active:scale-95"
-                      title="Send Emergency SMS"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" /> SMS
-                    </a>
-                  </div>
-                </div>
-              ))}
+          {/* Granular SMS Delivery Section */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm space-y-3 text-left">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4 text-emerald-500" />
+                Cellular SMS Emergency Notifications ({emergencyContacts.length})
+              </p>
             </div>
-            <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300">
-              <span className="font-bold text-slate-800 dark:text-slate-200">⚡ Notification Delivery: </span>
-              In-app SOS notification broadcasted to all active family screens. Because external SMS gateways (e.g. Twilio) require paid API keys, click <strong>Call</strong> or <strong>SMS</strong> above to trigger a direct SMS or call from your device!
+
+            <div className="space-y-2">
+              {emergencyContacts.map(c => {
+                const activeAlert = lastAlert || emergencyLogs[0];
+                const cleanPhone = c.phone.replace(/[\s\-\(\)]/g, '');
+                const smsResult = activeAlert?.smsResults?.find(s =>
+                  s.recipient === cleanPhone || s.recipient.endsWith(cleanPhone.slice(-8)) || s.recipientName === c.name
+                );
+
+                const status = smsResult?.status || 'UNCONFIGURED';
+
+                return (
+                  <div
+                    key={c.id}
+                    className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700 space-y-2"
+                  >
+                    <div className="flex items-center justify-between flex-wrap gap-1">
+                      <div>
+                        <span className="font-bold text-slate-900 dark:text-white text-xs">{c.name}</span>
+                        <span className="text-[11px] text-slate-500 font-mono ml-2">{c.phone}</span>
+                        {c.relation && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                            {c.relation}
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          status === 'ACCEPTED' || status === 'SENT'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                            : status === 'FAILED'
+                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300/50'
+                        }`}
+                      >
+                        {status === 'ACCEPTED' || status === 'SENT'
+                          ? '✓ SMS Delivered'
+                          : status === 'FAILED'
+                          ? '✕ Delivery Failed'
+                          : '⚠️ Gateway Unconfigured'}
+                      </span>
+                    </div>
+
+                    {status === 'UNCONFIGURED' && (
+                      <p className="text-[10px] text-amber-700 dark:text-amber-400 leading-snug">
+                        External SMS gateway unconfigured in <code className="px-1 py-0.5 bg-amber-200/70 dark:bg-amber-900/80 rounded font-mono">.env.local</code> (add TWILIO or FAST2SMS keys). Use native direct dispatch below:
+                      </p>
+                    )}
+
+                    {status === 'FAILED' && smsResult?.error && (
+                      <p className="text-[10px] text-rose-600 dark:text-rose-400">
+                        Error: {smsResult.error}
+                      </p>
+                    )}
+
+                    {/* Direct 1-Tap Fallback: Call & Native SMS */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <a
+                        href={`tel:${c.phone}`}
+                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
+                      >
+                        <Phone className="w-3.5 h-3.5" /> Call Now
+                      </a>
+                      <a
+                        href={`sms:${c.phone}?body=${encodeURIComponent(
+                          `EMERGENCY SOS ALERT! ${currentUser.name} has triggered an urgent emergency alert. Address: ${address || DEFAULT_HOME_LOCATION.address}. Live Map: ${mapUrl || `https://www.google.com/maps?q=${coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude},${coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude}`}`
+                        )}`}
+                        className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" /> Send Native SMS
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-          {emailResults.length > 0 && (
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-left space-y-2">
-              <p className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-brand-500" /> Emergency Email Dispatch Results ({emailResults.length})
-              </p>
-              <div className="space-y-1.5 text-xs">
-                {emailResults.map((res, i) => (
-                  <div key={i} className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-                    <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[200px]">{res.email}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      res.status === 'sent'
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                        : res.status === 'simulated_sandbox'
-                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
-                        : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                    }`}>
-                      {res.status === 'sent' ? '✓ Delivered via Resend' : res.status === 'simulated_sandbox' ? '✓ Sandbox Email Simulated' : 'Failed'}
+
+          {/* Granular Email Delivery Section */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm space-y-3 text-left">
+            <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <Mail className="w-4 h-4 text-indigo-500" />
+              Emergency Email Notifications
+            </p>
+
+            <div className="space-y-1.5">
+              {emergencyContacts.map(c => {
+                const activeAlert = lastAlert || emergencyLogs[0];
+                const emailResult = activeAlert?.emailResults?.find(e =>
+                  (c.email && e.recipient === c.email.toLowerCase()) || e.recipientName === c.name
+                );
+                const status = emailResult?.status || 'UNCONFIGURED';
+
+                return (
+                  <div
+                    key={c.id}
+                    className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-800 dark:text-slate-200">{c.name}</p>
+                      <p className="text-[11px] text-slate-500 font-mono">
+                        {c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`}
+                      </p>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        status === 'ACCEPTED' || status === 'SENT'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                          : status === 'FAILED'
+                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                      }`}
+                    >
+                      {status === 'ACCEPTED' || status === 'SENT'
+                        ? '✓ Delivered via Resend'
+                        : status === 'FAILED'
+                        ? '✕ Email Failed'
+                        : '⚠️ RESEND_API_KEY Required'}
                     </span>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          )}
+          </div>
 
-          {emergencySession?.initiatedBy === currentUser.id && emergencySession.status === 'active' && (
-            <button type="button" onClick={() => void stopTrackingAndEnd()} className="rounded-xl bg-rose-600 hover:bg-rose-700 px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-rose-600/30">
-              End Emergency Session
+          {/* Action Buttons: Cancel Alert / Retry / Close */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            {/* Retry Button if any notification failed */}
+            <button
+              type="button"
+              onClick={handleRetryFailed}
+              disabled={isRetrying}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isRetrying ? 'animate-spin' : ''}`} />
+              <span>{isRetrying ? 'Retrying alerts...' : 'Retry Failed Notifications'}</span>
             </button>
-          )}
 
-          <div>
+            {/* Cancel Alert / Mark Safe */}
+            {(!lastAlert?.isResolved && lastAlert?.status !== 'Cancelled') && (
+              <button
+                type="button"
+                onClick={handleCancelAlert}
+                disabled={isCancelling}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>{isCancelling ? 'Broadcasting safe status...' : 'Cancel Alert / Mark Family Safe (False Alarm)'}</span>
+              </button>
+            )}
+
             <button
               onClick={() => setActiveSubScreen('none')}
-              className="px-6 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
             >
-              Close Emergency Panel
+              Close Panel
             </button>
           </div>
         </div>
