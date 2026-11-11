@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { isSupabaseConfigured, uploadPrivateFile } from '../../lib/supabase';
+import { CleanChatMessage } from './CleanChatMessage';
 import {
   Bot,
   Send,
@@ -361,12 +362,16 @@ export const AIChatScreen: React.FC = () => {
 
                 <div className="max-w-[85%] sm:max-w-[75%] space-y-2">
                   <div
-                    className={`p-4 rounded-3xl text-xs sm:text-sm leading-relaxed whitespace-pre-wrap ${isUser
+                    className={`p-4 rounded-3xl text-xs sm:text-sm leading-relaxed ${isUser
                         ? 'bg-brand-600 text-white rounded-tr-none shadow-md'
-                        : 'bg-slate-100 dark:bg-slate-700/70 text-slate-900 dark:text-white rounded-tl-none border border-slate-200/50 dark:border-slate-600'
+                        : 'bg-slate-100 dark:bg-slate-800/90 text-slate-900 dark:text-white rounded-tl-none border border-slate-200/70 dark:border-slate-700 shadow-sm'
                       }`}
                   >
-                    {msg.text}
+                    <CleanChatMessage
+                      text={msg.text}
+                      isUser={isUser}
+                      onNavigate={navigateToSubScreen}
+                    />
 
                     {/* Multimodal Attachments Previews */}
                     {msg.attachments && msg.attachments.length > 0 && (
