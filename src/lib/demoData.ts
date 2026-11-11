@@ -11,7 +11,8 @@ import {
   BillItem,
   FamilyKnowledge,
   FamilyMemory,
-  EmergencyContact
+  EmergencyContact,
+  EmergencyAlertLog
 } from '../types';
 import { insertRow, deleteRow } from './supabase';
 
@@ -488,60 +489,20 @@ export const seedDemoFamilyData = async (familyId: string, currentUserEmail: str
     }
   }
 
-  // 7. Seed Document Vault Records
-  const demoDocs: Array<Omit<DocumentItem, 'id' | 'uploadDate'>> = [
-    {
-      title: `${DEMO_TAG} Star Health Comprehensive Family Insurance Policy`,
-      category: 'Insurance',
-      fileType: 'PDF',
-      fileSize: '2.4 MB',
-      fileUrl: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=800&q=80',
-      description: `${DEMO_TAG} Policy No: SH-2024-98421. Covers all 5 family members up to ₹15,00,000 cashless hospitalization. Cashless TPA card in safe.`,
-      summaryContent: 'Star Health Family Optima Policy covering Father, Mother, Sarah, Sneha, Sham. Sum Insured ₹15 Lakhs. Room rent no capping. Cashless hospital network across India.',
-      uploaderName: 'Sarah'
-    },
-    {
-      title: `${DEMO_TAG} Apartment Flat 402 Sale Deed & Property Tax Receipt`,
-      category: 'Home',
-      fileType: 'PDF',
-      fileSize: '4.8 MB',
-      fileUrl: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80',
-      description: `${DEMO_TAG} Registered with Sub-Registrar Office. Property Tax (BBMP Khata A) paid through 2026.`,
-      summaryContent: 'Property deed registration for Flat 402, Green Valley Apartments, 1850 sq ft 3BHK. Khata certificate A attached.',
-      uploaderName: 'Father'
-    },
-    {
-      title: `${DEMO_TAG} Father Complete Health Panel & Blood Report 2026`,
-      category: 'Medical',
-      fileType: 'PDF',
-      fileSize: '1.2 MB',
-      fileUrl: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80',
-      description: `${DEMO_TAG} Routine annual master health checkup at Manipal Hospital. HbA1c 6.4 (Controlled), Lipid profile normal.`,
-      summaryContent: 'Annual health checkup report: Fasting blood sugar 112 mg/dL, HbA1c 6.4%, Total Cholesterol 185 mg/dL. Kidney and Liver function tests within normal limits.',
-      uploaderName: 'Mother'
-    },
-    {
-      title: `${DEMO_TAG} Sham 10th ICSE Board Marksheet & Certificate`,
-      category: 'Education',
-      fileType: 'PDF',
-      fileSize: '890 KB',
-      fileUrl: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=800&q=80',
-      description: `${DEMO_TAG} Official ICSE Board examination marksheet. Passed with 94.2% distinction.`,
-      summaryContent: 'ICSE Board Secondary School Examination Certificate for Sham. Total marks 94.2%, Grade A1 across Mathematics, Science, and English.',
-      uploaderName: 'Father'
-    }
-  ];
-
-  for (const doc of demoDocs) {
-    try {
-      await insertRow('documents', familyId, {
-        ...doc,
-        uploadDate: today
-      });
-      counts.documents += 1;
-    } catch (e) {
-      console.warn('Doc seed skip:', doc.title, e);
-    }
+  // 7. Emergency Logs Example (Document Vault uploads omitted as requested)
+  try {
+    await insertRow('emergency_logs', familyId, {
+      userLocation: 'Indiranagar 100ft Road, Bangalore, Karnataka, India',
+      latitude: 12.9716,
+      longitude: 77.6412,
+      accuracyMeters: 10,
+      userName: 'Sarah',
+      status: 'Logged',
+      timestamp: new Date().toISOString(),
+      recipients: [`${DEMO_TAG} Dr. Rajesh Mehta (+91 98450 11223)`, `${DEMO_TAG} Uncle Vikram (+91 98450 99887)`]
+    });
+  } catch (e) {
+    console.warn('Emergency log seed skip:', e);
   }
 
   // 8. Seed Family Memories
@@ -715,3 +676,619 @@ export const removeDemoFamilyData = async (
 
   return { success: true, removedCount: removed };
 };
+
+export const getDemoFamilySnapshot = () => {
+  const currentYear = new Date().getFullYear();
+  const today = new Date().toISOString().split('T')[0];
+
+  const familyMembers: FamilyMember[] = DEMO_FAMILY_MEMBERS.map((m, idx) => ({
+    ...m,
+    id: `demo-member-${idx + 1}`
+  }));
+
+  const events: FamilyEvent[] = [
+    {
+      id: 'demo-evt-1',
+      title: `${DEMO_TAG} Father's 52nd Birthday Celebration`,
+      date: `${currentYear}-06-15`,
+      time: '19:00',
+      category: 'Birthday',
+      description: 'Family dinner at Royal Orchid Restaurant celebrating Dad 52nd birthday',
+      membersInvolved: ['Father', 'Mother', 'Sarah', 'Sneha', 'Sham'],
+      reminder: true,
+      recurring: 'Yearly'
+    },
+    {
+      id: 'demo-evt-2',
+      title: `${DEMO_TAG} Mother's Birthday & Morning Puja`,
+      date: `${currentYear}-09-22`,
+      time: '09:00',
+      category: 'Birthday',
+      description: 'Special morning prayer followed by family lunch for Mom',
+      membersInvolved: ['Mother', 'Father', 'Sarah', 'Sneha', 'Sham'],
+      reminder: true,
+      recurring: 'Yearly'
+    },
+    {
+      id: 'demo-evt-3',
+      title: `${DEMO_TAG} Sarah's 25th Birthday Dinner`,
+      date: `${currentYear}-03-10`,
+      time: '18:30',
+      category: 'Birthday',
+      description: 'Sarah turning 25! Dinner with close friends and family',
+      membersInvolved: ['Sarah', 'Father', 'Mother'],
+      reminder: true,
+      recurring: 'Yearly'
+    },
+    {
+      id: 'demo-evt-4',
+      title: `${DEMO_TAG} Sneha's MBBS Pathology Semester Exam`,
+      date: `${currentYear}-11-24`,
+      time: '10:00',
+      category: 'School',
+      description: 'MBBS 2nd Year Pathology semester examination',
+      membersInvolved: ['Sneha'],
+      reminder: true,
+      recurring: 'None'
+    },
+    {
+      id: 'demo-evt-5',
+      title: `${DEMO_TAG} Sham's Interschool Football Tournament Final`,
+      date: today,
+      time: '16:30',
+      category: 'School',
+      description: 'Quarter-finals against St. Joseph Academy at City Stadium',
+      membersInvolved: ['Sham', 'Father'],
+      reminder: true,
+      recurring: 'None'
+    },
+    {
+      id: 'demo-evt-6',
+      title: `${DEMO_TAG} Mother's Diabetic Health Review with Dr. Sharma`,
+      date: `${currentYear}-11-20`,
+      time: '11:00',
+      category: 'Appointment',
+      description: 'Quarterly HbA1c review with Dr. Sharma at Apollo Clinic',
+      membersInvolved: ['Mother', 'Father'],
+      reminder: true,
+      recurring: 'Monthly'
+    },
+    {
+      id: 'demo-evt-7',
+      title: `${DEMO_TAG} Parents' 26th Wedding Anniversary Getaway`,
+      date: `${currentYear}-05-20`,
+      time: '20:00',
+      category: 'Holiday',
+      description: 'Celebrating 26 wonderful years of marriage! Family weekend getaway',
+      membersInvolved: ['Father', 'Mother', 'Sarah', 'Sneha', 'Sham'],
+      reminder: true,
+      recurring: 'Yearly'
+    },
+    {
+      id: 'demo-evt-8',
+      title: `${DEMO_TAG} Annual Kent RO Water Purifier Servicing`,
+      date: `${currentYear}-12-05`,
+      time: '14:00',
+      category: 'General',
+      description: 'Filter replacement and membrane service by authorized technician',
+      membersInvolved: ['Father'],
+      reminder: true,
+      recurring: 'None'
+    }
+  ];
+
+  const reminders: ReminderItem[] = [
+    {
+      id: 'demo-rem-1',
+      title: `${DEMO_TAG} Pay BESCOM Electricity Bill before due date`,
+      category: 'Bill',
+      dateTime: `${currentYear}-11-17T18:00:00+05:30`,
+      priority: 'High',
+      completed: false,
+      assignedMemberName: 'Sarah'
+    },
+    {
+      id: 'demo-rem-2',
+      title: `${DEMO_TAG} Pick up Mother's Thyroxine refill from Apollo Pharmacy`,
+      category: 'Medicine',
+      dateTime: `${currentYear}-11-15T17:00:00+05:30`,
+      priority: 'High',
+      completed: false,
+      assignedMemberName: 'Father'
+    },
+    {
+      id: 'demo-rem-3',
+      title: `${DEMO_TAG} Water balcony indoor plants and herb garden`,
+      category: 'General',
+      dateTime: `${currentYear}-11-12T07:30:00+05:30`,
+      priority: 'Low',
+      completed: false,
+      assignedMemberName: 'Sham'
+    },
+    {
+      id: 'demo-rem-4',
+      title: `${DEMO_TAG} Restock fresh groceries and organic milk from supermarket`,
+      category: 'Grocery',
+      dateTime: `${currentYear}-11-13T10:00:00+05:30`,
+      priority: 'Medium',
+      completed: false,
+      assignedMemberName: 'Mother'
+    },
+    {
+      id: 'demo-rem-5',
+      title: `${DEMO_TAG} Practice football passing drills before Friday match`,
+      category: 'General',
+      dateTime: `${currentYear}-11-14T16:00:00+05:30`,
+      priority: 'Low',
+      completed: false,
+      assignedMemberName: 'Sham'
+    },
+    {
+      id: 'demo-rem-6',
+      title: `${DEMO_TAG} Schedule car routine oil change and wheel alignment`,
+      category: 'General',
+      dateTime: `${currentYear}-11-16T11:00:00+05:30`,
+      priority: 'Medium',
+      completed: false,
+      assignedMemberName: 'Father'
+    }
+  ];
+
+  const medicines: MedicineItem[] = [
+    {
+      id: 'demo-med-1',
+      name: `${DEMO_TAG} Amlodipine 5mg`,
+      dosage: '5 mg tablet',
+      timing: 'Morning (08:00 AM)',
+      frequency: 'Daily',
+      personName: 'Father',
+      startDate: `${currentYear}-01-01`,
+      notes: `${DEMO_TAG} Blood pressure maintenance. Take after light breakfast.`
+    },
+    {
+      id: 'demo-med-2',
+      name: `${DEMO_TAG} Metformin 500mg`,
+      dosage: '500 mg tablet',
+      timing: 'Morning & Night (After Meals)',
+      frequency: 'Twice Daily',
+      personName: 'Father',
+      startDate: `${currentYear}-01-01`,
+      notes: `${DEMO_TAG} Prescribed for blood sugar management by Dr. Mehta.`
+    },
+    {
+      id: 'demo-med-3',
+      name: `${DEMO_TAG} Atorvastatin 10mg`,
+      dosage: '10 mg tablet',
+      timing: 'Night (10:00 PM)',
+      frequency: 'Daily',
+      personName: 'Father',
+      startDate: `${currentYear}-01-01`,
+      notes: `${DEMO_TAG} Cholesterol control. Take with warm water.`
+    },
+    {
+      id: 'demo-med-4',
+      name: `${DEMO_TAG} Thyroxine 50mcg`,
+      dosage: '50 mcg tablet',
+      timing: 'Morning (07:00 AM)',
+      frequency: 'Daily',
+      personName: 'Mother',
+      startDate: `${currentYear}-02-15`,
+      notes: `${DEMO_TAG} Thyroid support. Take on empty stomach with water.`
+    },
+    {
+      id: 'demo-med-5',
+      name: `${DEMO_TAG} Calcium + Vitamin D3`,
+      dosage: '1 tablet',
+      timing: 'Afternoon (01:30 PM)',
+      frequency: 'Daily',
+      personName: 'Mother',
+      startDate: `${currentYear}-03-01`,
+      notes: `${DEMO_TAG} Bone health supplement. Take after lunch.`
+    },
+    {
+      id: 'demo-med-6',
+      name: `${DEMO_TAG} Salbutamol Inhaler 100mcg`,
+      dosage: '2 puffs',
+      timing: 'As Needed',
+      frequency: 'As Needed',
+      personName: 'Sham',
+      startDate: `${currentYear}-04-01`,
+      notes: `${DEMO_TAG} Mild asthma relief before intense football training.`
+    }
+  ];
+
+  const medicineLogs: MedicineLog[] = [
+    {
+      id: 'demo-log-1',
+      medicineId: 'demo-med-1',
+      medicineName: 'Amlodipine 5mg',
+      personName: 'Father',
+      status: 'Taken',
+      timestamp: new Date().toISOString(),
+      loggedBy: 'Father'
+    },
+    {
+      id: 'demo-log-2',
+      medicineId: 'demo-med-2',
+      medicineName: 'Metformin 500mg',
+      personName: 'Father',
+      status: 'Taken',
+      timestamp: new Date().toISOString(),
+      loggedBy: 'Father'
+    },
+    {
+      id: 'demo-log-3',
+      medicineId: 'demo-med-4',
+      medicineName: 'Thyroxine 50mcg',
+      personName: 'Mother',
+      status: 'Taken',
+      timestamp: new Date().toISOString(),
+      loggedBy: 'Mother'
+    }
+  ];
+
+  const expenses: ExpenseItem[] = [
+    {
+      id: 'demo-exp-1',
+      title: `${DEMO_TAG} Fresh Organic Produce & Fruits at Farmer Market`,
+      amount: 1450,
+      category: 'Groceries',
+      date: today,
+      payer: 'Mother',
+      description: 'Weekly fresh organic produce, apples, spinach, and tomatoes'
+    },
+    {
+      id: 'demo-exp-2',
+      title: `${DEMO_TAG} Airtel Fiber Broadband 300 Mbps Monthly Plan`,
+      amount: 1180,
+      category: 'Utilities',
+      date: today,
+      payer: 'Sarah',
+      description: '300 Mbps unlimited family broadband plan'
+    },
+    {
+      id: 'demo-exp-3',
+      title: `${DEMO_TAG} Sham Sports Nivia Football Studs & Kit`,
+      amount: 3200,
+      category: 'Shopping',
+      date: `${currentYear}-11-02`,
+      payer: 'Father',
+      description: 'Nivia football studs and shin guards for school tournament'
+    },
+    {
+      id: 'demo-exp-4',
+      title: `${DEMO_TAG} Sneha Medical Reference Textbook (Robbins Pathology)`,
+      amount: 2850,
+      category: 'Education',
+      date: `${currentYear}-11-04`,
+      payer: 'Father',
+      description: 'Required medical reference book for 2nd year MBBS'
+    },
+    {
+      id: 'demo-exp-5',
+      title: `${DEMO_TAG} Family Sunday Brunch at Cafe Bistro`,
+      amount: 2150,
+      category: 'Dining',
+      date: `${currentYear}-11-08`,
+      payer: 'Sarah',
+      description: 'Family weekend brunch celebrating Sham match victory'
+    },
+    {
+      id: 'demo-exp-6',
+      title: `${DEMO_TAG} Monthly Fuel & Petrol for Family Car`,
+      amount: 4500,
+      category: 'Utilities',
+      date: `${currentYear}-11-06`,
+      payer: 'Father',
+      description: 'Full tank petrol refill for Honda City at IndianOil'
+    },
+    {
+      id: 'demo-exp-7',
+      title: `${DEMO_TAG} Apollo Pharmacy Monthly Prescription Refill`,
+      amount: 1620,
+      category: 'Healthcare',
+      date: `${currentYear}-11-01`,
+      payer: 'Mother',
+      description: 'Monthly refill of Amlodipine, Metformin, and Thyroxine'
+    }
+  ];
+
+  const bills: BillItem[] = [
+    {
+      id: 'demo-bill-1',
+      title: `${DEMO_TAG} BESCOM Home Electricity Bill`,
+      amount: 3450,
+      dueDate: `${currentYear}-11-18`,
+      category: 'Utilities',
+      isPaid: false,
+      recurring: 'Monthly'
+    },
+    {
+      id: 'demo-bill-2',
+      title: `${DEMO_TAG} BWSSB Water & Sanitation Utility`,
+      amount: 680,
+      dueDate: `${currentYear}-11-25`,
+      category: 'Utilities',
+      isPaid: false,
+      recurring: 'Monthly'
+    },
+    {
+      id: 'demo-bill-3',
+      title: `${DEMO_TAG} Society Maintenance Fee (Flat 402)`,
+      amount: 3200,
+      dueDate: `${currentYear}-11-10`,
+      category: 'Maintenance',
+      isPaid: true,
+      paidDate: `${currentYear}-11-05`,
+      paidBy: 'Father',
+      recurring: 'Monthly'
+    },
+    {
+      id: 'demo-bill-4',
+      title: `${DEMO_TAG} Piped Natural Gas (Adani Gas)`,
+      amount: 890,
+      dueDate: `${currentYear}-11-22`,
+      category: 'Utilities',
+      isPaid: false,
+      recurring: 'Monthly'
+    },
+    {
+      id: 'demo-bill-5',
+      title: `${DEMO_TAG} Tata Play DTH Satellite TV Annual Plan`,
+      amount: 2400,
+      dueDate: `${currentYear}-12-01`,
+      category: 'Utilities',
+      isPaid: false,
+      recurring: 'Yearly'
+    }
+  ];
+
+  const groceries: GroceryItem[] = [
+    {
+      id: 'demo-groc-1',
+      name: `${DEMO_TAG} Basmati Rice (Daawat Rozana)`,
+      category: 'Pantry',
+      quantity: '10 kg bag',
+      notes: `${DEMO_TAG} Essential household stock`,
+      isPurchased: false,
+      estimatedPrice: 750
+    },
+    {
+      id: 'demo-groc-2',
+      name: `${DEMO_TAG} Fresh Cow Milk (Nandini Blue)`,
+      category: 'Dairy',
+      quantity: '2 Litres daily',
+      notes: `${DEMO_TAG} Daily morning tea and cereal`,
+      isPurchased: false,
+      estimatedPrice: 96
+    },
+    {
+      id: 'demo-groc-3',
+      name: `${DEMO_TAG} Farm Fresh Eggs`,
+      category: 'Meat',
+      quantity: '1 Crate (30 eggs)',
+      notes: `${DEMO_TAG} High protein for Sham and Sarah`,
+      isPurchased: false,
+      estimatedPrice: 210
+    },
+    {
+      id: 'demo-groc-4',
+      name: `${DEMO_TAG} Cold-Pressed Sunflower Oil`,
+      category: 'Pantry',
+      quantity: '2 Litres',
+      notes: `${DEMO_TAG} Heart healthy cooking oil for Dad`,
+      isPurchased: false,
+      estimatedPrice: 340
+    },
+    {
+      id: 'demo-groc-5',
+      name: `${DEMO_TAG} Whole Wheat Bread (The Baker's Dozen)`,
+      category: 'Bakery',
+      quantity: '2 loaves',
+      notes: `${DEMO_TAG} Breakfast sandwiches`,
+      isPurchased: true,
+      purchasedBy: 'Mother',
+      purchasedAt: new Date().toISOString(),
+      estimatedPrice: 110
+    },
+    {
+      id: 'demo-groc-6',
+      name: `${DEMO_TAG} Raw Pressery Almond Milk`,
+      category: 'Dairy',
+      quantity: '1 Litre',
+      notes: `${DEMO_TAG} Lactose-free dairy substitute for Sneha`,
+      isPurchased: false,
+      estimatedPrice: 190
+    },
+    {
+      id: 'demo-groc-7',
+      name: `${DEMO_TAG} Organic India Tulsi Green Tea`,
+      category: 'Beverages',
+      quantity: '1 Box (25 bags)',
+      notes: `${DEMO_TAG} Morning antioxidant tea for Dad`,
+      isPurchased: false,
+      estimatedPrice: 220
+    },
+    {
+      id: 'demo-groc-8',
+      name: `${DEMO_TAG} Dishwasher Detergent Pods & Scrubber`,
+      category: 'Household',
+      quantity: '1 Pack',
+      notes: `${DEMO_TAG} Kitchen cleanup supply`,
+      isPurchased: true,
+      purchasedBy: 'Sarah',
+      purchasedAt: new Date().toISOString(),
+      estimatedPrice: 280
+    }
+  ];
+
+  const groceryHistory: GroceryHistoryItem[] = [
+    {
+      id: 'demo-ghist-1',
+      groceryId: 'demo-groc-5',
+      name: 'Whole Wheat Bread (The Baker\'s Dozen)',
+      category: 'Bakery',
+      purchasedBy: 'Mother',
+      purchasedAt: new Date().toISOString()
+    },
+    {
+      id: 'demo-ghist-2',
+      groceryId: 'demo-groc-8',
+      name: 'Dishwasher Detergent Pods & Scrubber',
+      category: 'Household',
+      purchasedBy: 'Sarah',
+      purchasedAt: new Date().toISOString()
+    }
+  ];
+
+  const knowledgeList: FamilyKnowledge[] = [
+    {
+      id: 'demo-knw-1',
+      title: `${DEMO_TAG} Sneha Lactose Intolerance & Dairy Sensitivity`,
+      category: 'Allergies',
+      importance: 'Critical',
+      relatedMemberName: 'Sneha',
+      content: 'Sneha has severe lactose intolerance. Substitute cow milk with almond milk or oat milk. Keep Lactaid enzyme tablets available in bathroom cabinet in case of accidental ingestion.',
+      createdDate: today
+    },
+    {
+      id: 'demo-knw-2',
+      title: `${DEMO_TAG} Father Blood Group B+ & Sulfa Drug Allergy`,
+      category: 'Emergency',
+      importance: 'Critical',
+      relatedMemberName: 'Father',
+      content: 'Blood Group: B+ Positive. Allergic to Sulfa-based antibiotics (causes acute skin rash). Primary Physician: Dr. Rajesh Mehta at Fortis Hospital.',
+      createdDate: today
+    },
+    {
+      id: 'demo-knw-3',
+      title: `${DEMO_TAG} Sham Exercise-Induced Mild Asthma Alert`,
+      category: 'Allergies',
+      importance: 'Important',
+      relatedMemberName: 'Sham',
+      content: 'Keep Salbutamol blue inhaler in football kit bag. Take 2 puffs 15 minutes before strenuous sports play or in cold winter mornings.',
+      createdDate: today
+    },
+    {
+      id: 'demo-knw-4',
+      title: `${DEMO_TAG} Mother Diabetic Diet Constraints`,
+      category: 'Dietary',
+      importance: 'Important',
+      relatedMemberName: 'Mother',
+      content: 'Strict low glycemic index diet. Avoid white refined sugar and white flour. Light dinner before 8:30 PM.',
+      createdDate: today
+    },
+    {
+      id: 'demo-knw-5',
+      title: `${DEMO_TAG} Home WiFi 5GHz Network Credentials & Printer IP`,
+      category: 'General',
+      importance: 'Important',
+      relatedMemberName: 'Sarah',
+      content: 'Primary SSID: HomeBrain_5GHz. Guest SSID: HomeBrain_Guest. Printer HP LaserJet IP: 192.168.1.150.',
+      createdDate: today
+    }
+  ];
+
+  const memories: FamilyMemory[] = [
+    {
+      id: 'demo-mem-1',
+      title: `${DEMO_TAG} Golden Temple & Himachal Family Road Trip`,
+      year: 2024,
+      date: '2024-06-25',
+      description: 'An unforgettable 8-day road trip from Amritsar to Manali. Breathtaking sunrise views over the Himalayas and peaceful evening at the Golden Temple.',
+      photoUrl: 'https://images.unsplash.com/photo-1514222134-b57cbb8ce073?auto=format&fit=crop&w=800&q=80',
+      location: 'Amritsar & Manali, Himachal Pradesh',
+      addedBy: 'Sarah',
+      photoUrls: ['https://images.unsplash.com/photo-1514222134-b57cbb8ce073?auto=format&fit=crop&w=800&q=80'],
+      taggedMembers: ['Father', 'Mother', 'Sarah', 'Sneha', 'Sham'],
+      tags: ['vacation', 'himachal', 'familytrip', 'memories']
+    },
+    {
+      id: 'demo-mem-2',
+      title: `${DEMO_TAG} Sarah University Graduation Day at NIT`,
+      year: 2024,
+      date: '2024-05-18',
+      description: 'Proud moment as Sarah graduated with B.Tech in Computer Science with Honors! Mom and Dad could not stop smiling.',
+      photoUrl: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=800&q=80',
+      location: 'National Institute of Technology Campus',
+      addedBy: 'Father',
+      photoUrls: ['https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=800&q=80'],
+      taggedMembers: ['Sarah', 'Father', 'Mother'],
+      tags: ['graduation', 'achievement', 'college', 'pride']
+    },
+    {
+      id: 'demo-mem-3',
+      title: `${DEMO_TAG} Sham Scoring Winning Goal in Cup Final`,
+      year: 2024,
+      date: '2024-08-30',
+      description: 'Sham scored in the 88th minute to lift the State Interschool Football Trophy! Entire family cheered from the stadium stand.',
+      photoUrl: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=800&q=80',
+      location: 'Kanteerava Stadium, Bangalore',
+      addedBy: 'Father',
+      photoUrls: ['https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=800&q=80'],
+      taggedMembers: ['Sham', 'Father', 'Sneha'],
+      tags: ['football', 'sports', 'champion', 'trophy']
+    }
+  ];
+
+  const emergencyContacts: EmergencyContact[] = [
+    {
+      id: 'demo-con-1',
+      name: `${DEMO_TAG} Dr. Rajesh Mehta (Family Physician)`,
+      relation: 'Doctor',
+      phone: '+91 98450 11223',
+      email: 'dr.mehta.demo@apollohospitals.test',
+      isPrimary: true
+    },
+    {
+      id: 'demo-con-2',
+      name: `${DEMO_TAG} Uncle Vikram (Father's Brother)`,
+      relation: 'Uncle',
+      phone: '+91 98450 99887',
+      email: 'vikram.demo@homebrain.test',
+      isPrimary: false
+    }
+  ];
+
+  const emergencyLogs: EmergencyAlertLog[] = [
+    {
+      id: 'demo-elog-1',
+      timestamp: new Date().toISOString(),
+      userLocation: 'Indiranagar 100ft Road, Bangalore, Karnataka, India',
+      latitude: 12.9716,
+      longitude: 77.6412,
+      accuracyMeters: 10,
+      userName: 'Sarah',
+      status: 'Logged',
+      recipients: [`${DEMO_TAG} Dr. Rajesh Mehta (+91 98450 11223)`, `${DEMO_TAG} Uncle Vikram (+91 98450 99887)`]
+    }
+  ];
+
+  return {
+    currentUser: {
+      id: 'demo-user-sarah',
+      familyId: 'demo-family-kumar',
+      familyName: 'Kumar Household',
+      name: 'Sarah',
+      role: 'Admin' as const,
+      email: 'sarah.demo@homebrain.test',
+      avatar: '👩‍💻'
+    },
+    familyMembers,
+    events,
+    reminders,
+    medicines,
+    medicineLogs,
+    expenses,
+    bills,
+    groceries,
+    groceryHistory,
+    knowledgeList,
+    knowledgeFiles: [],
+    documents: [], // Document upload omitted as requested!
+    memories,
+    emergencyContacts,
+    emergencyLogs
+  };
+};
+

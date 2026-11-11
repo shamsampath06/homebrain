@@ -33,6 +33,7 @@ const AppContent: React.FC = () => {
     dataError,
     clearDataError,
     isAuthenticated,
+    enterDemoMode,
     signIn,
     signUp
   } = useHomeBrain();
@@ -72,6 +73,7 @@ const AppContent: React.FC = () => {
         onSignedIn={signIn}
         onSignedUp={signUp}
         onGoogleSignIn={signInWithGoogle}
+        onEnterDemo={enterDemoMode}
       />
     );
   }

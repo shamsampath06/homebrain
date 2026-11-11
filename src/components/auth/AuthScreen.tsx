@@ -4,9 +4,10 @@ interface AuthScreenProps {
   onSignedIn: (email: string, password: string) => Promise<void>;
   onSignedUp: (email: string, password: string, name: string, familyName: string) => Promise<void>;
   onGoogleSignIn?: () => void;
+  onEnterDemo?: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onSignedIn, onSignedUp, onGoogleSignIn }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ onSignedIn, onSignedUp, onGoogleSignIn, onEnterDemo }) => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -102,6 +103,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSignedIn, onSignedUp, 
         <button type="button" onClick={() => setIsRegistering(previous => !previous)} className="w-full text-xs font-semibold text-brand-600 hover:underline">
           {isRegistering ? 'Already have an account? Sign in' : 'Need an account? Register'}
         </button>
+
+        {onEnterDemo && (
+          <div className="pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={onEnterDemo}
+              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-[0.99]"
+            >
+              <span>✨</span>
+              <span>Explore All Features (Preloaded Demo)</span>
+            </button>
+            <p className="mt-1.5 text-center text-[11px] text-slate-500 font-medium">
+              Immediate access with 5 family members, calendar, prescriptions, expenses, smart groceries & SOS.
+            </p>
+          </div>
+        )}
       </form>
     </main>
   );

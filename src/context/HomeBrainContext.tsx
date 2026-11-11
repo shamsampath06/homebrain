@@ -41,6 +41,7 @@ import {
 } from '../lib/supabase';
 import { formatIndiaDateTime, formatINR } from '../lib/display';
 import { SCREEN_META } from '../lib/navigation';
+import { getDemoFamilySnapshot } from '../lib/demoData';
 
 export type MainTab = 'dashboard' | 'ai' | 'timeline' | 'profile';
 export type SubScreen =
@@ -195,6 +196,7 @@ interface HomeBrainContextType {
   clearDataError: () => void;
   refreshFamilyData: () => Promise<void>;
   isAuthenticated: boolean;
+  enterDemoMode: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string, familyName: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -375,6 +377,30 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await signOut();
     setIsAuthenticated(false);
     setCurrentUser(emptyUser);
+  };
+
+  const enterDemoMode = () => {
+    const snapshot = getDemoFamilySnapshot();
+    setCurrentUser(snapshot.currentUser);
+    setIsAuthenticated(true);
+    setFamilyMembers(snapshot.familyMembers);
+    setEvents(snapshot.events);
+    setReminders(snapshot.reminders);
+    setDocuments(snapshot.documents); // strictly empty array
+    setGroceries(snapshot.groceries);
+    setGroceryHistory(snapshot.groceryHistory);
+    setMedicines(snapshot.medicines);
+    setMedicineLogs(snapshot.medicineLogs);
+    setExpenses(snapshot.expenses);
+    setBills(snapshot.bills);
+    setKnowledgeList(snapshot.knowledgeList);
+    setKnowledgeFiles([]);
+    setEmergencyContacts(snapshot.emergencyContacts);
+    setEmergencyLogs(snapshot.emergencyLogs);
+    setMemories(snapshot.memories);
+    setActiveTab('dashboard');
+    setActiveSubScreen('none');
+    setDataError(null);
   };
 
   useEffect(() => {
@@ -1082,6 +1108,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         clearDataError,
         refreshFamilyData,
         isAuthenticated,
+        enterDemoMode,
         signIn,
         signUp,
         signOut: handleSignOut,
