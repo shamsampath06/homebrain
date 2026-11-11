@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { Bell, ShieldAlert, Sun, Moon, Sparkles, User as UserIcon } from 'lucide-react';
+import { InitialAvatar } from '../common/InitialAvatar';
+import { formatIndiaDateTime } from '../../lib/display';
 
 export const Header: React.FC = () => {
-  const { currentUser, isDarkMode, toggleDarkMode, reminders, navigateToSubScreen, activeTab } = useHomeBrain();
+  const { currentUser, isDarkMode, toggleDarkMode, reminders, emergencyNotifications, openEmergencyNotification, navigateToSubScreen, activeTab } = useHomeBrain();
   const [showNotifications, setShowNotifications] = useState(false);
 
   const pendingReminders = reminders.filter(r => !r.completed);
+  const activeEmergencyNotifications = emergencyNotifications.filter(notification => notification.status === 'active');
+  const recentEmergencyNotifications = emergencyNotifications.slice(0, 5);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -72,9 +76,9 @@ export const Header: React.FC = () => {
               title="Notifications"
             >
               <Bell className="w-5 h-5" />
-              {pendingReminders.length > 0 && (
+              {pendingReminders.length + activeEmergencyNotifications.length > 0 && (
                 <span className="absolute top-1 right-1 w-4 h-4 bg-amber-500 text-white font-bold text-[10px] rounded-full flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
-                  {pendingReminders.length}
+                  {pendingReminders.length + activeEmergencyNotifications.length}
                 </span>
               )}
             </button>
@@ -94,6 +98,18 @@ export const Header: React.FC = () => {
                   </button>
                 </div>
                 <div className="max-h-72 overflow-y-auto px-2 py-1">
+                  {recentEmergencyNotifications.map(notification => (
+                    <button
+                      type="button"
+                      key={notification.id}
+                      onClick={() => { openEmergencyNotification(notification); setShowNotifications(false); }}
+                      className="w-full rounded-xl bg-rose-50 p-2.5 my-1 text-left dark:bg-rose-950/40"
+                    >
+                      <p className="text-xs font-bold text-rose-700 dark:text-rose-300">EMERGENCY SOS ALERT</p>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300">{notification.initiatorName} · {notification.address}</p>
+                      <p className="text-[10px] text-slate-500">{formatIndiaDateTime(notification.lastLocationAt)} · View live location</p>
+                    </button>
+                  ))}
                   {pendingReminders.length === 0 ? (
                     <p className="text-xs text-slate-500 dark:text-slate-400 text-center py-6">
                       No pending reminders today! 🎉
@@ -126,11 +142,7 @@ export const Header: React.FC = () => {
             onClick={() => navigateToSubScreen('user-profile')}
             className="flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-slate-700 hover:opacity-80 transition-opacity"
           >
-            <img
-              src={currentUser.avatar}
-              alt={currentUser.name}
-              className="w-9 h-9 rounded-full object-cover ring-2 ring-brand-500/30"
-            />
+            <InitialAvatar name={currentUser.name} className="w-9 h-9 ring-2 ring-brand-500/30" />
           </button>
         </div>
       </div>

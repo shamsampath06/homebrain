@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
+import { formatIndiaDateTime } from '../../lib/display';
 import { GroceryCategory } from '../../types';
 import { ShoppingCart, Plus, CheckCircle2, Circle, Clock, User, History, Sparkles, X } from 'lucide-react';
 
@@ -51,7 +52,7 @@ export const GroceryCard: React.FC = () => {
                   </p>
                   {item.isPurchased && (
                     <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                      Bought by {item.purchasedBy} on {item.purchasedAt}
+                      Bought by {item.purchasedBy} on {item.purchasedAt ? formatIndiaDateTime(item.purchasedAt) : 'date unavailable'}
                     </p>
                   )}
                 </div>
@@ -184,7 +185,7 @@ export const GroceryListScreen: React.FC = () => {
 
                   {item.isPurchased ? (
                     <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
-                      ✓ Bought by <span className="font-bold">{item.purchasedBy}</span> on {item.purchasedAt}
+                      ✓ Bought by <span className="font-bold">{item.purchasedBy}</span> on {item.purchasedAt ? formatIndiaDateTime(item.purchasedAt) : 'date unavailable'}
                     </p>
                   ) : (
                     item.notes && <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{item.notes}</p>
@@ -195,10 +196,18 @@ export const GroceryListScreen: React.FC = () => {
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-400">{item.category}</span>
                 <button
-                  onClick={() => deleteGroceryItem(item.id)}
+                  onClick={() => navigateToSubScreen('edit-grocery', item.id)}
+                  className="text-xs text-brand-600 hover:underline ml-2"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete ${item.name}?`)) deleteGroceryItem(item.id);
+                  }}
                   className="text-xs text-rose-500 hover:underline ml-2"
                 >
-                  Remove
+                  Delete
                 </button>
               </div>
             </div>
@@ -210,24 +219,27 @@ export const GroceryListScreen: React.FC = () => {
 };
 
 export const AddGroceryModal: React.FC = () => {
-  const { addGroceryItem, setActiveSubScreen } = useHomeBrain();
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState<GroceryCategory>('Dairy');
-  const [quantity, setQuantity] = useState('1 Pack');
-  const [notes, setNotes] = useState('');
+  const { addGroceryItem, updateGroceryItem, groceries, selectedItemId, activeSubScreen, setActiveSubScreen } = useHomeBrain();
+  const existing = groceries.find(item => item.id === selectedItemId);
+  const editing = activeSubScreen === 'edit-grocery' && Boolean(existing);
+  const [name, setName] = useState(existing?.name || '');
+  const [category, setCategory] = useState<GroceryCategory>(existing?.category || 'Dairy');
+  const [quantity, setQuantity] = useState(existing?.quantity || '1 Pack');
+  const [notes, setNotes] = useState(existing?.notes || '');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    addGroceryItem({ name, category, quantity, notes });
+    if (editing && existing) updateGroceryItem(existing.id, { name, category, quantity, notes });
+    else addGroceryItem({ name, category, quantity, notes });
     setActiveSubScreen('grocery');
   };
 
   return (
     <div className="max-w-md mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
       <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Add Grocery Requirement</h2>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Grocery Requirement' : 'Add Grocery Requirement'}</h2>
         <button onClick={() => setActiveSubScreen('grocery')} className="text-slate-400 hover:text-slate-600">
           <X className="w-5 h-5" />
         </button>
@@ -300,7 +312,7 @@ export const AddGroceryModal: React.FC = () => {
             type="submit"
             className="px-5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-md"
           >
-            Add to List
+            {editing ? 'Save Changes' : 'Add to List'}
           </button>
         </div>
       </form>
@@ -327,7 +339,13 @@ export const GroceryHistoryScreen: React.FC = () => {
       </div>
 
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-card border border-slate-200 dark:border-slate-700 space-y-3">
-        {groceryHistory.map(hist => (
+        {groceryHistory.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-sm text-slate-500 dark:text-slate-400">No purchase history recorded yet.</p>
+            <p className="text-xs text-slate-400 mt-1">Purchased items will automatically log here with timestamps and buyer details.</p>
+          </div>
+        ) : (
+          groceryHistory.map(hist => (
           <div
             key={hist.id}
             className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-700/50 flex items-center justify-between text-xs"
@@ -338,10 +356,11 @@ export const GroceryHistoryScreen: React.FC = () => {
             </div>
             <div className="text-right">
               <p className="font-semibold text-emerald-600 dark:text-emerald-400">Bought by {hist.purchasedBy}</p>
-              <p className="text-[10px] text-slate-400">{hist.purchasedAt}</p>
+              <p className="text-[10px] text-slate-400">{formatIndiaDateTime(hist.purchasedAt)}</p>
             </div>
           </div>
-        ))}
+        ))
+        )}
       </div>
     </div>
   );

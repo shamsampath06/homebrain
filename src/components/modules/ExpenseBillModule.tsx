@@ -1,12 +1,19 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
-import { ExpenseCategory } from '../../types';
+import { BillItem, ExpenseCategory } from '../../types';
+import { formatINR } from '../../lib/display';
 import { DollarSign, Plus, Zap, PieChart, CreditCard, CheckCircle2, AlertCircle, X, Calendar } from 'lucide-react';
 
 export const ExpenseCard: React.FC = () => {
   const { expenses, bills, navigateToSubScreen } = useHomeBrain();
 
-  const totalMonthlySpending = expenses.reduce((acc, curr) => acc + curr.amount, 0);
+  const now = new Date();
+  const totalMonthlySpending = expenses
+    .filter(expense => {
+      const date = new Date(`${expense.date}T00:00:00`);
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    })
+    .reduce((acc, curr) => acc + curr.amount, 0);
   const upcomingBills = bills.filter(b => !b.isPaid);
 
   return (
@@ -32,14 +39,14 @@ export const ExpenseCard: React.FC = () => {
 
         <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-slate-700 dark:to-slate-700/50 border border-amber-200/60 dark:border-slate-600 mt-2">
           <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider">
-            September Household Spending
+            {now.toLocaleString('en-US', { month: 'long' })} Household Spending
           </p>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-            ${totalMonthlySpending.toLocaleString()}
+            {formatINR(totalMonthlySpending)}
           </p>
           {upcomingBills.length > 0 && (
             <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mt-2 flex items-center gap-1">
-              <Zap className="w-3.5 h-3.5 fill-amber-500" /> Next Due: {upcomingBills[0].title} (${upcomingBills[0].amount})
+              <Zap className="w-3.5 h-3.5 fill-amber-500" /> Next Due: {upcomingBills[0].title} ({formatINR(upcomingBills[0].amount)})
             </p>
           )}
         </div>
@@ -113,7 +120,7 @@ export const ExpenseDashboardScreen: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-card border border-slate-200 dark:border-slate-700">
           <p className="text-xs font-semibold text-slate-500">Total Monthly Household Spending</p>
-          <p className="text-3xl font-black text-slate-900 dark:text-white mt-2">${totalSpending.toLocaleString()}</p>
+          <p className="text-3xl font-black text-slate-900 dark:text-white mt-2">{formatINR(totalSpending)}</p>
           <p className="text-[11px] text-emerald-600 font-semibold mt-1">✓ Updated in real-time from database</p>
         </div>
 
@@ -126,7 +133,7 @@ export const ExpenseDashboardScreen: React.FC = () => {
                 <div key={cat} className="space-y-1">
                   <div className="flex justify-between text-xs font-semibold">
                     <span className="text-slate-800 dark:text-slate-200">{cat}</span>
-                    <span className="text-slate-600 dark:text-slate-400">${amount.toLocaleString()} ({percent}%)</span>
+                    <span className="text-slate-600 dark:text-slate-400">{formatINR(amount)} ({percent}%)</span>
                   </div>
                   <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
                     <div
@@ -145,7 +152,18 @@ export const ExpenseDashboardScreen: React.FC = () => {
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-card border border-slate-200 dark:border-slate-700 space-y-4">
         <h3 className="font-bold text-base text-slate-900 dark:text-white">Recent Household Expenses</h3>
 
-        <div className="space-y-2.5">
+        {expenses.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-sm text-slate-500 dark:text-slate-400">No household expenses logged yet.</p>
+            <button
+              onClick={() => navigateToSubScreen('add-expense')}
+              className="mt-3 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" /> Log First Expense
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
           {expenses.map(exp => (
             <div
               key={exp.id}
@@ -160,9 +178,17 @@ export const ExpenseDashboardScreen: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="text-base font-black text-slate-900 dark:text-white">${exp.amount.toLocaleString()}</span>
+                <span className="text-base font-black text-slate-900 dark:text-white">{formatINR(exp.amount)}</span>
                 <button
-                  onClick={() => deleteExpense(exp.id)}
+                  onClick={() => navigateToSubScreen('edit-expense', exp.id)}
+                  className="text-xs text-brand-600 hover:underline"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete ${exp.title}?`)) deleteExpense(exp.id);
+                  }}
                   className="text-xs text-rose-500 hover:underline"
                 >
                   Delete
@@ -171,32 +197,37 @@ export const ExpenseDashboardScreen: React.FC = () => {
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );
 };
 
 export const AddExpenseModal: React.FC = () => {
-  const { addExpense, setActiveSubScreen, currentUser } = useHomeBrain();
-  const [title, setTitle] = useState('');
-  const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState<ExpenseCategory>('Groceries');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [payer, setPayer] = useState(currentUser.name);
-  const [description, setDescription] = useState('');
+  const { addExpense, updateExpense, expenses, selectedItemId, activeSubScreen, setActiveSubScreen, currentUser } = useHomeBrain();
+  const existing = expenses.find(expense => expense.id === selectedItemId);
+  const editing = activeSubScreen === 'edit-expense' && Boolean(existing);
+  const [title, setTitle] = useState(existing?.title || '');
+  const [amount, setAmount] = useState(existing ? String(existing.amount) : '');
+  const [category, setCategory] = useState<ExpenseCategory>(existing?.category || 'Groceries');
+  const [date, setDate] = useState(existing?.date || new Date().toISOString().split('T')[0]);
+  const [payer, setPayer] = useState(existing?.payer || currentUser.name);
+  const [description, setDescription] = useState(existing?.description || '');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !amount) return;
 
-    addExpense({
+    const payload = {
       title,
       amount: parseFloat(amount),
       category,
       date,
       payer,
       description
-    });
+    };
+    if (editing && existing) updateExpense(existing.id, payload);
+    else addExpense(payload);
 
     setActiveSubScreen('expense');
   };
@@ -204,7 +235,7 @@ export const AddExpenseModal: React.FC = () => {
   return (
     <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
       <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Record New Household Expense</h2>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Household Expense' : 'Record New Household Expense'}</h2>
         <button onClick={() => setActiveSubScreen('expense')} className="text-slate-400 hover:text-slate-600">
           <X className="w-5 h-5" />
         </button>
@@ -225,7 +256,7 @@ export const AddExpenseModal: React.FC = () => {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Amount ($)</label>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Amount (₹)</label>
             <input
               type="number"
               required
@@ -302,7 +333,7 @@ export const AddExpenseModal: React.FC = () => {
             type="submit"
             className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold shadow-md"
           >
-            Save Expense
+            {editing ? 'Save Changes' : 'Save Expense'}
           </button>
         </div>
       </form>
@@ -311,25 +342,29 @@ export const AddExpenseModal: React.FC = () => {
 };
 
 export const BillManagementScreen: React.FC = () => {
-  const { bills, markBillPaid, setActiveSubScreen, addBill } = useHomeBrain();
+  const { bills, markBillPaid, markBillUnpaid, updateBill, deleteBill, setActiveSubScreen, addBill } = useHomeBrain();
   const [showAddBill, setShowAddBill] = useState(false);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const handleAddBillSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !amount || !dueDate) return;
 
-    addBill({
+    const payload: Omit<BillItem, 'id' | 'isPaid'> = {
       title,
       amount: parseFloat(amount),
       dueDate,
       category: 'Utilities',
       recurring: 'Monthly'
-    });
+    };
+    if (editingId) updateBill(editingId, payload);
+    else addBill(payload);
 
     setShowAddBill(false);
+    setEditingId(null);
     setTitle('');
     setAmount('');
     setDueDate('');
@@ -373,7 +408,7 @@ export const BillManagementScreen: React.FC = () => {
             />
             <input
               type="number"
-              placeholder="Amount ($)"
+              placeholder="Amount (₹)"
               required
               value={amount}
               onChange={e => setAmount(e.target.value)}
@@ -394,6 +429,11 @@ export const BillManagementScreen: React.FC = () => {
       )}
 
       <div className="space-y-3">
+        {bills.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+            No bills recorded yet.
+          </div>
+        )}
         {bills.map(b => (
           <div
             key={b.id}
@@ -422,7 +462,27 @@ export const BillManagementScreen: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-base font-black text-slate-900 dark:text-white">${b.amount.toLocaleString()}</span>
+              <span className="text-base font-black text-slate-900 dark:text-white">{formatINR(b.amount)}</span>
+              <button
+                onClick={() => {
+                  setEditingId(b.id);
+                  setTitle(b.title);
+                  setAmount(String(b.amount));
+                  setDueDate(b.dueDate);
+                  setShowAddBill(true);
+                }}
+                className="text-xs text-brand-600 hover:underline"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm(`Delete ${b.title}?`)) deleteBill(b.id);
+                }}
+                className="text-xs text-rose-500 hover:underline"
+              >
+                Delete
+              </button>
               {!b.isPaid ? (
                 <button
                   onClick={() => markBillPaid(b.id)}
@@ -431,7 +491,15 @@ export const BillManagementScreen: React.FC = () => {
                   Mark as Paid
                 </button>
               ) : (
-                <span className="text-xs text-emerald-600 font-semibold">Paid by {b.paidBy}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-emerald-600 font-semibold">Paid by {b.paidBy}</span>
+                  <button
+                    onClick={() => markBillUnpaid(b.id)}
+                    className="text-xs font-semibold text-slate-500 hover:text-amber-600 hover:underline"
+                  >
+                    Mark unpaid
+                  </button>
+                </div>
               )}
             </div>
           </div>

@@ -18,9 +18,9 @@ export const ImportantReminders: React.FC = () => {
             Immediate reminders, medicines, appointments, and bills requiring attention
           </p>
         </div>
-        <span className="text-xs font-semibold px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+        <button onClick={() => navigateToSubScreen('reminders')} className="text-xs font-semibold px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
           {reminders.filter(r => !r.completed).length} Pending
-        </span>
+        </button>
       </div>
 
       <div className="space-y-2.5">

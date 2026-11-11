@@ -1,7 +1,36 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
-import { FamilyKnowledge } from '../../types';
+import { FamilyKnowledge, FamilyKnowledgeFile } from '../../types';
 import { Brain, Plus, Search, AlertCircle, Sparkles, Trash2, Edit3, X, User } from 'lucide-react';
+import { createPrivateFileUrl, deletePrivateFile, uploadPrivateFile } from '../../lib/supabase';
+
+const KnowledgeFileTile: React.FC<{
+  file: FamilyKnowledgeFile;
+  onOpen: () => void;
+  onDelete: () => void;
+  onRename: () => void;
+}> = ({ file, onOpen, onDelete, onRename }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file.isFolder) void createPrivateFileUrl('documents', file.storagePath).then(setUrl).catch(() => undefined);
+  }, [file]);
+  return (
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-2">
+      {file.isFolder ? (
+        <button type="button" onClick={onOpen} className="w-full text-left text-xs font-semibold">📁 {file.name}</button>
+      ) : (
+        <button type="button" onClick={onOpen} className="w-full text-left">
+          {url ? <img src={url} alt={file.name} className="h-20 w-full rounded-xl object-cover" /> : <div className="h-20 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs">Loading...</div>}
+          <p className="truncate text-xs font-semibold mt-1">{file.name}</p>
+        </button>
+      )}
+      <div className="flex gap-2 mt-1">
+        <button type="button" onClick={onRename} className="text-[10px] text-purple-600 hover:underline">Rename</button>
+        <button type="button" onClick={onDelete} className="text-[10px] text-rose-500 hover:underline">Delete</button>
+      </div>
+    </div>
+  );
+};
 
 export const KnowledgeCard: React.FC = () => {
   const { knowledgeList, navigateToSubScreen } = useHomeBrain();
@@ -37,7 +66,12 @@ export const KnowledgeCard: React.FC = () => {
               <span className="text-[10px] font-extrabold text-rose-600 uppercase">{critical.importance}</span>
             </div>
             <p className="text-xs font-bold text-slate-900 dark:text-white">{critical.title}</p>
-            <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2">{critical.content}</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+              <User className="w-3 h-3" /> {critical.relatedMemberName}
+            </p>
+            {critical.content && (
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2">{critical.content}</p>
+            )}
           </div>
         ) : (
           <p className="text-xs text-slate-400 py-4 text-center">No knowledge entries recorded yet.</p>
@@ -55,8 +89,11 @@ export const KnowledgeCard: React.FC = () => {
 };
 
 export const FamilyKnowledgeScreen: React.FC = () => {
-  const { knowledgeList, navigateToSubScreen, setActiveSubScreen, deleteKnowledge } = useHomeBrain();
+  const { knowledgeList, knowledgeFiles, navigateToSubScreen, setActiveSubScreen, deleteKnowledge, addKnowledgeFile, updateKnowledgeFile, deleteKnowledgeFile, currentUser } = useHomeBrain();
   const [searchTerm, setSearchTerm] = useState('');
+  const [folderPath, setFolderPath] = useState('');
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const filtered = knowledgeList.filter(
     k =>
@@ -64,6 +101,44 @@ export const FamilyKnowledgeScreen: React.FC = () => {
       k.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
       k.relatedMemberName.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  const visibleFiles = knowledgeFiles.filter(file => file.folderPath === folderPath);
+  const createFolder = () => {
+    const name = window.prompt('Folder name');
+    if (!name?.trim()) return;
+    addKnowledgeFile({ name: name.trim(), folderPath, storagePath: '', mimeType: '', sizeBytes: 0, isFolder: true });
+  };
+  const uploadKnowledgeFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setFileError('Only JPG, JPEG, PNG, and WEBP files are supported.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setFileError('Files must be 10 MB or smaller.');
+      return;
+    }
+    setIsUploading(true);
+    setFileError(null);
+    try {
+      const path = `${currentUser.familyId}/knowledge/${folderPath ? `${folderPath}/` : ''}${crypto.randomUUID()}-${file.name}`;
+      await uploadPrivateFile('documents', path, file);
+      addKnowledgeFile({ name: file.name, folderPath, storagePath: path, mimeType: file.type, sizeBytes: file.size, isFolder: false });
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'Knowledge file upload failed.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+  const openKnowledgeFile = async (file: typeof knowledgeFiles[number]) => {
+    try {
+      const url = await createPrivateFileUrl('documents', file.storagePath);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'Unable to open file.');
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -104,6 +179,51 @@ export const FamilyKnowledgeScreen: React.FC = () => {
         />
       </div>
 
+      <section className="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-card border border-slate-200/80 dark:border-slate-700/80 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-sm text-slate-900 dark:text-white">Knowledge Files</h2>
+            <p className="text-xs text-slate-500">Private family images, organized in folders.</p>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={createFolder} className="px-3 py-2 rounded-xl border text-xs font-semibold">New folder</button>
+            <label className="px-3 py-2 rounded-xl bg-purple-600 text-white text-xs font-semibold cursor-pointer">
+              {isUploading ? 'Uploading...' : 'Upload image'}
+              <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" className="hidden" onChange={uploadKnowledgeFile} disabled={isUploading} />
+            </label>
+          </div>
+        </div>
+        {fileError && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{fileError}</p>}
+        {folderPath && <button type="button" onClick={() => setFolderPath(folderPath.split('/').slice(0, -1).join('/'))} className="text-xs text-purple-600 hover:underline">← Back</button>}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {visibleFiles.map(file => (
+            <KnowledgeFileTile key={file.id} file={file}
+              onOpen={() => file.isFolder ? setFolderPath(folderPath ? `${folderPath}/${file.name}` : file.name) : void openKnowledgeFile(file)}
+              onRename={() => {
+                const name = window.prompt('New name', file.name);
+                if (name?.trim()) {
+                  const oldPath = folderPath ? `${folderPath}/${file.name}` : file.name;
+                  const newPath = folderPath ? `${folderPath}/${name.trim()}` : name.trim();
+                  updateKnowledgeFile(file.id, { name: name.trim() });
+                  if (file.isFolder) {
+                    knowledgeFiles
+                      .filter(child => child.folderPath === oldPath || child.folderPath.startsWith(`${oldPath}/`))
+                      .forEach(child => updateKnowledgeFile(child.id, {
+                        folderPath: `${newPath}${child.folderPath.slice(oldPath.length)}`
+                      }));
+                  }
+                }
+              }}
+              onDelete={() => {
+                if (!file.isFolder) void deletePrivateFile('documents', file.storagePath);
+                deleteKnowledgeFile(file.id);
+              }}
+            />
+          ))}
+          {visibleFiles.length === 0 && <p className="col-span-full text-xs text-slate-400">No files in this folder.</p>}
+        </div>
+      </section>
+
       {/* Knowledge Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filtered.map(knw => (
@@ -135,7 +255,13 @@ export const FamilyKnowledgeScreen: React.FC = () => {
             <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs text-slate-500">
               <span>Member: <strong>{knw.relatedMemberName}</strong></span>
               <button
-                onClick={() => deleteKnowledge(knw.id)}
+                onClick={() => navigateToSubScreen('edit-knowledge', knw.id)}
+                className="text-xs text-brand-600 hover:underline"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => { if (window.confirm(`Delete ${knw.title}?`)) deleteKnowledge(knw.id); }}
                 className="text-xs text-rose-500 hover:underline"
               >
                 Delete
@@ -149,24 +275,32 @@ export const FamilyKnowledgeScreen: React.FC = () => {
 };
 
 export const AddKnowledgeModal: React.FC = () => {
-  const { addKnowledge, setActiveSubScreen, familyMembers } = useHomeBrain();
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [category, setCategory] = useState<any>('Allergies');
-  const [relatedMemberName, setRelatedMemberName] = useState(familyMembers[2]?.name || 'Grandma Savitri');
-  const [importance, setImportance] = useState<any>('Critical');
+  const { addKnowledge, updateKnowledge, knowledgeList, selectedItemId, activeSubScreen, setActiveSubScreen, familyMembers, currentUser } = useHomeBrain();
+  const existing = knowledgeList.find(knowledge => knowledge.id === selectedItemId);
+  const editing = activeSubScreen === 'edit-knowledge' && Boolean(existing);
+  const [title, setTitle] = useState(existing?.title || '');
+  const [content, setContent] = useState(existing?.content || '');
+  const [category, setCategory] = useState<FamilyKnowledge['category']>(existing?.category || 'Allergies');
+  const [relatedMemberName, setRelatedMemberName] = useState(existing?.relatedMemberName || currentUser.name);
+  const relatedMembers = [
+    { id: currentUser.id, name: currentUser.name },
+    ...familyMembers.filter(member => member.name !== currentUser.name)
+  ];
+  const [importance, setImportance] = useState<FamilyKnowledge['importance']>(existing?.importance || 'Critical');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
+    if (!title.trim()) return;
 
-    addKnowledge({
+    const value = {
       title,
       content,
       category,
       relatedMemberName,
       importance
-    });
+    };
+    if (editing && existing) updateKnowledge(existing.id, value);
+    else addKnowledge(value);
 
     setActiveSubScreen('knowledge');
   };
@@ -174,7 +308,7 @@ export const AddKnowledgeModal: React.FC = () => {
   return (
     <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
       <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Add Family Knowledge Fact</h2>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Family Knowledge Fact' : 'Add Family Knowledge Fact'}</h2>
         <button onClick={() => setActiveSubScreen('knowledge')} className="text-slate-400 hover:text-slate-600">
           <X className="w-5 h-5" />
         </button>
@@ -198,7 +332,7 @@ export const AddKnowledgeModal: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
             <select
               value={category}
-              onChange={e => setCategory(e.target.value)}
+              onChange={e => setCategory(e.target.value as any)}
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-xs"
             >
               <option value="Allergies">Allergies ⚠️</option>
@@ -212,11 +346,12 @@ export const AddKnowledgeModal: React.FC = () => {
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Related Member</label>
             <select
+              required
               value={relatedMemberName}
               onChange={e => setRelatedMemberName(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-xs font-semibold"
             >
-              {familyMembers.map(m => (
+              {relatedMembers.map(m => (
                 <option key={m.id} value={m.name}>
                   {m.name}
                 </option>
@@ -228,7 +363,7 @@ export const AddKnowledgeModal: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Importance</label>
             <select
               value={importance}
-              onChange={e => setImportance(e.target.value)}
+              onChange={e => setImportance(e.target.value as any)}
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-xs font-semibold"
             >
               <option value="Critical">Critical 🔴</option>
@@ -239,10 +374,9 @@ export const AddKnowledgeModal: React.FC = () => {
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Detailed Information</label>
+          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Detailed Information <span className="font-normal text-slate-400">(optional)</span></label>
           <textarea
             rows={3}
-            required
             placeholder="e.g. Grandma is severely allergic to Penicillin and Amoxicillin antibiotics."
             value={content}
             onChange={e => setContent(e.target.value)}
@@ -262,7 +396,7 @@ export const AddKnowledgeModal: React.FC = () => {
             type="submit"
             className="px-5 py-2 rounded-xl bg-purple-600 text-white text-xs font-semibold shadow-md"
           >
-            Save Knowledge
+            {editing ? 'Save Changes' : 'Save Knowledge'}
           </button>
         </div>
       </form>

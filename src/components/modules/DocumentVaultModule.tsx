@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { DocumentCategory, DocumentItem } from '../../types';
-import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode } from 'lucide-react';
+import { createPrivateFileUrl, isSupabaseConfigured, uploadPrivateFile, getAccessToken } from '../../lib/supabase';
+import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode, Bot, Sparkles, ExternalLink } from 'lucide-react';
 
 export const DocumentVaultCard: React.FC = () => {
   const { documents, navigateToSubScreen } = useHomeBrain();
@@ -190,31 +191,100 @@ export const UploadDocumentModal: React.FC = () => {
   const [category, setCategory] = useState<DocumentCategory>('Identity');
   const [description, setDescription] = useState('');
   const [fileName, setFileName] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleFileSimulate = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      setSelectedFile(file);
       setFileName(file.name);
       if (!title) setTitle(file.name);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim() || !selectedFile) {
+      setError('Choose a PDF or image before uploading.');
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setError('Supabase is not configured. Add the public Supabase variables to .env.local.');
+      return;
+    }
+    const allowedTypes = ['application/pdf', 'image/png', 'image/jpeg'];
+    const maxSizeBytes = 10 * 1024 * 1024;
+    if (!allowedTypes.includes(selectedFile.type)) {
+      setError('Only PDF, PNG, and JPEG files are supported.');
+      return;
+    }
+    if (selectedFile.size > maxSizeBytes) {
+      setError('Documents must be 10 MB or smaller.');
+      return;
+    }
+    setIsUploading(true);
+    setError(null);
+    try {
+      const path = `${currentUser.familyId}/${crypto.randomUUID()}-${selectedFile.name}`;
+      const fileUrl = await uploadPrivateFile('documents', path, selectedFile);
 
-    addDocument({
-      title: title.endsWith('.pdf') || title.endsWith('.png') ? title : `${title}.pdf`,
-      category,
-      fileType: 'PDF',
-      fileSize: '2.5 MB',
-      fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-      description: description || 'Family uploaded record.',
-      summaryContent: `Indexed content for ${title}. Stored safely under ${category} category.`,
-      uploaderName: currentUser.name
-    });
+      // Attempt AI document text extraction & summary
+      let summaryContent: string | undefined = undefined;
+      try {
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((res, rej) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            res(result.split(',')[1] || result);
+          };
+          reader.onerror = rej;
+          reader.readAsDataURL(selectedFile);
+        });
+        const fileBase64 = await base64Promise;
 
-    setActiveSubScreen('documents');
+        const token = getAccessToken();
+        const extractRes = await fetch('/api/documents/extract', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            fileBase64,
+            mimeType: selectedFile.type,
+            fileName: selectedFile.name
+          })
+        });
+
+        if (extractRes.ok) {
+          const extractData = await extractRes.json();
+          if (extractData.extractedText) {
+            summaryContent = extractData.extractedText.slice(0, 500);
+          }
+        }
+      } catch (extractErr) {
+        console.warn('Text extraction skipped:', extractErr);
+      }
+
+      addDocument({
+        title,
+        category,
+        fileType: selectedFile.type.split('/')[1]?.toUpperCase() || 'FILE',
+        fileSize: `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`,
+        fileUrl,
+        storagePath: path,
+        description: description || 'Family uploaded record.',
+        summaryContent,
+        uploaderName: currentUser.name
+      });
+      setActiveSubScreen('documents');
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Document upload failed.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -227,6 +297,7 @@ export const UploadDocumentModal: React.FC = () => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+        {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
         {/* Upload Dropzone */}
         <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-6 text-center hover:border-brand-400 transition-colors">
           <Upload className="w-8 h-8 text-brand-500 mx-auto mb-2" />
@@ -291,9 +362,10 @@ export const UploadDocumentModal: React.FC = () => {
           </button>
           <button
             type="submit"
+            disabled={isUploading}
             className="px-5 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow-md"
           >
-            Upload to Vault
+            {isUploading ? 'Uploading...' : 'Upload to Vault'}
           </button>
         </div>
       </form>
@@ -302,10 +374,49 @@ export const UploadDocumentModal: React.FC = () => {
 };
 
 export const DocumentDetailsModal: React.FC = () => {
-  const { documents, selectedItemId, deleteDocument, setActiveSubScreen } = useHomeBrain();
+  const { documents, selectedItemId, updateDocument, deleteDocument, setActiveSubScreen, setActiveTab, sendAIMessage } = useHomeBrain();
+  const [isOpening, setIsOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<DocumentCategory>('Identity');
+  const [description, setDescription] = useState('');
   const doc = documents.find(d => d.id === selectedItemId);
 
   if (!doc) return null;
+  const startEditing = () => {
+    setTitle(doc.title);
+    setCategory(doc.category);
+    setDescription(doc.description);
+    setEditing(true);
+  };
+
+  const handleAskAI = () => {
+    setActiveSubScreen('none');
+    setActiveTab('ai');
+    void sendAIMessage(`Tell me details about our family document "${doc.title}" (${doc.category}). Notes: ${doc.description || 'None'}`);
+  };
+
+  const handleDownload = async () => {
+    setIsOpening(true);
+    setError(null);
+    try {
+      const url = doc.storagePath
+        ? await createPrivateFileUrl('documents', doc.storagePath)
+        : doc.fileUrl;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = doc.title;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      setError(err.message || 'Download failed.');
+    } finally {
+      setIsOpening(false);
+    }
+  };
 
   return (
     <div className="max-w-xl mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
@@ -319,7 +430,17 @@ export const DocumentDetailsModal: React.FC = () => {
       </div>
 
       <div className="mt-4 space-y-4">
-        <h2 className="text-xl font-bold text-slate-900 dark:text-white">{doc.title}</h2>
+        {editing ? (
+          <form onSubmit={event => { event.preventDefault(); updateDocument(doc.id, { title, category, description }); setEditing(false); }} className="space-y-3">
+            <input required value={title} onChange={event => setTitle(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" />
+            <select value={category} onChange={event => setCategory(event.target.value as DocumentCategory)} className="w-full rounded-xl border px-3 py-2 text-sm">
+              {['Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'].map(value => <option key={value}>{value}</option>)}
+            </select>
+            <textarea value={description} onChange={event => setDescription(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" rows={3} />
+            <div className="flex gap-2"><button type="button" onClick={() => setEditing(false)} className="text-xs px-3 py-2">Cancel</button><button className="rounded-xl bg-brand-600 px-3 py-2 text-xs text-white">Save Metadata</button></div>
+          </form>
+        ) : <h2 className="text-xl font-bold text-slate-900 dark:text-white">{doc.title}</h2>}
+        {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
         <p className="text-xs text-slate-500">Uploaded by {doc.uploaderName} on {doc.uploadDate}</p>
 
         <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-700/50 border border-slate-200/60 dark:border-slate-700 space-y-2">
@@ -337,25 +458,66 @@ export const DocumentDetailsModal: React.FC = () => {
         )}
       </div>
 
-      <div className="flex items-center justify-between pt-6 mt-6 border-t border-slate-100 dark:border-slate-700">
-        <button
-          onClick={() => {
-            deleteDocument(doc.id);
-            setActiveSubScreen('documents');
-          }}
-          className="text-xs font-semibold text-rose-600 hover:underline"
-        >
-          Delete Document
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-6 mt-6 border-t border-slate-100 dark:border-slate-700">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={startEditing}
+            className="text-xs font-semibold text-brand-600 hover:underline"
+          >
+            Edit Metadata
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm(`Delete ${doc.title}?`)) {
+                deleteDocument(doc.id);
+                setActiveSubScreen('documents');
+              }
+            }}
+            className="text-xs font-semibold text-rose-600 hover:underline"
+          >
+            Delete Document
+          </button>
+        </div>
+
         <div className="flex items-center gap-2">
-          <a
-            href={doc.fileUrl}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={handleAskAI}
+            className="px-3.5 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-xs font-bold flex items-center gap-1.5 hover:bg-purple-100 transition-colors"
+          >
+            <Bot className="w-3.5 h-3.5" /> Ask HomeBrain AI
+          </button>
+
+          <button
+            type="button"
+            disabled={isOpening}
+            onClick={handleDownload}
+            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" /> Download
+          </button>
+
+          <button
+            type="button"
+            disabled={isOpening}
+            onClick={async () => {
+              setIsOpening(true);
+              setError(null);
+              try {
+                const url = doc.storagePath
+                  ? await createPrivateFileUrl('documents', doc.storagePath)
+                  : doc.fileUrl;
+                window.open(url, '_blank', 'noopener,noreferrer');
+              } catch (openError) {
+                setError(openError instanceof Error ? openError.message : 'Unable to open document.');
+              } finally {
+                setIsOpening(false);
+              }
+            }}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md"
           >
-            <Download className="w-3.5 h-3.5" /> Download PDF
-          </a>
+            <ExternalLink className="w-3.5 h-3.5" /> {isOpening ? 'Opening...' : 'View Document'}
+          </button>
         </div>
       </div>
     </div>

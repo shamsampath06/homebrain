@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   User,
   FamilyMember,
@@ -12,54 +12,70 @@ import {
   ExpenseItem,
   BillItem,
   FamilyKnowledge,
+  FamilyKnowledgeFile,
   EmergencyContact,
   EmergencyAlertLog,
+  EmergencyNotification,
+  EmergencySession,
   FamilyMemory,
   AIMessage
 } from '../types';
 import {
-  initialUser,
-  initialFamilyMembers,
-  initialEvents,
-  initialReminders,
-  initialDocuments,
-  initialGroceries,
-  initialGroceryHistory,
-  initialMedicines,
-  initialMedicineLogs,
-  initialExpenses,
-  initialBills,
-  initialKnowledge,
-  initialEmergencyContacts,
-  initialMemories,
-  initialAIMessages
-} from '../data/initialData';
+  deleteRow,
+  insertRow,
+  isSupabaseConfigured,
+  loadFamilyData,
+  loadEmergencyData,
+  listFamilyProfiles,
+  signUpWithPassword,
+  signInWithPassword,
+  signOut,
+  updatePassword,
+  updateRow,
+  deletePrivateFile,
+  clearStoredSession,
+  getAuthenticatedProfile,
+  refreshSession,
+  getAccessToken,
+  handleOAuthCallback
+} from '../lib/supabase';
+import { formatIndiaDateTime, formatINR } from '../lib/display';
 
 export type MainTab = 'dashboard' | 'ai' | 'timeline' | 'profile';
 export type SubScreen =
   | 'none'
   | 'calendar'
   | 'add-event'
+  | 'edit-event'
   | 'event-details'
   | 'documents'
   | 'upload-document'
   | 'document-details'
   | 'grocery'
   | 'add-grocery'
+  | 'edit-grocery'
+  | 'reminders'
+  | 'add-reminder'
+  | 'edit-reminder'
   | 'grocery-history'
   | 'medicine'
   | 'add-medicine'
+  | 'edit-medicine'
   | 'medicine-details'
   | 'medicine-history'
   | 'expense'
   | 'add-expense'
+  | 'edit-expense'
   | 'expense-history'
   | 'bill-management'
+  | 'edit-bill'
   | 'knowledge'
   | 'add-knowledge'
+  | 'edit-knowledge'
   | 'knowledge-details'
   | 'emergency'
   | 'add-memory'
+  | 'edit-memory'
   | 'memory-details'
   | 'user-profile'
   | 'family-members'
@@ -85,6 +101,7 @@ interface HomeBrainContextType {
   // Family Members
   familyMembers: FamilyMember[];
   addFamilyMember: (member: Omit<FamilyMember, 'id'>) => void;
+  updateFamilyMember: (id: string, updated: Partial<FamilyMember>) => void;
   removeFamilyMember: (id: string) => void;
 
   // Events & Calendar
@@ -96,17 +113,21 @@ interface HomeBrainContextType {
   // Reminders
   reminders: ReminderItem[];
   addReminder: (reminder: Omit<ReminderItem, 'id'>) => void;
+  updateReminder: (id: string, updated: Partial<ReminderItem>) => void;
   toggleReminder: (id: string) => void;
+  deleteReminder: (id: string) => void;
 
   // Documents
   documents: DocumentItem[];
   addDocument: (doc: Omit<DocumentItem, 'id' | 'uploadDate'>) => void;
+  updateDocument: (id: string, updated: Partial<DocumentItem>) => void;
   deleteDocument: (id: string) => void;
 
   // Groceries
   groceries: GroceryItem[];
   groceryHistory: GroceryHistoryItem[];
   addGroceryItem: (item: Omit<GroceryItem, 'id' | 'isPurchased'>) => void;
+  updateGroceryItem: (id: string, updated: Partial<GroceryItem>) => void;
   toggleGroceryPurchased: (id: string) => void;
   deleteGroceryItem: (id: string) => void;
 
@@ -122,22 +143,37 @@ interface HomeBrainContextType {
   expenses: ExpenseItem[];
   bills: BillItem[];
   addExpense: (exp: Omit<ExpenseItem, 'id'>) => void;
+  updateExpense: (id: string, updated: Partial<ExpenseItem>) => void;
   deleteExpense: (id: string) => void;
   addBill: (bill: Omit<BillItem, 'id' | 'isPaid'>) => void;
+  updateBill: (id: string, updated: Partial<BillItem>) => void;
+  deleteBill: (id: string) => void;
   markBillPaid: (id: string) => void;
+  markBillUnpaid: (id: string) => void;
 
   // Knowledge
   knowledgeList: FamilyKnowledge[];
   addKnowledge: (knw: Omit<FamilyKnowledge, 'id' | 'createdDate'>) => void;
   updateKnowledge: (id: string, updated: Partial<FamilyKnowledge>) => void;
   deleteKnowledge: (id: string) => void;
+  knowledgeFiles: FamilyKnowledgeFile[];
+  addKnowledgeFile: (file: Omit<FamilyKnowledgeFile, 'id' | 'createdAt'>) => void;
+  updateKnowledgeFile: (id: string, updated: Partial<FamilyKnowledgeFile>) => void;
+  deleteKnowledgeFile: (id: string) => void;
 
   // Emergency
   emergencyContacts: EmergencyContact[];
   emergencyLogs: EmergencyAlertLog[];
   addEmergencyContact: (contact: Omit<EmergencyContact, 'id'>) => void;
+  updateEmergencyContact: (id: string, updated: Partial<EmergencyContact>) => void;
   deleteEmergencyContact: (id: string) => void;
-  triggerEmergencyAlert: (location: string) => Promise<EmergencyAlertLog>;
+  triggerEmergencyAlert: (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number; mapUrl: string }) => Promise<EmergencyAlertLog>;
+  emergencySession: EmergencySession | null;
+  emergencyNotifications: EmergencyNotification[];
+  startEmergencySession: (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number }) => Promise<void>;
+  updateEmergencySessionLocation: (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number }) => Promise<void>;
+  endEmergencySession: () => Promise<void>;
+  openEmergencyNotification: (notification: EmergencyNotification) => void;
 
   // Family Timeline
   memories: FamilyMemory[];
@@ -150,25 +186,29 @@ interface HomeBrainContextType {
   isAITyping: boolean;
   sendAIMessage: (text: string, attachments?: { name: string; url: string; type: string }[]) => Promise<void>;
   clearAIConversation: () => void;
+
+  // Data synchronization
+  isDataLoading: boolean;
+  dataError: string | null;
+  clearDataError: () => void;
+  refreshFamilyData: () => Promise<void>;
+  isAuthenticated: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string, name: string, familyName: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  updatePassword: (currentPassword: string, password: string) => Promise<void>;
 }
 
 const HomeBrainContext = createContext<HomeBrainContextType | undefined>(undefined);
 
-const loadFromStorage = <T,>(key: string, fallback: T): T => {
-  try {
-    const saved = localStorage.getItem(`homebrain_${key}`);
-    return saved ? JSON.parse(saved) : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-const saveToStorage = <T,>(key: string, data: T) => {
-  try {
-    localStorage.setItem(`homebrain_${key}`, JSON.stringify(data));
-  } catch (e) {
-    console.error(`Failed to save ${key} to localStorage`, e);
-  }
+const emptyUser: User = {
+  id: '',
+  name: '',
+  email: '',
+  avatar: '',
+  role: 'Member',
+  familyId: '',
+  familyName: ''
 };
 
 export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -185,15 +225,147 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // User & Theme
-  const [currentUser, setCurrentUser] = useState<User>(() => loadFromStorage('user', initialUser));
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => loadFromStorage('darkMode', false));
+  const [currentUser, setCurrentUser] = useState<User>(emptyUser);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('homebrain_darkMode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isDataLoading, setIsDataLoading] = useState(isSupabaseConfigured);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const authGeneration = useRef(0);
+
+  const clearDataError = () => setDataError(null);
+  const reportPersistenceError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'The data operation failed.';
+    console.error(message, error);
+    setDataError(message);
+  };
+  const persist = async (operation: () => Promise<void>) => {
+    try {
+      await operation();
+    } catch (error) {
+      reportPersistenceError(error);
+    }
+  };
 
   useEffect(() => {
-    saveToStorage('user', currentUser);
-  }, [currentUser]);
+    const hydrate = async () => {
+      // Check for OAuth callback from Google Sign-In
+      handleOAuthCallback();
+
+      if (!isSupabaseConfigured) {
+        setIsDataLoading(false);
+        return;
+      }
+      try {
+        const profile = await getAuthenticatedProfile();
+        if (profile) {
+          const data = await loadFamilyData(profile);
+          setCurrentUser(profile);
+          setIsAuthenticated(true);
+          setFamilyMembers(data.familyMembers);
+          setEvents(data.events);
+          setReminders(data.reminders);
+          setDocuments(data.documents);
+          setGroceries(data.groceries);
+          setGroceryHistory(data.groceryHistory);
+          setMedicines(data.medicines);
+          setMedicineLogs(data.medicineLogs);
+          setExpenses(data.expenses);
+          setBills(data.bills);
+          setKnowledgeList(data.knowledgeList);
+          setKnowledgeFiles(data.knowledgeFiles);
+          setEmergencyContacts(data.emergencyContacts as EmergencyContact[]);
+          setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
+          setEmergencySessions(data.emergencySessions);
+          setEmergencyNotifications(data.emergencyNotifications);
+          setMemories(data.memories);
+        } else {
+          clearStoredSession();
+          setIsAuthenticated(false);
+        }
+      } catch {
+        clearStoredSession();
+        setIsAuthenticated(false);
+      }
+      setIsDataLoading(false);
+    };
+    void hydrate();
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    authGeneration.current += 1;
+    const profile = await signInWithPassword(email, password);
+    const data = await loadFamilyData(profile);
+    setCurrentUser(profile);
+    setIsAuthenticated(true);
+    setDataError(null);
+    setFamilyMembers(data.familyMembers);
+    setEvents(data.events);
+    setReminders(data.reminders);
+    setDocuments(data.documents);
+    setGroceries(data.groceries);
+    setGroceryHistory(data.groceryHistory);
+    setMedicines(data.medicines);
+    setMedicineLogs(data.medicineLogs);
+    setExpenses(data.expenses);
+    setBills(data.bills);
+    setKnowledgeList(data.knowledgeList);
+    setKnowledgeFiles(data.knowledgeFiles);
+    setEmergencyContacts(data.emergencyContacts as EmergencyContact[]);
+    setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
+    setEmergencySessions(data.emergencySessions);
+    setEmergencyNotifications(data.emergencyNotifications);
+    setMemories(data.memories);
+    setIsDataLoading(false);
+  };
+
+  const signUp = async (email: string, password: string, name: string, familyName: string) => {
+    authGeneration.current += 1;
+    const profile = await signUpWithPassword(email, password, name, familyName);
+    if (!profile) {
+      throw new Error('Registration succeeded but email confirmation is required before signing in.');
+    }
+    const data = await loadFamilyData(profile);
+    setCurrentUser(profile);
+    setIsAuthenticated(true);
+    setDataError(null);
+    setFamilyMembers(data.familyMembers);
+    setEvents(data.events);
+    setReminders(data.reminders);
+    setDocuments(data.documents);
+    setGroceries(data.groceries);
+    setGroceryHistory(data.groceryHistory);
+    setMedicines(data.medicines);
+    setMedicineLogs(data.medicineLogs);
+    setExpenses(data.expenses);
+    setBills(data.bills);
+    setKnowledgeList(data.knowledgeList);
+    setKnowledgeFiles(data.knowledgeFiles);
+    setEmergencyContacts(data.emergencyContacts);
+    setEmergencyLogs(data.emergencyLogs);
+    setEmergencySessions(data.emergencySessions);
+    setEmergencyNotifications(data.emergencyNotifications);
+    setMemories(data.memories);
+    setIsDataLoading(false);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    setIsAuthenticated(false);
+    setCurrentUser(emptyUser);
+  };
 
   useEffect(() => {
-    saveToStorage('darkMode', isDarkMode);
+    try {
+      localStorage.setItem('homebrain_darkMode', String(isDarkMode));
+    } catch {
+      // Theme persistence is optional and must not block the application.
+    }
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -203,141 +375,196 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
+  const refreshFamilyData = async () => {
+    if (!currentUser?.familyId) return;
+    try {
+      const data = await loadFamilyData(currentUser);
+      setFamilyMembers(data.familyMembers);
+      setEvents(data.events);
+      setReminders(data.reminders);
+      setDocuments(data.documents);
+      setGroceries(data.groceries);
+      setGroceryHistory(data.groceryHistory);
+      setMedicines(data.medicines);
+      setMedicineLogs(data.medicineLogs);
+      setExpenses(data.expenses);
+      setBills(data.bills);
+      setKnowledgeList(data.knowledgeList);
+      setKnowledgeFiles(data.knowledgeFiles);
+      setEmergencyContacts(data.emergencyContacts as EmergencyContact[]);
+      setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
+      setEmergencySessions(data.emergencySessions);
+      setEmergencyNotifications(data.emergencyNotifications);
+      setMemories(data.memories);
+    } catch (err) {
+      console.warn('Silent refresh failed:', err);
+    }
+  };
+
   const updateCurrentUser = (updated: Partial<User>) => {
     setCurrentUser(prev => ({ ...prev, ...updated }));
+    void persist(() => updateRow('profiles', currentUser.familyId, currentUser.id, updated));
   };
 
   // Family Members
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(() =>
-    loadFromStorage('familyMembers', initialFamilyMembers)
-  );
-  useEffect(() => saveToStorage('familyMembers', familyMembers), [familyMembers]);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
 
   const addFamilyMember = (member: Omit<FamilyMember, 'id'>) => {
-    const newMember: FamilyMember = { ...member, id: `mem_${Date.now()}` };
+    const newMember: FamilyMember = { ...member, id: crypto.randomUUID() };
     setFamilyMembers(prev => [...prev, newMember]);
+    void persist(() => insertRow('family_members', currentUser.familyId, newMember).then(() => undefined));
+  };
+
+  const updateFamilyMember = (id: string, updated: Partial<FamilyMember>) => {
+    setFamilyMembers(prev => prev.map(member => member.id === id ? { ...member, ...updated } : member));
+    void persist(() => updateRow('family_members', currentUser.familyId, id, updated));
   };
 
   const removeFamilyMember = (id: string) => {
     setFamilyMembers(prev => prev.filter(m => m.id !== id));
+    void persist(() => deleteRow('family_members', currentUser.familyId, id));
   };
 
   // Events
-  const [events, setEvents] = useState<FamilyEvent[]>(() => loadFromStorage('events', initialEvents));
-  useEffect(() => saveToStorage('events', events), [events]);
+  const [events, setEvents] = useState<FamilyEvent[]>([]);
 
   const addEvent = (event: Omit<FamilyEvent, 'id'>) => {
-    const newEvt: FamilyEvent = { ...event, id: `evt_${Date.now()}` };
+    const newEvt: FamilyEvent = { ...event, id: crypto.randomUUID() };
     setEvents(prev => [...prev, newEvt]);
+    void persist(() => insertRow('events', currentUser.familyId, newEvt).then(() => undefined));
   };
 
   const updateEvent = (id: string, updated: Partial<FamilyEvent>) => {
     setEvents(prev => prev.map(e => (e.id === id ? { ...e, ...updated } : e)));
+    void persist(() => updateRow('events', currentUser.familyId, id, updated));
   };
 
   const deleteEvent = (id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
+    void persist(() => deleteRow('events', currentUser.familyId, id));
   };
 
   // Reminders
-  const [reminders, setReminders] = useState<ReminderItem[]>(() => loadFromStorage('reminders', initialReminders));
-  useEffect(() => saveToStorage('reminders', reminders), [reminders]);
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
 
   const addReminder = (rem: Omit<ReminderItem, 'id'>) => {
-    const newRem: ReminderItem = { ...rem, id: `rem_${Date.now()}` };
+    const newRem: ReminderItem = { ...rem, id: crypto.randomUUID() };
     setReminders(prev => [newRem, ...prev]);
+    void persist(() => insertRow('reminders', currentUser.familyId, newRem).then(() => undefined));
+  };
+
+  const updateReminder = (id: string, updated: Partial<ReminderItem>) => {
+    setReminders(prev => prev.map(reminder => reminder.id === id ? { ...reminder, ...updated } : reminder));
+    void persist(() => updateRow('reminders', currentUser.familyId, id, updated));
   };
 
   const toggleReminder = (id: string) => {
     setReminders(prev => prev.map(r => (r.id === id ? { ...r, completed: !r.completed } : r)));
+    const reminder = reminders.find(item => item.id === id);
+    if (reminder) void persist(() => updateRow('reminders', currentUser.familyId, id, { completed: !reminder.completed }));
+  };
+
+  const deleteReminder = (id: string) => {
+    setReminders(prev => prev.filter(reminder => reminder.id !== id));
+    void persist(() => deleteRow('reminders', currentUser.familyId, id));
   };
 
   // Documents
-  const [documents, setDocuments] = useState<DocumentItem[]>(() => loadFromStorage('documents', initialDocuments));
-  useEffect(() => saveToStorage('documents', documents), [documents]);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
   const addDocument = (doc: Omit<DocumentItem, 'id' | 'uploadDate'>) => {
     const newDoc: DocumentItem = {
       ...doc,
-      id: `doc_${Date.now()}`,
+      id: crypto.randomUUID(),
       uploadDate: new Date().toISOString().split('T')[0]
     };
+
     setDocuments(prev => [newDoc, ...prev]);
+    void persist(() => insertRow('documents', currentUser.familyId, newDoc).then(() => undefined));
+  };
+
+  const updateDocument = (id: string, updated: Partial<DocumentItem>) => {
+    setDocuments(prev => prev.map(document => document.id === id ? { ...document, ...updated } : document));
+    void persist(() => updateRow('documents', currentUser.familyId, id, updated));
   };
 
   const deleteDocument = (id: string) => {
+    const document = documents.find(item => item.id === id);
     setDocuments(prev => prev.filter(d => d.id !== id));
+    void persist(() => deleteRow('documents', currentUser.familyId, id));
+    if (document?.storagePath) {
+      void persist(() => deletePrivateFile('documents', document.storagePath as string));
+    }
   };
 
   // Groceries
-  const [groceries, setGroceries] = useState<GroceryItem[]>(() => loadFromStorage('groceries', initialGroceries));
-  const [groceryHistory, setGroceryHistory] = useState<GroceryHistoryItem[]>(() =>
-    loadFromStorage('groceryHistory', initialGroceryHistory)
-  );
-
-  useEffect(() => saveToStorage('groceries', groceries), [groceries]);
-  useEffect(() => saveToStorage('groceryHistory', groceryHistory), [groceryHistory]);
+  const [groceries, setGroceries] = useState<GroceryItem[]>([]);
+  const [groceryHistory, setGroceryHistory] = useState<GroceryHistoryItem[]>([]);
 
   const addGroceryItem = (item: Omit<GroceryItem, 'id' | 'isPurchased'>) => {
-    const newItem: GroceryItem = { ...item, id: `groc_${Date.now()}`, isPurchased: false };
+    const newItem: GroceryItem = { ...item, id: crypto.randomUUID(), isPurchased: false };
     setGroceries(prev => [newItem, ...prev]);
+    void persist(() => insertRow('groceries', currentUser.familyId, newItem).then(() => undefined));
+  };
+
+  const updateGroceryItem = (id: string, updated: Partial<GroceryItem>) => {
+    setGroceries(prev => prev.map(item => item.id === id ? { ...item, ...updated } : item));
+    void persist(() => updateRow('groceries', currentUser.familyId, id, updated));
   };
 
   const toggleGroceryPurchased = (id: string) => {
     const now = new Date();
-    const formattedDate = `${now.getDate()} ${now.toLocaleString('en-US', { month: 'short' })} ${now.getFullYear()} – ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-    setGroceries(prev =>
-      prev.map(g => {
-        if (g.id === id) {
-          const nextState = !g.isPurchased;
-          if (nextState) {
-            // Log to history
-            const histItem: GroceryHistoryItem = {
-              id: `ghist_${Date.now()}`,
-              name: g.name,
-              category: g.category,
-              purchasedBy: currentUser.name,
-              purchasedAt: formattedDate
-            };
-            setGroceryHistory(h => [histItem, ...h]);
-          }
-          return {
-            ...g,
-            isPurchased: nextState,
-            purchasedBy: nextState ? currentUser.name : undefined,
-            purchasedAt: nextState ? formattedDate : undefined
-          };
-        }
-        return g;
-      })
-    );
+    const purchasedAt = now.toISOString();
+    const item = groceries.find(g => g.id === id);
+    if (!item) return;
+    const nextState = !item.isPurchased;
+    const updated = {
+      isPurchased: nextState,
+      purchasedBy: nextState ? currentUser.name : undefined,
+      purchasedAt: nextState ? purchasedAt : undefined
+    };
+    setGroceries(prev => prev.map(g => (g.id === id ? { ...g, ...updated } : g)));
+    void persist(() => updateRow('groceries', currentUser.familyId, id, updated));
+    if (nextState) {
+      const alreadyRecorded = groceryHistory.some(history => history.groceryId === id);
+      if (!alreadyRecorded) {
+        const histItem: GroceryHistoryItem = {
+          id,
+          groceryId: id,
+          name: item.name,
+          category: item.category,
+          purchasedBy: currentUser.name,
+          purchasedAt
+        };
+        setGroceryHistory(prev => [histItem, ...prev]);
+        void persist(() => insertRow('grocery_history', currentUser.familyId, { ...histItem, groceryId: id }).then(() => undefined));
+      }
+    }
   };
 
   const deleteGroceryItem = (id: string) => {
     setGroceries(prev => prev.filter(g => g.id !== id));
+    void persist(() => deleteRow('groceries', currentUser.familyId, id));
   };
 
   // Medicines
-  const [medicines, setMedicines] = useState<MedicineItem[]>(() => loadFromStorage('medicines', initialMedicines));
-  const [medicineLogs, setMedicineLogs] = useState<MedicineLog[]>(() =>
-    loadFromStorage('medicineLogs', initialMedicineLogs)
-  );
-
-  useEffect(() => saveToStorage('medicines', medicines), [medicines]);
-  useEffect(() => saveToStorage('medicineLogs', medicineLogs), [medicineLogs]);
+  const [medicines, setMedicines] = useState<MedicineItem[]>([]);
+  const [medicineLogs, setMedicineLogs] = useState<MedicineLog[]>([]);
 
   const addMedicine = (med: Omit<MedicineItem, 'id'>) => {
-    const newMed: MedicineItem = { ...med, id: `med_${Date.now()}` };
+    const newMed: MedicineItem = { ...med, id: crypto.randomUUID() };
     setMedicines(prev => [...prev, newMed]);
+    void persist(() => insertRow('medicines', currentUser.familyId, newMed).then(() => undefined));
   };
 
   const updateMedicine = (id: string, updated: Partial<MedicineItem>) => {
     setMedicines(prev => prev.map(m => (m.id === id ? { ...m, ...updated } : m)));
+    void persist(() => updateRow('medicines', currentUser.familyId, id, updated));
   };
 
   const deleteMedicine = (id: string) => {
     setMedicines(prev => prev.filter(m => m.id !== id));
+    void persist(() => deleteRow('medicines', currentUser.familyId, id));
   };
 
   const logMedicineStatus = (medicineId: string, status: 'Taken' | 'Missed') => {
@@ -345,40 +572,55 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!med) return;
 
     const now = new Date();
-    const formattedDate = `${now.getDate()} ${now.toLocaleString('en-US', { month: 'short' })} ${now.getFullYear()} – ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
     const newLog: MedicineLog = {
-      id: `mlog_${Date.now()}`,
+      id: crypto.randomUUID(),
       medicineId: med.id,
       medicineName: med.name,
       personName: med.personName,
       status,
-      timestamp: formattedDate,
+      timestamp: now.toISOString(),
       loggedBy: currentUser.name
     };
 
     setMedicineLogs(prev => [newLog, ...prev]);
+    void persist(() => insertRow('medicine_logs', currentUser.familyId, newLog).then(() => undefined));
   };
 
   // Expenses & Bills
-  const [expenses, setExpenses] = useState<ExpenseItem[]>(() => loadFromStorage('expenses', initialExpenses));
-  const [bills, setBills] = useState<BillItem[]>(() => loadFromStorage('bills', initialBills));
-
-  useEffect(() => saveToStorage('expenses', expenses), [expenses]);
-  useEffect(() => saveToStorage('bills', bills), [bills]);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  const [bills, setBills] = useState<BillItem[]>([]);
 
   const addExpense = (exp: Omit<ExpenseItem, 'id'>) => {
-    const newExp: ExpenseItem = { ...exp, id: `exp_${Date.now()}` };
+    const newExp: ExpenseItem = { ...exp, id: crypto.randomUUID() };
     setExpenses(prev => [newExp, ...prev]);
+    void persist(() => insertRow('expenses', currentUser.familyId, newExp).then(() => undefined));
+  };
+
+  const updateExpense = (id: string, updated: Partial<ExpenseItem>) => {
+    setExpenses(prev => prev.map(expense => expense.id === id ? { ...expense, ...updated } : expense));
+    void persist(() => updateRow('expenses', currentUser.familyId, id, updated));
   };
 
   const deleteExpense = (id: string) => {
     setExpenses(prev => prev.filter(e => e.id !== id));
+    void persist(() => deleteRow('expenses', currentUser.familyId, id));
   };
 
   const addBill = (bill: Omit<BillItem, 'id' | 'isPaid'>) => {
-    const newBill: BillItem = { ...bill, id: `bill_${Date.now()}`, isPaid: false };
+    const newBill: BillItem = { ...bill, id: crypto.randomUUID(), isPaid: false };
     setBills(prev => [newBill, ...prev]);
+    void persist(() => insertRow('bills', currentUser.familyId, newBill).then(() => undefined));
+  };
+
+  const updateBill = (id: string, updated: Partial<BillItem>) => {
+    setBills(prev => prev.map(bill => bill.id === id ? { ...bill, ...updated } : bill));
+    void persist(() => updateRow('bills', currentUser.familyId, id, updated));
+  };
+
+  const deleteBill = (id: string) => {
+    if (!currentUser.familyId) return;
+    setBills(previous => previous.filter(bill => bill.id !== id));
+    void persist(() => deleteRow('bills', currentUser.familyId, id));
   };
 
   const markBillPaid = (id: string) => {
@@ -388,107 +630,275 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         b.id === id ? { ...b, isPaid: true, paidDate: today, paidBy: currentUser.name } : b
       )
     );
+    void persist(() => updateRow('bills', currentUser.familyId, id, { isPaid: true, paidDate: today, paidBy: currentUser.name }));
+  };
+
+  const markBillUnpaid = (id: string) => {
+    setBills(prev => prev.map(b => b.id === id ? { ...b, isPaid: false, paidDate: undefined, paidBy: undefined } : b));
+    void persist(() => updateRow('bills', currentUser.familyId, id, { isPaid: false, paidDate: null, paidBy: null }));
   };
 
   // Knowledge
-  const [knowledgeList, setKnowledgeList] = useState<FamilyKnowledge[]>(() =>
-    loadFromStorage('knowledgeList', initialKnowledge)
-  );
-  useEffect(() => saveToStorage('knowledgeList', knowledgeList), [knowledgeList]);
+  const [knowledgeList, setKnowledgeList] = useState<FamilyKnowledge[]>([]);
+  const [knowledgeFiles, setKnowledgeFiles] = useState<FamilyKnowledgeFile[]>([]);
+
+  const addKnowledgeFile = (file: Omit<FamilyKnowledgeFile, 'id' | 'createdAt'>) => {
+    const newFile: FamilyKnowledgeFile = { ...file, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+    setKnowledgeFiles(prev => [newFile, ...prev]);
+    void persist(() => insertRow('knowledge_files', currentUser.familyId, newFile).then(() => undefined));
+  };
+
+  const deleteKnowledgeFile = (id: string) => {
+    setKnowledgeFiles(prev => prev.filter(file => file.id !== id));
+    void persist(() => deleteRow('knowledge_files', currentUser.familyId, id));
+  };
+  const updateKnowledgeFile = (id: string, updated: Partial<FamilyKnowledgeFile>) => {
+    setKnowledgeFiles(prev => prev.map(file => file.id === id ? { ...file, ...updated } : file));
+    void persist(() => updateRow('knowledge_files', currentUser.familyId, id, updated));
+  };
 
   const addKnowledge = (knw: Omit<FamilyKnowledge, 'id' | 'createdDate'>) => {
     const newKnw: FamilyKnowledge = {
       ...knw,
-      id: `knw_${Date.now()}`,
+      id: crypto.randomUUID(),
       createdDate: new Date().toISOString().split('T')[0]
     };
     setKnowledgeList(prev => [newKnw, ...prev]);
+    void persist(() => insertRow('family_knowledge', currentUser.familyId, newKnw).then(() => undefined));
   };
 
   const updateKnowledge = (id: string, updated: Partial<FamilyKnowledge>) => {
     setKnowledgeList(prev => prev.map(k => (k.id === id ? { ...k, ...updated } : k)));
+    void persist(() => updateRow('family_knowledge', currentUser.familyId, id, updated));
   };
 
   const deleteKnowledge = (id: string) => {
     setKnowledgeList(prev => prev.filter(k => k.id !== id));
+    void persist(() => deleteRow('family_knowledge', currentUser.familyId, id));
   };
 
   // Emergency
-  const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>(() =>
-    loadFromStorage('emergencyContacts', initialEmergencyContacts)
-  );
-  const [emergencyLogs, setEmergencyLogs] = useState<EmergencyAlertLog[]>(() =>
-    loadFromStorage('emergencyLogs', [])
-  );
-
-  useEffect(() => saveToStorage('emergencyContacts', emergencyContacts), [emergencyContacts]);
-  useEffect(() => saveToStorage('emergencyLogs', emergencyLogs), [emergencyLogs]);
+  const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
+  const [emergencyLogs, setEmergencyLogs] = useState<EmergencyAlertLog[]>([]);
+  const [emergencySessions, setEmergencySessions] = useState<EmergencySession[]>([]);
+  const [emergencyNotifications, setEmergencyNotifications] = useState<EmergencyNotification[]>([]);
+  const emergencySession = emergencySessions.find(session => session.status === 'active')
+    || [...emergencySessions].sort((a, b) => b.lastLocationAt.localeCompare(a.lastLocationAt))[0]
+    || null;
 
   const addEmergencyContact = (contact: Omit<EmergencyContact, 'id'>) => {
-    const newC: EmergencyContact = { ...contact, id: `emg_${Date.now()}` };
+    const newC: EmergencyContact = { ...contact, id: crypto.randomUUID() };
     setEmergencyContacts(prev => [...prev, newC]);
+    void persist(() => insertRow('emergency_contacts', currentUser.familyId, newC).then(() => undefined));
+  };
+
+  const updateEmergencyContact = (id: string, updated: Partial<EmergencyContact>) => {
+    setEmergencyContacts(prev => prev.map(contact => contact.id === id ? { ...contact, ...updated } : contact));
+    void persist(() => updateRow('emergency_contacts', currentUser.familyId, id, updated));
   };
 
   const deleteEmergencyContact = (id: string) => {
     setEmergencyContacts(prev => prev.filter(c => c.id !== id));
+    void persist(() => deleteRow('emergency_contacts', currentUser.familyId, id));
   };
 
-  const triggerEmergencyAlert = async (location: string): Promise<EmergencyAlertLog> => {
+  const startEmergencySession = async (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number }) => {
+    const now = new Date().toISOString();
+    const session = await insertRow<EmergencySession>('emergency_sessions', currentUser.familyId, {
+      id: crypto.randomUUID(),
+      familyId: currentUser.familyId,
+      initiatedBy: currentUser.id,
+      initiatorName: currentUser.name,
+      status: 'active',
+      address: location.address,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracyMeters: location.accuracyMeters,
+      lastLocationAt: now,
+      createdAt: now
+    });
+    const profiles = await listFamilyProfiles(currentUser.familyId);
+    const notifications = await Promise.all(profiles.map(profile => insertRow<EmergencyNotification>('emergency_notifications', currentUser.familyId, {
+      id: crypto.randomUUID(),
+      familyId: currentUser.familyId,
+      sessionId: session.id,
+      recipientUserId: profile.id,
+      initiatorName: currentUser.name,
+      address: location.address,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracyMeters: location.accuracyMeters,
+      lastLocationAt: now,
+      status: 'active',
+      createdAt: now
+    })));
+    setEmergencySessions(prev => [session, ...prev.filter(item => item.id !== session.id)]);
+    setEmergencyNotifications(prev => [...notifications, ...prev.filter(item => item.sessionId !== session.id)]);
+  };
+
+  const updateEmergencySessionLocation = async (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number }) => {
+    if (!emergencySession || emergencySession.initiatedBy !== currentUser.id) {
+      throw new Error('Only the person who started this SOS session can update it.');
+    }
+    const lastLocationAt = new Date().toISOString();
+    const update = { address: location.address, latitude: location.latitude, longitude: location.longitude, accuracyMeters: location.accuracyMeters, lastLocationAt };
+    await updateRow('emergency_sessions', currentUser.familyId, emergencySession.id, update);
+    const ownNotifications = emergencyNotifications.filter(notification => notification.sessionId === emergencySession.id);
+    await Promise.all(ownNotifications.map(notification => updateRow('emergency_notifications', currentUser.familyId, notification.id, update)));
+    setEmergencySessions(prev => prev.map(session => session.id === emergencySession.id ? { ...session, ...update } : session));
+    setEmergencyNotifications(prev => prev.map(notification => notification.sessionId === emergencySession.id ? { ...notification, ...update } : notification));
+  };
+
+  const endEmergencySession = async () => {
+    if (!emergencySession || emergencySession.initiatedBy !== currentUser.id) {
+      throw new Error('Only the person who started this SOS session can end it.');
+    }
+    const endedAt = new Date().toISOString();
+    await updateRow('emergency_sessions', currentUser.familyId, emergencySession.id, { status: 'ended', endedAt });
+    const ownNotifications = emergencyNotifications.filter(notification => notification.sessionId === emergencySession.id);
+    await Promise.all(ownNotifications.map(notification => updateRow('emergency_notifications', currentUser.familyId, notification.id, { status: 'ended' })));
+    setEmergencySessions(prev => prev.map(session => session.id === emergencySession.id ? { ...session, status: 'ended', endedAt } : session));
+    setEmergencyNotifications(prev => prev.map(notification => notification.sessionId === emergencySession.id ? { ...notification, status: 'ended' } : notification));
+  };
+
+  const openEmergencyNotification = (notification: EmergencyNotification) => {
+    setEmergencyNotifications(prev => prev.map(item => item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item));
+    void updateRow('emergency_notifications', currentUser.familyId, notification.id, { readAt: new Date().toISOString() });
+    setActiveSubScreen('emergency');
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser.familyId) return;
+    const refresh = async () => {
+      try {
+        const data = await loadEmergencyData(currentUser.familyId);
+        setEmergencySessions(data.sessions);
+        setEmergencyNotifications(data.notifications);
+      } catch (error) {
+        reportPersistenceError(error);
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(timer);
+  }, [currentUser.familyId, isAuthenticated]);
+
+  const triggerEmergencyAlert = async (location: { address: string; latitude: number; longitude: number; accuracyMeters?: number; mapUrl: string }): Promise<EmergencyAlertLog> => {
     const log: EmergencyAlertLog = {
-      id: `emg_log_${Date.now()}`,
-      timestamp: new Date().toLocaleString(),
-      userLocation: location,
-      status: 'Sent',
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      userLocation: location.address,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracyMeters: location.accuracyMeters,
+      userName: currentUser.name,
+      status: 'Logged',
       recipients: emergencyContacts.map(c => `${c.name} (${c.phone})`)
     };
     setEmergencyLogs(prev => [log, ...prev]);
+    await insertRow('emergency_logs', currentUser.familyId, {
+      id: log.id,
+      timestamp: log.timestamp,
+      userLocation: log.userLocation,
+      latitude: log.latitude,
+      longitude: log.longitude,
+      accuracyMeters: log.accuracyMeters,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      status: log.status,
+      recipients: log.recipients
+    }).then(() => undefined);
     return log;
   };
 
   // Memories
-  const [memories, setMemories] = useState<FamilyMemory[]>(() => loadFromStorage('memories', initialMemories));
-  useEffect(() => saveToStorage('memories', memories), [memories]);
+  const [memories, setMemories] = useState<FamilyMemory[]>([]);
 
   const addMemory = (mem: Omit<FamilyMemory, 'id'>) => {
-    const newMem: FamilyMemory = { ...mem, id: `mem_${Date.now()}` };
+    const newMem: FamilyMemory = { ...mem, id: crypto.randomUUID() };
     setMemories(prev => [newMem, ...prev]);
+    void persist(() => insertRow('family_memories', currentUser.familyId, newMem).then(() => undefined));
   };
 
   const updateMemory = (id: string, updated: Partial<FamilyMemory>) => {
     setMemories(prev => prev.map(m => (m.id === id ? { ...m, ...updated } : m)));
+    void persist(() => updateRow('family_memories', currentUser.familyId, id, updated));
   };
 
   const deleteMemory = (id: string) => {
+    const memory = memories.find(item => item.id === id);
     setMemories(prev => prev.filter(m => m.id !== id));
+    void persist(() => deleteRow('family_memories', currentUser.familyId, id));
+    if (memory?.photoUrl && !/^https?:\/\//i.test(memory.photoUrl)) {
+      void persist(() => deletePrivateFile('documents', memory.photoUrl));
+    }
   };
 
   // AI Assistant Engine (RAG Grounded in local database)
-  const [aiMessages, setAIMessages] = useState<AIMessage[]>(() =>
-    loadFromStorage('aiMessages', initialAIMessages)
-  );
+  const [aiMessages, setAIMessages] = useState<AIMessage[]>([]);
   const [isAITyping, setIsAITyping] = useState<boolean>(false);
 
-  useEffect(() => saveToStorage('aiMessages', aiMessages), [aiMessages]);
-
-  const sendAIMessage = async (text: string, attachments?: { name: string; url: string; type: string }[]) => {
+  const sendAIMessage = async (text: string, attachments?: { name: string; url: string; type: string; base64?: string; mimeType?: string }[]) => {
     const userMsg: AIMessage = {
       id: `msg_${Date.now()}`,
       sender: 'user',
       text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       attachments
     };
 
     setAIMessages(prev => [...prev, userMsg]);
     setIsAITyping(true);
 
-    // Simulate AI grounded context query delay
+    try {
+      const token = getAccessToken();
+      const res = await fetch('/api/ai/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          query: text,
+          attachments: attachments || [],
+          conversationHistory: aiMessages.slice(-6).map(m => ({
+            role: m.sender === 'user' ? 'user' : 'model',
+            text: m.text
+          }))
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const aiReply: AIMessage = {
+          id: `msg_${Date.now()}`,
+          sender: 'assistant',
+          text: data.reply || 'No response generated.',
+          timestamp: new Date().toISOString(),
+          groundingSources: data.groundingSources || ['Family Database'],
+          actionsExecuted: data.actionsExecuted,
+          confidenceScore: data.confidenceScore,
+          latencyMs: data.latencyMs,
+          cognitiveMetrics: data.cognitiveMetrics
+        };
+        setAIMessages(prev => [...prev, aiReply]);
+        setIsAITyping(false);
+
+        // If autonomous actions were executed, trigger silent refresh
+        if (data.actionsExecuted && data.actionsExecuted.length > 0) {
+          void refreshFamilyData();
+        }
+        return;
+      }
+    } catch (apiErr) {
+      console.warn('Backend AI query endpoint failed, using local grounding engine:', apiErr);
+    }
+
+    // Client-side Database RAG Grounding fallback if backend is offline
     setTimeout(() => {
       let replyText = '';
       const sources: string[] = [];
       const queryLower = text.toLowerCase();
 
-      // RAG Grounding Logic based on prompt examples
       if (queryLower.includes('happening today') || queryLower.includes("today's schedule") || queryLower.includes('events today')) {
         const todayEvts = events.filter(e => e.date === new Date().toISOString().split('T')[0]);
         const todayRems = reminders.filter(r => !r.completed);
@@ -496,51 +906,39 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           `• **Important Reminders**: ${todayRems.map(r => r.title).join(', ') || 'No pending reminders for today.'}\n` +
           `• **Today's Events**: ${todayEvts.length ? todayEvts.map(e => `${e.title} at ${e.time}`).join(', ') : 'No scheduled events on calendar for today.'}`;
         sources.push('Calendar Events Table', 'Important Reminders Table');
-
       } else if (queryLower.includes('medicine') && (queryLower.includes('due') || queryLower.includes('today'))) {
         replyText = `Here are the medicines due today:\n\n` +
           medicines.map(m => `💊 **${m.personName}**: ${m.name} (${m.dosage}) at **${m.timing}** [Frequency: ${m.frequency}]`).join('\n') +
           `\n\n*Note: Use the Medicine Manager card on the Dashboard to record doses.*`;
         sources.push('Medicine Manager Table');
-
-      } else if (queryLower.includes('grandma') && queryLower.includes('medicine')) {
-        const gMed = medicines.filter(m => m.personName.toLowerCase().includes('grandma'));
-        replyText = `Grandma Savitri has the following medicine schedule:\n\n` +
-          gMed.map(m => `💊 **${m.name}**: ${m.dosage} due at **${m.timing}** (${m.notes})`).join('\n');
-        sources.push('Medicine Schedule - Grandma Savitri');
-
       } else if (queryLower.includes('grocery') || queryLower.includes('groceries') || queryLower.includes('left on')) {
         const pending = groceries.filter(g => !g.isPurchased);
         replyText = `There are **${pending.length} pending items** on your family grocery list:\n\n` +
           pending.map(g => `🛒 **${g.name}** (${g.quantity}) - Category: ${g.category}`).join('\n') +
           `\n\nWould you like me to add any additional items for you?`;
         sources.push('Smart Grocery List Database');
-
       } else if (queryLower.includes('who bought') || queryLower.includes('bought the milk') || queryLower.includes('bought milk')) {
         const milkItem = groceries.find(g => g.name.toLowerCase().includes('milk'));
         if (milkItem && milkItem.isPurchased) {
-          replyText = `Organic Milk was bought by **${milkItem.purchasedBy}** on **${milkItem.purchasedAt}**.`;
+          replyText = `The item was bought by **${milkItem.purchasedBy}** on **${milkItem.purchasedAt ? formatIndiaDateTime(milkItem.purchasedAt) : 'an unknown date'}**.`;
         } else {
-          replyText = `Organic Milk has not been bought yet. It is currently pending on the grocery list!`;
+          replyText = `No purchased milk item was found in the family grocery data.`;
         }
         sources.push('Grocery Purchase History Log');
-
       } else if (queryLower.includes('bill') || queryLower.includes('bills')) {
         const unpaid = bills.filter(b => !b.isPaid);
         replyText = `You have **${unpaid.length} upcoming unpaid bills**:\n\n` +
-          unpaid.map(b => `⚡ **${b.title}**: $${b.amount} (Due: ${b.dueDate})`).join('\n') +
-          `\nTotal pending bills amount: **$${unpaid.reduce((acc, b) => acc + b.amount, 0).toLocaleString()}**`;
+          unpaid.map(b => `⚡ **${b.title}**: ${formatINR(b.amount)} (Due: ${b.dueDate})`).join('\n') +
+          `\nTotal pending bills amount: **${formatINR(unpaid.reduce((acc, b) => acc + b.amount, 0))}**`;
         sources.push('Bills & Expenses Intelligence Database');
-
       } else if (queryLower.includes('passport') || queryLower.includes('where is my passport')) {
         const passportDoc = documents.find(d => d.title.toLowerCase().includes('passport') || d.description.toLowerCase().includes('passport'));
         if (passportDoc) {
-          replyText = `Found passport document: **${passportDoc.title}** uploaded by ${passportDoc.uploaderName}.\n\n📄 **Details**: ${passportDoc.description}\n📌 **Physical Location**: Master Bedroom Safe #2.`;
-          sources.push('Document Vault Database - doc_2');
+          replyText = `Found passport document: **${passportDoc.title}** uploaded by ${passportDoc.uploaderName}.\n\n📄 **Details**: ${passportDoc.description || 'No description was provided.'}\n\nThe database does not contain a physical storage location.`;
+          sources.push('Document Vault Database');
         } else {
           replyText = `I searched your Document Vault, but no passport document has been uploaded yet.`;
         }
-
       } else if (queryLower.includes('allergic') || queryLower.includes('allergy') || queryLower.includes('grandma allergic')) {
         const allergyKnw = knowledgeList.find(k => k.category === 'Allergies');
         if (allergyKnw) {
@@ -549,29 +947,25 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           replyText = `No registered medical allergies found in Family Knowledge.`;
         }
         sources.push('Family Knowledge Base - Critical Health Record');
-
       } else if (attachments && attachments.length > 0) {
-        const att = attachments[0];
-        replyText = `I analyzed your uploaded document/image **"${att.name}"**.\n\n` +
-          `🔍 **AI Document Recognition**: The document is recognized as a household record. I matched it with authorized information in your **Document Vault**. It is now indexed under your family files.`;
-        sources.push('OCR Document Vault Indexer');
-
+        replyText = `Attached file **"${attachments[0].name}"** received. Analyzing document contents...`;
+        sources.push('Private Family Storage');
       } else {
-        replyText = `I checked your family records for "${text}". Everything is up to date! You currently have ${events.length} upcoming events, ${groceries.filter(g => !g.isPurchased).length} grocery items, and ${medicines.length} scheduled medicines. Is there anything specific you would like me to update or search?`;
-        sources.push('HomeBrain Global Context Engine');
+        replyText = `I searched your family records for "${text}". Try asking about today's schedule, medicines, groceries, bills, documents, or past family milestones.`;
+        sources.push('Family Central Database');
       }
 
       const aiReply: AIMessage = {
         id: `msg_${Date.now()}`,
         sender: 'assistant',
         text: replyText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: new Date().toISOString(),
         groundingSources: sources
       };
 
       setAIMessages(prev => [...prev, aiReply]);
       setIsAITyping(false);
-    }, 800);
+    }, 600);
   };
 
   const clearAIConversation = () => {
@@ -580,7 +974,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         id: `msg_${Date.now()}`,
         sender: 'assistant',
         text: `Conversation cleared. I am ready for your questions!`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        timestamp: new Date().toISOString()
       }
     ]);
   };
@@ -601,6 +995,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         toggleDarkMode,
         familyMembers,
         addFamilyMember,
+        updateFamilyMember,
         removeFamilyMember,
         events,
         addEvent,
@@ -608,13 +1003,17 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         deleteEvent,
         reminders,
         addReminder,
+        updateReminder,
         toggleReminder,
+        deleteReminder,
         documents,
         addDocument,
+        updateDocument,
         deleteDocument,
         groceries,
         groceryHistory,
         addGroceryItem,
+        updateGroceryItem,
         toggleGroceryPurchased,
         deleteGroceryItem,
         medicines,
@@ -626,18 +1025,33 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         expenses,
         bills,
         addExpense,
+        updateExpense,
         deleteExpense,
         addBill,
+        updateBill,
+        deleteBill,
         markBillPaid,
+        markBillUnpaid,
         knowledgeList,
+        knowledgeFiles,
+        addKnowledgeFile,
+        updateKnowledgeFile,
+        deleteKnowledgeFile,
         addKnowledge,
         updateKnowledge,
         deleteKnowledge,
         emergencyContacts,
         emergencyLogs,
         addEmergencyContact,
+        updateEmergencyContact,
         deleteEmergencyContact,
         triggerEmergencyAlert,
+        emergencySession,
+        emergencyNotifications,
+        startEmergencySession,
+        updateEmergencySessionLocation,
+        endEmergencySession,
+        openEmergencyNotification,
         memories,
         addMemory,
         updateMemory,
@@ -645,7 +1059,17 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         aiMessages,
         isAITyping,
         sendAIMessage,
-        clearAIConversation
+        clearAIConversation,
+        isDataLoading,
+        dataError,
+        clearDataError,
+        refreshFamilyData,
+        isAuthenticated,
+        signIn,
+        signUp,
+        signOut: handleSignOut,
+        updatePassword: (currentPassword: string, password: string) =>
+          updatePassword(currentUser.email, currentPassword, password)
       }}
     >
       {children}

@@ -55,6 +55,7 @@ export interface DocumentItem {
   fileType: string; // e.g. "PDF", "PNG", "JPEG"
   fileSize: string; // e.g. "2.4 MB"
   fileUrl: string;
+  storagePath?: string;
   description: string;
   summaryContent?: string;
   uploaderName: string;
@@ -75,6 +76,7 @@ export interface GroceryItem {
 
 export interface GroceryHistoryItem {
   id: string;
+  groceryId?: string;
   name: string;
   category: GroceryCategory;
   purchasedBy: string;
@@ -138,6 +140,17 @@ export interface FamilyKnowledge {
   createdDate: string;
 }
 
+export interface FamilyKnowledgeFile {
+  id: string;
+  name: string;
+  folderPath: string;
+  storagePath: string;
+  mimeType: string;
+  sizeBytes: number;
+  isFolder: boolean;
+  createdAt: string;
+}
+
 export interface EmergencyContact {
   id: string;
   name: string;
@@ -150,8 +163,43 @@ export interface EmergencyAlertLog {
   id: string;
   timestamp: string;
   userLocation: string;
-  status: 'Sent' | 'Delivered' | 'Cancelled';
+  latitude: number;
+  longitude: number;
+  accuracyMeters?: number;
+  userName?: string;
+  status: 'Logged' | 'Sent' | 'Delivered' | 'Cancelled';
   recipients: string[];
+}
+
+export interface EmergencySession {
+  id: string;
+  familyId: string;
+  initiatedBy: string;
+  initiatorName: string;
+  status: 'active' | 'ended';
+  address: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters?: number;
+  lastLocationAt: string;
+  endedAt?: string;
+  createdAt: string;
+}
+
+export interface EmergencyNotification {
+  id: string;
+  familyId: string;
+  sessionId: string;
+  recipientUserId: string;
+  initiatorName: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters?: number;
+  lastLocationAt: string;
+  status: 'active' | 'ended';
+  readAt?: string;
+  createdAt: string;
 }
 
 export interface FamilyMemory {
@@ -163,6 +211,17 @@ export interface FamilyMemory {
   photoUrl: string;
   location?: string;
   addedBy: string;
+  photoUrls?: string[];
+  documentUrls?: string[];
+  taggedMembers?: string[];
+  tags?: string[];
+}
+
+export interface AIAgentAction {
+  type: 'add_grocery' | 'add_event' | 'add_reminder' | 'add_expense' | 'log_medicine' | 'vault_search';
+  title: string;
+  detail: string;
+  status: 'success' | 'pending' | 'failed';
 }
 
 export interface AIMessage {
@@ -170,6 +229,21 @@ export interface AIMessage {
   sender: 'user' | 'assistant';
   text: string;
   timestamp: string;
-  attachments?: { name: string; url: string; type: string }[];
+  attachments?: {
+    name: string;
+    url: string;
+    type: string;
+    base64?: string;
+    mimeType?: string;
+    previewUrl?: string;
+  }[];
   groundingSources?: string[];
+  actionsExecuted?: AIAgentAction[];
+  confidenceScore?: number;
+  latencyMs?: number;
+  cognitiveMetrics?: {
+    tokensUsed?: number;
+    nodesEvaluated?: number;
+    ragPipelines?: string[];
+  };
 }

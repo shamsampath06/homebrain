@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { MedicineItem } from '../../types';
+import { formatIndiaDateTime } from '../../lib/display';
 import { Pill, Plus, CheckCircle, Clock, AlertTriangle, ShieldCheck, History, X, User } from 'lucide-react';
 
 export const MedicineCard: React.FC = () => {
@@ -57,7 +58,7 @@ export const MedicineCard: React.FC = () => {
 };
 
 export const MedicineManagerScreen: React.FC = () => {
-  const { medicines, medicineLogs, logMedicineStatus, navigateToSubScreen, setActiveSubScreen } = useHomeBrain();
+  const { medicines, medicineLogs, logMedicineStatus, navigateToSubScreen, setActiveSubScreen, deleteMedicine } = useHomeBrain();
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -136,6 +137,20 @@ export const MedicineManagerScreen: React.FC = () => {
               >
                 Mark Missed
               </button>
+              <button
+                onClick={() => navigateToSubScreen('edit-medicine', med.id)}
+                className="text-xs text-brand-600 hover:underline"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm(`Delete ${med.name}?`)) deleteMedicine(med.id);
+                }}
+                className="text-xs text-rose-500 hover:underline"
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
@@ -145,19 +160,25 @@ export const MedicineManagerScreen: React.FC = () => {
 };
 
 export const AddMedicineModal: React.FC = () => {
-  const { addMedicine, setActiveSubScreen, familyMembers } = useHomeBrain();
-  const [name, setName] = useState('');
-  const [dosage, setDosage] = useState('1 Tablet');
-  const [timing, setTiming] = useState('8:00 PM');
-  const [frequency, setFrequency] = useState<any>('Daily');
-  const [personName, setPersonName] = useState(familyMembers[2]?.name || 'Grandma Savitri');
-  const [notes, setNotes] = useState('');
+  const { addMedicine, updateMedicine, deleteMedicine, medicines, selectedItemId, activeSubScreen, setActiveSubScreen, familyMembers, currentUser } = useHomeBrain();
+  const existing = medicines.find(medicine => medicine.id === selectedItemId);
+  const editing = activeSubScreen === 'edit-medicine' && Boolean(existing);
+  const assignees = [
+    { id: currentUser.id, name: currentUser.name, relation: 'Me' },
+    ...familyMembers.filter(member => member.name !== currentUser.name)
+  ];
+  const [name, setName] = useState(existing?.name || '');
+  const [dosage, setDosage] = useState(existing?.dosage || '1 Tablet');
+  const [timing, setTiming] = useState(existing?.timing || '8:00 PM');
+  const [frequency, setFrequency] = useState<'Daily' | 'Twice Daily' | 'Weekly' | 'As Needed'>(existing?.frequency || 'Daily');
+  const [personName, setPersonName] = useState(existing?.personName || currentUser.name);
+  const [notes, setNotes] = useState(existing?.notes || '');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    addMedicine({
+    const payload = {
       name,
       dosage,
       timing,
@@ -165,7 +186,9 @@ export const AddMedicineModal: React.FC = () => {
       personName,
       startDate: new Date().toISOString().split('T')[0],
       notes
-    });
+    };
+    if (editing && existing) updateMedicine(existing.id, payload);
+    else addMedicine({ ...payload, startDate: new Date().toISOString().split('T')[0] });
 
     setActiveSubScreen('medicine');
   };
@@ -173,7 +196,7 @@ export const AddMedicineModal: React.FC = () => {
   return (
     <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
       <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Add Medicine Schedule</h2>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Medicine Schedule' : 'Add Medicine Schedule'}</h2>
         <button onClick={() => setActiveSubScreen('medicine')} className="text-slate-400 hover:text-slate-600">
           <X className="w-5 h-5" />
         </button>
@@ -183,11 +206,12 @@ export const AddMedicineModal: React.FC = () => {
         <div>
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Person Taking Medicine</label>
           <select
+            required
             value={personName}
             onChange={e => setPersonName(e.target.value)}
             className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm font-semibold"
           >
-            {familyMembers.map(m => (
+            {assignees.map(m => (
               <option key={m.id} value={m.name}>
                 {m.name} ({m.relation})
               </option>
@@ -236,7 +260,7 @@ export const AddMedicineModal: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Frequency</label>
             <select
               value={frequency}
-              onChange={e => setFrequency(e.target.value)}
+              onChange={e => setFrequency(e.target.value as any)}
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
             >
               <option value="Daily">Daily</option>
@@ -270,7 +294,7 @@ export const AddMedicineModal: React.FC = () => {
             type="submit"
             className="px-5 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold shadow-md"
           >
-            Save Schedule
+            {editing ? 'Save Changes' : 'Save Schedule'}
           </button>
         </div>
       </form>
@@ -317,7 +341,7 @@ export const MedicineHistoryScreen: React.FC = () => {
                 >
                   {log.status}
                 </span>
-                <p className="text-[10px] text-slate-400 mt-1">{log.timestamp}</p>
+                <p className="text-[10px] text-slate-400 mt-1">{formatIndiaDateTime(log.timestamp)}</p>
               </div>
             </div>
           ))

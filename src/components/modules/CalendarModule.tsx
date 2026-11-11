@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
-import { FamilyEvent } from '../../types';
+import { FamilyEvent, EventCategory } from '../../types';
 import { Calendar as CalendarIcon, Plus, ChevronLeft, ChevronRight, Clock, User, X, Check } from 'lucide-react';
 
 export const CalendarCard: React.FC = () => {
@@ -114,7 +114,24 @@ export const CalendarScreen: React.FC = () => {
       </div>
 
       {/* Event Grid & Details */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {filteredEvents.length === 0 ? (
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-12 text-center border border-slate-200/80 dark:border-slate-700/80 shadow-card">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 mx-auto flex items-center justify-center mb-4">
+            <CalendarIcon className="w-8 h-8" />
+          </div>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">No Events Found</h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">
+            There are no family events scheduled in this category. Keep your family synced by adding birthdays, appointments, and milestones.
+          </p>
+          <button
+            onClick={() => navigateToSubScreen('add-event')}
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm inline-flex items-center gap-2 shadow-md"
+          >
+            <Plus className="w-4 h-4" /> Add Event
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredEvents.map(evt => (
           <div
             key={evt.id}
@@ -143,33 +160,38 @@ export const CalendarScreen: React.FC = () => {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 };
 
 export const AddEventModal: React.FC = () => {
-  const { addEvent, setActiveSubScreen, familyMembers } = useHomeBrain();
-  const [title, setTitle] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [time, setTime] = useState('18:00');
-  const [category, setCategory] = useState<any>('Appointment');
-  const [description, setDescription] = useState('');
-  const [recurring, setRecurring] = useState<any>('None');
+  const { addEvent, updateEvent, deleteEvent, events, selectedItemId, activeSubScreen, setActiveSubScreen, familyMembers, currentUser } = useHomeBrain();
+  const existing = events.find(event => event.id === selectedItemId);
+  const editing = activeSubScreen === 'edit-event' && Boolean(existing);
+  const [title, setTitle] = useState(existing?.title || '');
+  const [date, setDate] = useState(existing?.date || new Date().toISOString().split('T')[0]);
+  const [time, setTime] = useState(existing?.time || '18:00');
+  const [category, setCategory] = useState<EventCategory>(existing?.category || 'Appointment');
+  const [description, setDescription] = useState(existing?.description || '');
+  const [recurring, setRecurring] = useState<'None' | 'Daily' | 'Weekly' | 'Monthly' | 'Yearly'>(existing?.recurring || 'None');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
-    addEvent({
+    const payload = {
       title,
       date,
       time,
       category,
       description,
-      membersInvolved: familyMembers.map(m => m.name),
+      membersInvolved: [currentUser.name, ...familyMembers.filter(member => member.name !== currentUser.name).map(member => member.name)],
       reminder: true,
       recurring
-    });
+    };
+    if (editing && existing) updateEvent(existing.id, payload);
+    else addEvent(payload);
 
     setActiveSubScreen('calendar');
   };
@@ -177,7 +199,7 @@ export const AddEventModal: React.FC = () => {
   return (
     <div className="max-w-xl mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
       <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Add New Family Event</h2>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Family Event' : 'Add New Family Event'}</h2>
         <button onClick={() => setActiveSubScreen('calendar')} className="text-slate-400 hover:text-slate-600">
           <X className="w-5 h-5" />
         </button>
@@ -224,7 +246,7 @@ export const AddEventModal: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
             <select
               value={category}
-              onChange={e => setCategory(e.target.value)}
+              onChange={e => setCategory(e.target.value as EventCategory)}
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
             >
               <option value="Birthday">Birthday 🎂</option>
@@ -240,7 +262,7 @@ export const AddEventModal: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Recurrence</label>
             <select
               value={recurring}
-              onChange={e => setRecurring(e.target.value)}
+              onChange={e => setRecurring(e.target.value as any)}
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
             >
               <option value="None">Does not repeat</option>
@@ -266,6 +288,20 @@ export const AddEventModal: React.FC = () => {
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
           <button
             type="button"
+            onClick={() => {
+              if (window.confirm('Delete this event?')) {
+                if (editing && existing) {
+                  deleteEvent(existing.id);
+                }
+                setActiveSubScreen('calendar');
+              }
+            }}
+            className="text-xs text-rose-600 hover:underline"
+          >
+            {editing ? 'Delete Event' : ''}
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveSubScreen('calendar')}
             className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100"
           >
@@ -275,7 +311,7 @@ export const AddEventModal: React.FC = () => {
             type="submit"
             className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md"
           >
-            Save Event
+            {editing ? 'Save Changes' : 'Save Event'}
           </button>
         </div>
       </form>
@@ -327,18 +363,20 @@ export const EventDetailsModal: React.FC = () => {
       <div className="flex items-center justify-between pt-6 mt-6 border-t border-slate-100 dark:border-slate-700">
         <button
           onClick={() => {
-            deleteEvent(evt.id);
-            setActiveSubScreen('calendar');
+            if (window.confirm('Delete this event?')) {
+              deleteEvent(evt.id);
+              setActiveSubScreen('calendar');
+            }
           }}
           className="text-xs font-semibold text-rose-600 hover:underline"
         >
           Delete Event
         </button>
         <button
-          onClick={() => setActiveSubScreen('calendar')}
+          onClick={() => setActiveSubScreen('edit-event')}
           className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold"
         >
-          Done
+          Edit Event
         </button>
       </div>
     </div>
