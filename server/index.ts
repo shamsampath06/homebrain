@@ -21,6 +21,30 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+function cleanEventTime(time?: string): string {
+  if (!time) return '';
+  const parts = String(time).split(':');
+  if (parts.length >= 2) {
+    const hours = parseInt(parts[0], 10);
+    const mins = parts[1];
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 || 12;
+    return `${h12}:${mins} ${ampm}`;
+  }
+  return time;
+}
+
+function cleanEventDate(dateStr?: string): string {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+  } catch {}
+  return dateStr;
+}
+
 // --- Authentication & Family Authorization Middleware ---
 export interface AuthenticatedUser {
   id: string;
@@ -642,8 +666,52 @@ ${familyContext}`;
       } else {
         // Smart Deterministic Database Q&A Resolver when no external LLM key is configured
         const qL = (query || '').toLowerCase().trim();
+        const todayDateStr = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowDateStr = tomorrow.toISOString().split('T')[0];
 
-        if (qL.includes('bill') || qL.includes('pending bill') || qL.includes('due')) {
+        // 1. TODAY'S SCHEDULE / ONLY TODAY
+        const isTodayQuery = (
+          qL.includes('today') ||
+          qL.includes('only today') ||
+          qL === 'only give today' ||
+          qL === 'give today' ||
+          qL.includes('for today') ||
+          qL.includes('happening today') ||
+          qL === 'today schedule' ||
+          qL === 'what is today schedule?' ||
+          qL === 'what is today schedule'
+        );
+
+        if (isTodayQuery) {
+          const todayEvents = events.filter((e: any) => e.date === todayDateStr);
+          const todayReminders = reminders.filter((r: any) => !r.completed && (r.date_time?.startsWith(todayDateStr) || !r.date_time));
+
+          if (todayEvents.length > 0) {
+            reply = `📅 **Today's Family Schedule (${cleanEventDate(todayDateStr)})**:\n\n` +
+              todayEvents.map((e: any) => `• **${e.date} at ${cleanEventTime(e.time)}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
+            if (todayReminders.length > 0) {
+              reply += `\n\n📝 **Pending Reminders for Today**:\n` +
+                todayReminders.map((r: any) => `• **${r.title.replace('[DEMO] ', '')}** (${r.priority} Priority, Assigned: ${r.assigned_member_name || 'Family'})`).join('\n');
+            }
+          } else {
+            const futureEvents = events.filter((e: any) => e.date > todayDateStr).sort((a: any, b: any) => a.date.localeCompare(b.date));
+            const nextEv = futureEvents[0];
+            reply = `📅 **Today's Family Schedule (${cleanEventDate(todayDateStr)})**:\n\n` +
+              `There are **no calendar events scheduled for today**.\n\n` +
+              (todayReminders.length > 0 ? `📝 **Today's Reminders**:\n${todayReminders.map((r: any) => `• **${r.title.replace('[DEMO] ', '')}**`).join('\n')}\n\n` : '') +
+              (nextEv ? `*(Your next upcoming event is **${nextEv.title.replace('[DEMO] ', '')}** on ${cleanEventDate(nextEv.date)} at ${cleanEventTime(nextEv.time)}).*` : '');
+          }
+        } else if (qL.includes('tomorrow')) {
+          const tomorrowEvents = events.filter((e: any) => e.date === tomorrowDateStr);
+          if (tomorrowEvents.length > 0) {
+            reply = `📅 **Tomorrow's Schedule (${cleanEventDate(tomorrowDateStr)})**:\n\n` +
+              tomorrowEvents.map((e: any) => `• **${e.date} at ${cleanEventTime(e.time)}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
+          } else {
+            reply = `📅 **Tomorrow's Schedule (${cleanEventDate(tomorrowDateStr)})**:\n\nNo calendar events scheduled for tomorrow.`;
+          }
+        } else if (qL.includes('bill') || qL.includes('pending bill') || qL.includes('due') || qL.includes('pay')) {
           const pendingBills = bills.filter((b: any) => !b.is_paid);
           const totalPending = pendingBills.reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0);
           if (pendingBills.length > 0) {
@@ -705,12 +773,14 @@ ${familyContext}`;
           } else {
             reply = `No documents stored in the Document Vault yet.`;
           }
-        } else if (qL.includes('event') || qL.includes('schedule') || qL.includes('calendar') || qL.includes('happening')) {
-          if (events.length > 0) {
-            reply = `📅 **Upcoming Family Events (${events.length} scheduled)**:\n\n` +
-              events.slice(0, 8).map((e: any) => `• **${e.date} at ${e.time}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
+        } else if (qL.includes('event') || qL.includes('schedule') || qL.includes('calendar') || qL.includes('happening') || qL.includes('upcoming') || qL.includes('plans')) {
+          const upcomingEvents = events.filter((e: any) => e.date >= todayDateStr).sort((a: any, b: any) => a.date.localeCompare(b.date));
+          const listToShow = upcomingEvents.length > 0 ? upcomingEvents : events;
+          if (listToShow.length > 0) {
+            reply = `📅 **Upcoming Family Events (${listToShow.length} scheduled)**:\n\n` +
+              listToShow.slice(0, 8).map((e: any) => `• **${e.date} at ${cleanEventTime(e.time)}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
           } else {
-            reply = `No events scheduled in the calendar.`;
+            reply = `No upcoming events scheduled in the calendar.`;
           }
         } else {
           // Comprehensive Live Household State Digest

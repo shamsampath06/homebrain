@@ -981,16 +981,56 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const sources: string[] = [];
       const queryLower = text.toLowerCase();
 
-      if (queryLower.includes('happening today') || queryLower.includes("today's schedule") || queryLower.includes('events today')) {
-        const todayEvts = events.filter(e => e.date === new Date().toISOString().split('T')[0]);
-        const todayRems = reminders.filter(r => !r.completed);
-        replyText = `📅 **Today's Family Schedule & Reminders**:\n\n` +
-          `• **Today's Events**: ${todayEvts.length ? todayEvts.map(e => `${e.title.replace('[DEMO] ', '')} at ${e.time}`).join(', ') : 'No scheduled events on calendar for today.'}\n` +
-          `• **Important Reminders**: ${todayRems.map(r => r.title.replace('[DEMO] ', '')).join(', ') || 'No pending reminders for today.'}`;
+      const todayDateStr = new Date().toISOString().split('T')[0];
+      const isToday = (
+        queryLower.includes('today') ||
+        queryLower.includes('only today') ||
+        queryLower === 'only give today' ||
+        queryLower === 'give today' ||
+        queryLower.includes('for today') ||
+        queryLower.includes('happening today') ||
+        queryLower === 'today schedule' ||
+        queryLower === 'what is today schedule?' ||
+        queryLower === 'what is today schedule'
+      );
+
+      if (isToday) {
+        const todayEvts = events.filter(e => e.date === todayDateStr);
+        const todayRems = reminders.filter(r => !r.completed && (r.dateTime?.startsWith(todayDateStr) || !r.dateTime));
+
+        if (todayEvts.length > 0) {
+          replyText = `📅 **Today's Family Schedule (${todayDateStr})**:\n\n` +
+            todayEvts.map(e => `• **${e.date} at ${e.time}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.membersInvolved) ? e.membersInvolved : []).join(', ')}`).join('\n');
+          if (todayRems.length > 0) {
+            replyText += `\n\n📝 **Pending Reminders for Today**:\n` +
+              todayRems.map(r => `• **${r.title.replace('[DEMO] ', '')}** (${r.priority} Priority, Assigned: ${r.assignedMemberName || 'Family'})`).join('\n');
+          }
+        } else {
+          const futureEvents = events.filter(e => e.date > todayDateStr).sort((a, b) => a.date.localeCompare(b.date));
+          const nextEv = futureEvents[0];
+          replyText = `📅 **Today's Family Schedule (${todayDateStr})**:\n\n` +
+            `There are **no calendar events scheduled for today**.\n\n` +
+            (todayRems.length > 0 ? `📝 **Today's Reminders**:\n${todayRems.map(r => `• **${r.title.replace('[DEMO] ', '')}**`).join('\n')}\n\n` : '') +
+            (nextEv ? `*(Your next upcoming event is **${nextEv.title.replace('[DEMO] ', '')}** on ${nextEv.date} at ${nextEv.time}).*` : '');
+        }
         sources.push('Calendar Events Table', 'Important Reminders Table');
+      } else if (queryLower.includes('tomorrow')) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowDateStr = tomorrow.toISOString().split('T')[0];
+        const tomorrowEvts = events.filter(e => e.date === tomorrowDateStr);
+        if (tomorrowEvts.length > 0) {
+          replyText = `📅 **Tomorrow's Schedule (${tomorrowDateStr})**:\n\n` +
+            tomorrowEvts.map(e => `• **${e.date} at ${e.time}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.membersInvolved) ? e.membersInvolved : []).join(', ')}`).join('\n');
+        } else {
+          replyText = `📅 **Tomorrow's Schedule (${tomorrowDateStr})**:\n\nNo calendar events scheduled for tomorrow.`;
+        }
+        sources.push('Calendar Events Table');
       } else if (queryLower.includes('event') || queryLower.includes('calendar') || queryLower.includes('schedule') || queryLower.includes('upcoming') || queryLower.includes('plans')) {
-        replyText = `📅 **Upcoming Family Events (${events.length} scheduled)**:\n\n` +
-          events.slice(0, 8).map(e => `• **${e.date} at ${e.time}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.membersInvolved) ? e.membersInvolved : []).join(', ')}`).join('\n');
+        const upcomingEvents = events.filter(e => e.date >= todayDateStr).sort((a, b) => a.date.localeCompare(b.date));
+        const listToShow = upcomingEvents.length > 0 ? upcomingEvents : events;
+        replyText = `📅 **Upcoming Family Events (${listToShow.length} scheduled)**:\n\n` +
+          listToShow.slice(0, 8).map(e => `• **${e.date} at ${e.time}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.membersInvolved) ? e.membersInvolved : []).join(', ')}`).join('\n');
         sources.push('Calendar Events Table');
       } else if (queryLower.includes('medicine') && (queryLower.includes('due') || queryLower.includes('today') || queryLower.includes('prescription'))) {
         replyText = `💊 **Registered Family Medication Regimens (${medicines.length} active)**:\n\n` +
