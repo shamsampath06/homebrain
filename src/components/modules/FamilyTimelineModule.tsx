@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { FamilyMemory } from '../../types';
-import { createPrivateFileUrl, isSupabaseConfigured, uploadPrivateFile } from '../../lib/supabase';
+import { createPrivateFileUrl, isSupabaseConfigured, uploadPrivateFile, buildStoragePath } from '../../lib/supabase';
+import { PageHeader } from '../layout/PageHeader';
 import {
   Clock,
   Plus,
@@ -80,23 +81,18 @@ export const FamilyTimelineScreen: React.FC = () => {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            🕒 Family Memories Timeline
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            A visual chronological record of birthdays, vacations, milestones, and photo stories
-          </p>
-        </div>
-
-        <button
-          onClick={() => navigateToSubScreen('add-memory')}
-          className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm flex items-center gap-2 shadow-md shadow-brand-600/20"
-        >
-          <Plus className="w-4 h-4" /> Add Family Memory
-        </button>
-      </div>
+      <PageHeader
+        title="Family Memories Timeline"
+        subtitle="A visual chronological record of birthdays, vacations, milestones, and photo stories"
+        actions={
+          <button
+            onClick={() => navigateToSubScreen('add-memory')}
+            className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 shadow-md shadow-brand-600/20"
+          >
+            <Plus className="w-4 h-4" /> Add Family Memory
+          </button>
+        }
+      />
 
       {/* Search and Tags Filter Bar */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -391,7 +387,7 @@ export const AddMemoryModal: React.FC = () => {
         if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
           continue;
         }
-        const path = `${currentUser.familyId}/timeline/${crypto.randomUUID()}-${file.name}`;
+        const path = buildStoragePath(currentUser.familyId, 'timeline', file.name);
         await uploadPrivateFile('documents', path, file);
         uploadedPaths.push(path);
       }
@@ -411,8 +407,11 @@ export const AddMemoryModal: React.FC = () => {
         tags
       };
 
-      if (editing && existing) updateMemory(existing.id, value);
-      else addMemory(value as any);
+      if (editing && existing) {
+        await updateMemory(existing.id, value);
+      } else {
+        await addMemory(value as any);
+      }
 
       setActiveSubScreen('none');
     } catch (uploadError) {
@@ -423,17 +422,15 @@ export const AddMemoryModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-          {editing ? 'Edit Family Memory' : 'Add Family Memory'}
-        </h2>
-        <button onClick={() => setActiveSubScreen('none')} className="text-slate-400 hover:text-slate-600">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader
+        title={editing ? 'Edit Family Memory' : 'Add Family Memory'}
+        subtitle="Chronicle vacations, celebrations, and milestones with photo stories"
+        showBack={true}
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-700">
+        <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Memory Title</label>
           <input
@@ -630,6 +627,7 @@ export const AddMemoryModal: React.FC = () => {
           </button>
         </div>
       </form>
+      </div>
     </div>
   );
 };
@@ -669,8 +667,15 @@ export const MemoryDetailsModal: React.FC = () => {
   const currentPhoto = imageUrls[activePhotoIdx] || '';
 
   return (
-    <div className="max-w-2xl mx-auto bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-700">
-      <div className="relative h-80 bg-black flex items-center justify-center">
+    <div className="max-w-2xl mx-auto space-y-4">
+      <PageHeader
+        title={mem.title}
+        subtitle={`Family Memory • ${mem.date} (${mem.year})`}
+        showBack={true}
+      />
+
+      <div className="bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-700">
+        <div className="relative h-80 bg-black flex items-center justify-center">
         {currentPhoto ? (
           <img src={currentPhoto} alt={mem.title} className="w-full h-full object-cover" />
         ) : (
@@ -771,6 +776,7 @@ export const MemoryDetailsModal: React.FC = () => {
         >
           Edit Memory
         </button>
+      </div>
       </div>
     </div>
   );

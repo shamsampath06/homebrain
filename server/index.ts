@@ -195,6 +195,26 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Helper: Stream-based text extractor for standard text PDFs without requiring external cloud API keys
+const extractPdfTextFallback = (buffer: Buffer): string => {
+  const binary = buffer.toString('latin1');
+  const chunks: string[] = [];
+  const tjRegex = /\(([^)]+)\)\s*(?:Tj|'|")/g;
+  let m: RegExpExecArray | null;
+  while ((m = tjRegex.exec(binary)) !== null) {
+    if (m[1].length > 1) chunks.push(m[1]);
+  }
+  const tjArray = /\[([^\]]+)\]\s*TJ/g;
+  while ((m = tjArray.exec(binary)) !== null) {
+    const inner = m[1];
+    const parenMatches = inner.match(/\(([^)]+)\)/g);
+    if (parenMatches) {
+      chunks.push(parenMatches.map(p => p.slice(1, -1)).join(' '));
+    }
+  }
+  return chunks.join(' ').replace(/\\([()\\])/g, '$1').replace(/\s+/g, ' ').trim();
+};
+
 // --- Document Text Extraction & Summarization Endpoint (Phase 2 & Multimodal) ---
 app.post('/api/documents/extract', authenticateUser, async (req: Request, res: Response): Promise<void> => {
   try {
@@ -213,8 +233,38 @@ app.post('/api/documents/extract', authenticateUser, async (req: Request, res: R
       extractedText = docxResult.value;
     } else if (mimeType.startsWith('text/') || (fileName && fileName.endsWith('.txt'))) {
       extractedText = buffer.toString('utf-8');
-    } else if (mimeType === 'application/pdf' || mimeType.startsWith('image/')) {
-      // Use Gemini Vision / Multimodal for PDF and Image text extraction / OCR
+    } else if (mimeType === 'application/pdf') {
+      // First attempt native PDF stream extraction
+      const nativePdfText = extractPdfTextFallback(buffer);
+      if (nativePdfText.length > 20) {
+        extractedText = nativePdfText;
+      } else if (GEMINI_API_KEY) {
+        // Fall back to Gemini Vision OCR for scanned or rasterized PDFs
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: mimeType,
+                    data: fileBase64
+                  }
+                },
+                {
+                  text: 'Extract all legible text from this document verbatim. Provide a concise 2-sentence summary.'
+                }
+              ]
+            }
+          ]
+        });
+        extractedText = response.text || '';
+      } else {
+        extractedText = nativePdfText || `[Scanned PDF: text extraction requires GEMINI_API_KEY for vision OCR]`;
+      }
+    } else if (mimeType.startsWith('image/')) {
       if (GEMINI_API_KEY) {
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         const response = await ai.models.generateContent({
@@ -230,7 +280,7 @@ app.post('/api/documents/extract', authenticateUser, async (req: Request, res: R
                   }
                 },
                 {
-                  text: 'Extract all legible text from this document/image verbatim. Then provide a concise 2-sentence summary of what this document is.'
+                  text: 'Extract all legible text from this image verbatim. Provide a concise summary.'
                 }
               ]
             }
@@ -238,7 +288,7 @@ app.post('/api/documents/extract', authenticateUser, async (req: Request, res: R
         });
         extractedText = response.text || '';
       } else {
-        extractedText = `[OCR/Vision pending: GEMINI_API_KEY required for automated PDF/image text extraction on backend]`;
+        extractedText = `[Image Document: Optical Character Recognition requires GEMINI_API_KEY configured in .env.local]`;
       }
     } else {
       res.status(400).json({ error: `Unsupported MIME type: ${mimeType}` });
@@ -439,7 +489,6 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
           quantity: '1 unit',
           notes: `Autonomously logged by HomeBrain AI for ${user.name}`,
           is_purchased: false,
-          added_by: user.name,
           family_id: user.familyId
         };
         const saved = await insertFamilyData('groceries', payload, token);
@@ -494,7 +543,7 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
         category: 'Other',
         date: new Date().toISOString().split('T')[0],
         payer: user.name,
-        payment_method: 'UPI',
+        description: `Logged autonomously by HomeBrain AI for ${user.name}`,
         family_id: user.familyId
       };
       const saved = await insertFamilyData('expenses', payload, token);
@@ -517,7 +566,7 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
         title,
         date: todayStr,
         time: '19:00',
-        category: 'Family',
+        category: 'General',
         recurring: 'None',
         members_involved: [user.name],
         family_id: user.familyId
@@ -591,18 +640,91 @@ ${familyContext}`;
       if (ollamaReply) {
         reply = ollamaReply;
       } else {
-        // Smart Database RAG Fallback when no external API key is configured yet
-        reply = `🧠 **HomeBrain Autonomous AI Cognitive RAG Response**:\n\n` +
-          `I have successfully retrieved, cross-referenced, and synthesized your family's live database records across ${groundingSources.length} relational tables.\n\n` +
-          `**Live Family Cognitive State Summary**:\n` +
-          `• **Today's Events**: ${events.length} scheduled\n` +
-          `• **Medicines**: ${medicines.length} registered prescriptions\n` +
-          `• **Pending Groceries**: ${groceries.filter((g: any) => !g.is_purchased).length} items to buy\n` +
-          `• **Unpaid Bills**: ${bills.filter((b: any) => !b.is_paid).length} pending\n` +
-          `• **Knowledge & Allergies**: ${knowledgeList.length} items logged\n` +
-          `• **Vault Documents**: ${documents.length} files securely indexed\n` +
-          `• **Memories in Timeline**: ${memories.length} milestone moments\n\n` +
-          `*(Powered by HomeBrain Local RAG Engine. To switch to generative Gemini 2.5 synthesis, set \`GEMINI_API_KEY\` in your \`.env.local\` file.)*`;
+        // Smart Deterministic Database Q&A Resolver when no external LLM key is configured
+        const qL = (query || '').toLowerCase().trim();
+
+        if (qL.includes('bill') || qL.includes('pending bill') || qL.includes('due')) {
+          const pendingBills = bills.filter((b: any) => !b.is_paid);
+          const totalPending = pendingBills.reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0);
+          if (pendingBills.length > 0) {
+            reply = `💳 **Pending Household Bills (${pendingBills.length} found, Total: ₹${totalPending.toLocaleString('en-IN')})**:\n\n` +
+              pendingBills.map((b: any) => `• **${b.title}**: ₹${Number(b.amount).toLocaleString('en-IN')} (Due: ${b.due_date}, Recurring: ${b.recurring})`).join('\n') +
+              `\n\n*(You can view or pay them in Household Finances.)*`;
+          } else {
+            reply = `✅ All registered household bills are currently paid! (Total registered bills: ${bills.length}).`;
+          }
+        } else if (qL.includes('birthday') || qL.includes('born')) {
+          const bdayEvents = events.filter((e: any) => e.category === 'Birthday' || (e.title && e.title.toLowerCase().includes('birthday')));
+          if (bdayEvents.length > 0) {
+            reply = `🎂 **Family Birthday Records (${bdayEvents.length} found)**:\n\n` +
+              bdayEvents.map((e: any) => `• **${e.title.replace('[DEMO] ', '')}**: ${e.date}`).join('\n');
+          } else {
+            reply = `No birthday events found in your calendar. You can add birthdays in the Calendar module.`;
+          }
+        } else if (qL.includes('appointment') || qL.includes('doctor') || qL.includes('checkup')) {
+          const appts = events.filter((e: any) => e.category === 'Appointment' || (e.title && (e.title.toLowerCase().includes('appointment') || e.title.toLowerCase().includes('doctor') || e.title.toLowerCase().includes('clinic') || e.title.toLowerCase().includes('checkup'))));
+          if (appts.length > 0) {
+            reply = `🩺 **Upcoming Family Appointments (${appts.length} scheduled)**:\n\n` +
+              appts.map((a: any) => `• **${a.title.replace('[DEMO] ', '')}** on ${a.date} at ${a.time} - ${a.description || ''}`).join('\n');
+          } else {
+            reply = `No upcoming doctor or medical appointments found in the family schedule.`;
+          }
+        } else if (qL.includes('spend') || qL.includes('spent') || qL.includes('expense') || qL.includes('burn rate')) {
+          const totalExpenses = expenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+          const topExpenses = expenses.slice(0, 5);
+          reply = `📊 **Family Expenditure Summary (Total: ₹${totalExpenses.toLocaleString('en-IN')})**:\n\n` +
+            `• **Total logged transactions**: ${expenses.length}\n` +
+            topExpenses.map((x: any) => `• ₹${Number(x.amount).toLocaleString('en-IN')} for "${x.title.replace('[DEMO] ', '')}" (${x.category}) on ${x.date} by ${x.payer}`).join('\n');
+        } else if (qL.includes('medicine') || qL.includes('medication') || qL.includes('dose') || qL.includes('prescription')) {
+          if (medicines.length > 0) {
+            reply = `💊 **Registered Family Medication Regimens (${medicines.length} prescriptions)**:\n\n` +
+              medicines.map((m: any) => `• **For ${m.person_name}**: ${m.name.replace('[DEMO] ', '')} (${m.dosage}) at ${m.timing} [Frequency: ${m.frequency}] - ${m.notes || 'No special notes'}`).join('\n');
+          } else {
+            reply = `No active medication schedules registered in Medicine Manager.`;
+          }
+        } else if (qL.includes('grocery') || qL.includes('groceries') || qL.includes('shopping') || qL.includes('pantry') || qL.includes('milk')) {
+          const pending = groceries.filter((g: any) => !g.is_purchased);
+          if (pending.length > 0) {
+            reply = `🛒 **Smart Grocery List (${pending.length} items to buy)**:\n\n` +
+              pending.map((g: any) => `• **${g.name.replace('[DEMO] ', '')}** (${g.quantity}) - Category: ${g.category}`).join('\n');
+          } else {
+            reply = `✅ The grocery list is currently clear! All items have been purchased.`;
+          }
+        } else if (qL.includes('allerg') || qL.includes('warning') || qL.includes('dietary') || qL.includes('blood')) {
+          const healthRecords = knowledgeList.filter((k: any) => k.category === 'Allergies' || k.category === 'Emergency' || k.category === 'Dietary' || k.importance === 'Critical');
+          if (healthRecords.length > 0) {
+            reply = `⚠️ **Critical Family Health & Allergy Records (${healthRecords.length} records)**:\n\n` +
+              healthRecords.map((k: any) => `• **[${k.importance}] ${k.title.replace('[DEMO] ', '')}** (For: ${k.related_member_name}): ${k.content}`).join('\n');
+          } else {
+            reply = `No critical allergy or health warnings found in the Family Knowledge Base.`;
+          }
+        } else if (qL.includes('document') || qL.includes('passport') || qL.includes('insurance') || qL.includes('vault')) {
+          if (documents.length > 0) {
+            reply = `📁 **Document Vault Records (${documents.length} files securely stored)**:\n\n` +
+              documents.map((d: any) => `• **${d.title.replace('[DEMO] ', '')}** (${d.category}, ${d.file_type}) - Uploaded by ${d.uploader_name}. ${d.description || ''}`).join('\n');
+          } else {
+            reply = `No documents stored in the Document Vault yet.`;
+          }
+        } else if (qL.includes('event') || qL.includes('schedule') || qL.includes('calendar') || qL.includes('happening')) {
+          if (events.length > 0) {
+            reply = `📅 **Upcoming Family Events (${events.length} scheduled)**:\n\n` +
+              events.slice(0, 8).map((e: any) => `• **${e.date} at ${e.time}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
+          } else {
+            reply = `No events scheduled in the calendar.`;
+          }
+        } else {
+          // Comprehensive Live Household State Digest
+          reply = `🧠 **HomeBrain Autonomous Cognitive Assistant Summary**:\n\n` +
+            `I have cross-examined live records across your family database (${groundingSources.length} tables consulted):\n\n` +
+            `• **Today's Events**: ${events.length} scheduled\n` +
+            `• **Prescriptions**: ${medicines.length} active\n` +
+            `• **Pending Groceries**: ${groceries.filter((g: any) => !g.is_purchased).length} items\n` +
+            `• **Unpaid Bills**: ${bills.filter((b: any) => !b.is_paid).length} pending\n` +
+            `• **Critical Knowledge**: ${knowledgeList.length} items logged\n` +
+            `• **Vault Documents**: ${documents.length} files securely indexed\n` +
+            `• **Family Memories**: ${memories.length} milestone moments\n\n` +
+            `*Ask specific questions like "What bills are pending?", "When is Father's birthday?", "Show mother's appointments", or "Add milk to groceries".*`;
+        }
       }
     }
 
@@ -673,6 +795,134 @@ app.post('/api/timeline/search', authenticateUser, async (req: Request, res: Res
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Timeline search failed.' });
+  }
+});
+
+// --- Emergency SOS Email Alert Endpoint (Phase 5) ---
+app.post('/api/emergency/alert', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  const { address, latitude, longitude, accuracyMeters, mapUrl, testRecipient } = req.body;
+  const user = req.user!;
+  const token = req.authToken!;
+
+  if (!latitude || !longitude || !address) {
+    res.status(400).json({ error: 'address, latitude, and longitude are required.' });
+    return;
+  }
+
+  try {
+    // 1. Gather family verified contact emails
+    const [profiles, contacts] = await Promise.all([
+      fetchFamilyData('profiles', user.familyId, token),
+      fetchFamilyData('emergency_contacts', user.familyId, token)
+    ]);
+
+    const recipientEmails = new Set<string>();
+    profiles.forEach((p: any) => {
+      if (p.email && p.email.includes('@') && p.email !== user.email && !p.email.endsWith('.test')) {
+        recipientEmails.add(p.email);
+      }
+    });
+    contacts.forEach((c: any) => {
+      if (c.email && c.email.includes('@') && !c.email.endsWith('.test')) {
+        recipientEmails.add(c.email);
+      }
+    });
+
+    if (testRecipient && testRecipient.includes('@')) {
+      recipientEmails.clear();
+      recipientEmails.add(testRecipient);
+    }
+
+    const emailList = Array.from(recipientEmails);
+    const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    const timestampStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    let emailSent = false;
+    let providerStatus = 'not_configured';
+    const deliveryResults: Array<{ recipient: string; status: 'sent' | 'failed' | 'simulated'; error?: string }> = [];
+
+    const RESEND_KEY = process.env.RESEND_API_KEY || '';
+
+    if (RESEND_KEY && emailList.length > 0) {
+      providerStatus = 'resend';
+      const emailHtml = `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 3px solid #e11d48; border-radius: 16px; background-color: #fff1f2;">
+          <h1 style="color: #9f1239; margin-top: 0;">🚨 EMERGENCY SOS ALERT - HOMEBRAIN</h1>
+          <p style="font-size: 16px; color: #1e293b;"><strong>${user.name}</strong> has triggered an urgent emergency alert requesting immediate assistance.</p>
+          <div style="background: #ffffff; padding: 15px; border-radius: 12px; margin: 15px 0; border: 1px solid #fda4af;">
+            <p style="margin: 5px 0;"><strong>Timestamp:</strong> ${timestampStr}</p>
+            <p style="margin: 5px 0;"><strong>Current Address:</strong> ${address}</p>
+            <p style="margin: 5px 0;"><strong>GPS Coordinates:</strong> ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracyMeters || 0)}m)</p>
+          </div>
+          <div style="text-align: center; margin: 25px 0;">
+            <a href="${googleMapsUrl}" style="background-color: #e11d48; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: bold; border-radius: 12px; display: inline-block;">Open Location in Google Maps</a>
+          </div>
+          <p style="font-size: 12px; color: #64748b;">This automated alert was dispatched by HomeBrain Autonomous Cognitive Operating System for Family ID: ${user.familyId}.</p>
+        </div>
+      `;
+
+      for (const recipient of emailList) {
+        try {
+          const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${RESEND_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              from: process.env.EMAIL_FROM || 'HomeBrain SOS <onboarding@resend.dev>',
+              to: [recipient],
+              subject: `🚨 EMERGENCY ALERT: ${user.name} needs immediate help!`,
+              html: emailHtml
+            })
+          });
+          if (res.ok) {
+            deliveryResults.push({ recipient, status: 'sent' });
+            emailSent = true;
+          } else {
+            const errBody = await res.text();
+            deliveryResults.push({ recipient, status: 'failed', error: errBody });
+          }
+        } catch (err: any) {
+          deliveryResults.push({ recipient, status: 'failed', error: err.message });
+        }
+      }
+    } else {
+      // Sandbox mode when RESEND_API_KEY is not configured
+      for (const recipient of (emailList.length > 0 ? emailList : ['emergency-contacts@homebrain.internal'])) {
+        deliveryResults.push({ recipient, status: 'simulated' });
+      }
+    }
+
+    // Record emergency log in database
+    const logPayload = {
+      timestamp: new Date().toISOString(),
+      user_location: address,
+      latitude,
+      longitude,
+      accuracy_meters: accuracyMeters,
+      user_id: user.id,
+      user_name: user.name,
+      status: emailSent ? 'Delivered' : 'Logged',
+      recipients: emailList.length > 0 ? emailList : ['Family Emergency Network']
+    };
+
+    const savedLog = await insertFamilyData('emergency_logs', logPayload, token);
+
+    res.json({
+      success: true,
+      emailSent,
+      providerStatus,
+      recipients: emailList,
+      deliveryResults,
+      loggedEventId: savedLog?.id || crypto.randomUUID(),
+      timestamp: logPayload.timestamp,
+      address,
+      googleMapsUrl
+    });
+  } catch (err: any) {
+    console.error('Emergency alert error:', err);
+    res.status(500).json({ error: err.message || 'Emergency alert execution failed.' });
   }
 });
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { formatIndiaDateTime } from '../../lib/display';
 import { GroceryCategory } from '../../types';
+import { PageHeader } from '../layout/PageHeader';
 import { ShoppingCart, Plus, CheckCircle2, Circle, Clock, User, History, Sparkles, X } from 'lucide-react';
 
 export const GroceryCard: React.FC = () => {
@@ -86,38 +87,26 @@ export const GroceryListScreen: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <button
-            onClick={() => setActiveSubScreen('none')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 mb-1 flex items-center gap-1"
-          >
-            ← Back to Dashboard
-          </button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            🛒 Shared Family Grocery List
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Real-time grocery list preventing duplicate purchases across family members
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigateToSubScreen('grocery-history')}
-            className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
-          >
-            <History className="w-4 h-4 text-emerald-500" /> Purchase History
-          </button>
-          <button
-            onClick={() => navigateToSubScreen('add-grocery')}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
-          >
-            <Plus className="w-4 h-4" /> Add Item
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Shared Family Grocery List"
+        subtitle="Real-time grocery list preventing duplicate purchases across family members"
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateToSubScreen('grocery-history')}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 shadow-sm"
+            >
+              <History className="w-4 h-4 text-emerald-500" /> Purchase History
+            </button>
+            <button
+              onClick={() => navigateToSubScreen('add-grocery')}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
+            >
+              <Plus className="w-4 h-4" /> Add Item
+            </button>
+          </div>
+        }
+      />
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700">
@@ -237,15 +226,15 @@ export const AddGroceryModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Grocery Requirement' : 'Add Grocery Requirement'}</h2>
-        <button onClick={() => setActiveSubScreen('grocery')} className="text-slate-400 hover:text-slate-600">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader
+        title={editing ? 'Edit Grocery Requirement' : 'Add Grocery Requirement'}
+        subtitle="Specify item, pantry category, and package quantities"
+        showBack={true}
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-700">
+        <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Item Name</label>
           <input
@@ -316,6 +305,7 @@ export const AddGroceryModal: React.FC = () => {
           </button>
         </div>
       </form>
+      </div>
     </div>
   );
 };
@@ -325,18 +315,11 @@ export const GroceryHistoryScreen: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <button
-            onClick={() => setActiveSubScreen('grocery')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 mb-1"
-          >
-            ← Back to Grocery List
-          </button>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">📜 Grocery Purchase History Log</h1>
-          <p className="text-xs text-slate-500">Record of who bought items and when</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Grocery Purchase History Log"
+        subtitle="Auditable record of fulfilled items, buyers, and transaction timestamps"
+        showBack={true}
+      />
 
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-card border border-slate-200 dark:border-slate-700 space-y-3">
         {groceryHistory.length === 0 ? (

@@ -393,15 +393,46 @@ export const listFamilyProfiles = async (familyId: string): Promise<Array<{ id: 
 const withFamilyId = (familyId: string, value: JsonRecord) =>
   snakify({ ...value, familyId }) as JsonRecord;
 
+/**
+ * Extracts the column name from a PostgREST "unknown column" error so the write can be
+ * retried without it. This keeps the app working when an optional migration (e.g. 007)
+ * has not been applied to the live database yet.
+ */
+export const extractMissingColumn = (message: string): string | null => {
+  const pgrst = message.match(/Could not find the '([^']+)' column/);
+  if (pgrst) return pgrst[1];
+  const pg = message.match(/column "?([a-z_0-9]+)"? (?:of relation "[^"]+" )?does not exist/i);
+  if (pg) return pg[1].replace(/^[a-z_]+\./, '');
+  return null;
+};
+
+const writeWithSchemaFallback = async <T>(
+  path: string,
+  method: 'POST' | 'PATCH',
+  payload: JsonRecord
+): Promise<T> => {
+  let body = { ...payload };
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      return await request<T>(path, { method, body: JSON.stringify(body) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const column = extractMissingColumn(message);
+      if (!column || !(column in body)) throw error;
+      console.warn(`[HomeBrain] Column "${column}" is missing in ${path.split('?')[0]}; saving without it. Apply migration 007 to enable it.`);
+      const { [column]: _removed, ...rest } = body;
+      body = rest;
+    }
+  }
+  throw new Error(`Could not save to ${path.split('?')[0]}: too many missing columns.`);
+};
+
 export const insertRow = async <T extends object>(
   table: string,
   familyId: string,
   value: T
 ): Promise<T> => {
-  const rows = await request<T[]>(table, {
-    method: 'POST',
-    body: JSON.stringify(withFamilyId(familyId, value as JsonRecord))
-  });
+  const rows = await writeWithSchemaFallback<T[]>(table, 'POST', withFamilyId(familyId, value as JsonRecord));
   if (!rows[0]) {
     throw new Error(`Supabase insert returned no row for ${table}. The session may not have permission for this family.`);
   }
@@ -414,10 +445,11 @@ export const updateRow = async (
   id: string,
   value: object
 ): Promise<void> => {
-  const rows = await request<JsonRecord[]>(`${table}?${familyFilter(familyId)}&id=eq.${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(snakify(value))
-  });
+  const rows = await writeWithSchemaFallback<JsonRecord[]>(
+    `${table}?${familyFilter(familyId)}&id=eq.${encodeURIComponent(id)}`,
+    'PATCH',
+    snakify(value) as JsonRecord
+  );
   if (!rows[0]) {
     throw new Error(`Supabase update affected no row in ${table}. Check the record ID and family access.`);
   }
@@ -432,18 +464,68 @@ export const deleteRow = async (table: string, familyId: string, id: string): Pr
   }
 };
 
-export const uploadPrivateFile = async (bucket: string, path: string, file: File): Promise<string> => {
+/** Makes a filename safe for a Supabase Storage object key (ASCII, no spaces or reserved characters). */
+export const sanitizeFileName = (name: string): string => {
+  const dot = name.lastIndexOf('.');
+  const base = (dot > 0 ? name.slice(0, dot) : name)
+    .normalize('NFKD')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || 'file';
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+  return ext ? `${base}.${ext}` : base;
+};
+
+export const buildStoragePath = (familyId: string, folder: string, fileName: string): string =>
+  `${familyId}/${folder ? `${folder}/` : ''}${crypto.randomUUID()}-${sanitizeFileName(fileName)}`;
+
+const describeStorageError = (status: number, body: string): string => {
+  const lower = body.toLowerCase();
+  if (lower.includes('row-level security') || status === 403) {
+    return 'Upload was blocked by storage security rules. Make sure you are signed in to your family account.';
+  }
+  if (lower.includes('bucket not found')) return 'The private "documents" storage bucket does not exist. Apply the Supabase migrations.';
+  if (lower.includes('payload too large') || status === 413) return 'The file is larger than the storage limit.';
+  if (lower.includes('invalid key')) return 'The file name contains unsupported characters.';
+  if (lower.includes('jwt') || status === 401) return 'Your session expired. Please sign in again.';
+  return `Upload failed (${status})${body ? `: ${body.slice(0, 160)}` : ''}`;
+};
+
+const xhrUpload = (url: string, file: File, onProgress?: (percent: number) => void) =>
+  new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('apikey', supabaseAnonKey || '');
+    xhr.setRequestHeader('Authorization', 'Bearer ' + getAccessToken());
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.setRequestHeader('x-upsert', 'false');
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable && onProgress) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText || '' });
+    xhr.onerror = () => reject(new Error('Network error while uploading. Check your connection.'));
+    xhr.send(file);
+  });
+
+export const uploadPrivateFile = async (
+  bucket: string,
+  path: string,
+  file: File,
+  onProgress?: (percent: number) => void
+): Promise<string> => {
   if (!isSupabaseConfigured || !supabaseUrl) {
     throw new Error('Supabase is not configured.');
   }
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${path}`, {
-    method: 'POST',
-    headers: { apikey: supabaseAnonKey || '', Authorization: 'Bearer ' + getAccessToken() },
-    body: file
-  });
-  if (!response.ok) {
-    throw new Error(`Private file upload failed (${response.status})`);
+  const url = `${supabaseUrl}/storage/v1/object/${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  let result = await xhrUpload(url, file, onProgress);
+  if ((result.status === 400 || result.status === 401) && /jwt|expired|unauthor/i.test(result.body)) {
+    if (await refreshSession()) result = await xhrUpload(url, file, onProgress);
   }
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(describeStorageError(result.status, result.body));
+  }
+  onProgress?.(100);
   return `${supabaseUrl}/storage/v1/object/authenticated/${bucket}/${path}`;
 };
 
@@ -451,11 +533,16 @@ export const createPrivateFileUrl = async (bucket: string, path: string, expires
   if (!isSupabaseConfigured || !supabaseUrl) {
     throw new Error('Supabase is not configured.');
   }
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/sign/${bucket}/${path}`, {
+  const signUrl = `${supabaseUrl}/storage/v1/object/sign/${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  const sign = () => fetch(signUrl, {
     method: 'POST',
     headers: { ...headers(), Authorization: 'Bearer ' + getAccessToken() },
     body: JSON.stringify({ expiresIn })
   });
+  let response = await sign();
+  if ((response.status === 400 || response.status === 401) && await refreshSession()) {
+    response = await sign();
+  }
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Private file retrieval failed (${response.status}): ${body || response.statusText}`);

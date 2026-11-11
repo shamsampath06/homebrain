@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
+import { seedDemoFamilyData } from '../../lib/demoData';
 import {
   Activity,
   Cpu,
@@ -150,7 +151,7 @@ export const CognitiveCommandCenter: React.FC = () => {
                 HomeBrain OS v2.0 • Telemetry Active
               </span>
               <span className="text-[10px] font-mono text-slate-400">
-                Grounding Reliability: 99.4%
+                Database Synchronization: Live
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
@@ -184,18 +185,18 @@ export const CognitiveCommandCenter: React.FC = () => {
         {/* Real-time Synapse Counters */}
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mt-6 pt-5 border-t border-slate-800/80">
           <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60">
-            <p className="text-[10px] font-mono text-slate-400 uppercase">Vector Nodes</p>
-            <p className="text-lg font-black text-white font-mono mt-0.5">11 Tables</p>
+            <p className="text-[10px] font-mono text-slate-400 uppercase">Family Members</p>
+            <p className="text-lg font-black text-white font-mono mt-0.5">{membersWithData.length} Profiles</p>
             <span className="text-[9px] text-emerald-400 font-semibold flex items-center gap-0.5">
-              <CheckCircle2 className="w-2.5 h-2.5" /> 100% Ingested
+              <CheckCircle2 className="w-2.5 h-2.5" /> Connected Entities
             </span>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/60">
-            <p className="text-[10px] font-mono text-slate-400 uppercase">Avg Latency</p>
-            <p className="text-lg font-black text-white font-mono mt-0.5">~185 ms</p>
+            <p className="text-[10px] font-mono text-slate-400 uppercase">Events & Tasks</p>
+            <p className="text-lg font-black text-white font-mono mt-0.5">{events.length + reminders.length} Total</p>
             <span className="text-[9px] text-brand-400 font-semibold flex items-center gap-0.5">
-              <Clock className="w-2.5 h-2.5" /> Ultra-low Latency
+              <Clock className="w-2.5 h-2.5" /> Calendar & Chores
             </span>
           </div>
 
@@ -232,6 +233,34 @@ export const CognitiveCommandCenter: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Quick Demo Family Banner if under-populated */}
+      {membersWithData.length < 2 && (
+        <div className="p-4 rounded-3xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-brand-500/10 border border-purple-200 dark:border-purple-800/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-2xl bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-900 dark:text-white">Populate 5-Member Demonstration Family</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Load Rajesh, Sunita, Sarah, Sneha, and Sham with realistic clinical schedules, bills, and grocery data.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              if (currentUser.familyId) {
+                await seedDemoFamilyData(currentUser.familyId, currentUser.email);
+                await refreshFamilyData();
+              }
+            }}
+            className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shrink-0 shadow-md shadow-purple-600/25 transition-all"
+          >
+            Load Demo Family
+          </button>
+        </div>
+      )}
 
       {/* 2. Analytical Intelligence Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

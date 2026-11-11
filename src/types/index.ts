@@ -19,6 +19,8 @@ export interface FamilyMember {
   phone: string;
   email: string;
   age?: number;
+  birthday?: string; // YYYY-MM-DD (requires migration 007)
+  preferences?: string;
 }
 
 export type EventCategory = 'Birthday' | 'Appointment' | 'Holiday' | 'School' | 'Bill' | 'General';
@@ -72,6 +74,7 @@ export interface GroceryItem {
   isPurchased: boolean;
   purchasedBy?: string;
   purchasedAt?: string;
+  estimatedPrice?: number;
 }
 
 export interface GroceryHistoryItem {
@@ -153,6 +156,7 @@ export interface FamilyKnowledgeFile {
 
 export interface EmergencyContact {
   id: string;
+  email?: string; // requires migration 007
   name: string;
   relation: string;
   phone: string;

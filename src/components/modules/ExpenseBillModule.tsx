@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { BillItem, ExpenseCategory } from '../../types';
 import { formatINR } from '../../lib/display';
+import { PageHeader } from '../layout/PageHeader';
 import { DollarSign, Plus, Zap, PieChart, CreditCard, CheckCircle2, AlertCircle, X, Calendar } from 'lucide-react';
 
 export const ExpenseCard: React.FC = () => {
@@ -83,38 +84,26 @@ export const ExpenseDashboardScreen: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <button
-            onClick={() => setActiveSubScreen('none')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 mb-1 flex items-center gap-1"
-          >
-            ← Back to Dashboard
-          </button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            💰 Expense & Bill Intelligence
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Monitor family spending, categorize household budget, and track due bills
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigateToSubScreen('bill-management')}
-            className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
-          >
-            <CreditCard className="w-4 h-4 text-amber-500" /> View Bills Tracker ({bills.filter(b => !b.isPaid).length} Due)
-          </button>
-          <button
-            onClick={() => navigateToSubScreen('add-expense')}
-            className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
-          >
-            <Plus className="w-4 h-4" /> Add Expense
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Expense & Bill Intelligence"
+        subtitle="Monitor family spending, categorize household budget, and track due bills"
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateToSubScreen('bill-management')}
+              className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 shadow-sm"
+            >
+              <CreditCard className="w-4 h-4 text-amber-500" /> View Bills Tracker ({bills.filter(b => !b.isPaid).length} Due)
+            </button>
+            <button
+              onClick={() => navigateToSubScreen('add-expense')}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
+            >
+              <Plus className="w-4 h-4" /> Add Expense
+            </button>
+          </div>
+        }
+      />
 
       {/* Analytics Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -233,15 +222,15 @@ export const AddExpenseModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Household Expense' : 'Record New Household Expense'}</h2>
-        <button onClick={() => setActiveSubScreen('expense')} className="text-slate-400 hover:text-slate-600">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader
+        title={editing ? 'Edit Household Expense' : 'Record New Household Expense'}
+        subtitle="Log transactions, assign category allocations, and track payer details"
+        showBack={true}
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-700">
+        <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Expense Title</label>
           <input
@@ -337,6 +326,7 @@ export const AddExpenseModal: React.FC = () => {
           </button>
         </div>
       </form>
+      </div>
     </div>
   );
 };
@@ -372,27 +362,18 @@ export const BillManagementScreen: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <PageHeader
+        title="Household Bill Management Tracker"
+        subtitle="Track electricity, water, internet, and recurring bills across billing cycles"
+        actions={
           <button
-            onClick={() => setActiveSubScreen('expense')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 mb-1"
+            onClick={() => setShowAddBill(!showAddBill)}
+            className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
           >
-            ← Back to Expense Dashboard
+            <Plus className="w-4 h-4" /> {showAddBill ? 'Close Form' : 'Add Bill'}
           </button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            ⚡ Household Bill Management Tracker
-          </h1>
-          <p className="text-sm text-slate-500">Track electricity, water, internet, and recurring bills</p>
-        </div>
-
-        <button
-          onClick={() => setShowAddBill(!showAddBill)}
-          className="px-4 py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
-        >
-          <Plus className="w-4 h-4" /> Add Bill
-        </button>
-      </div>
+        }
+      />
 
       {showAddBill && (
         <form onSubmit={handleAddBillSubmit} className="p-4 rounded-3xl bg-amber-50 dark:bg-slate-800 border border-amber-200 dark:border-slate-700 space-y-3">

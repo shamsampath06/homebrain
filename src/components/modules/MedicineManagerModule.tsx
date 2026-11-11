@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { MedicineItem } from '../../types';
 import { formatIndiaDateTime } from '../../lib/display';
+import { PageHeader } from '../layout/PageHeader';
 import { Pill, Plus, CheckCircle, Clock, AlertTriangle, ShieldCheck, History, X, User } from 'lucide-react';
 
 export const MedicineCard: React.FC = () => {
@@ -71,37 +72,26 @@ export const MedicineManagerScreen: React.FC = () => {
       </div>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <button
-            onClick={() => setActiveSubScreen('none')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 mb-1 flex items-center gap-1"
-          >
-            ← Back to Dashboard
-          </button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            💊 Medicine Schedule Manager
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Track family member dosage schedules, set timing reminders, and view taken logs
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigateToSubScreen('medicine-history')}
-            className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
-          >
-            <History className="w-4 h-4 text-rose-500" /> Medicine History Log
-          </button>
-          <button
-            onClick={() => navigateToSubScreen('add-medicine')}
-            className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
-          >
-            <Plus className="w-4 h-4" /> Add Medicine
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Medicine Schedule Manager"
+        subtitle="Track family member dosage schedules, set timing reminders, and view clinical logs"
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateToSubScreen('medicine-history')}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 shadow-sm"
+            >
+              <History className="w-4 h-4 text-rose-500" /> Medicine History Log
+            </button>
+            <button
+              onClick={() => navigateToSubScreen('add-medicine')}
+              className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
+            >
+              <Plus className="w-4 h-4" /> Add Medicine
+            </button>
+          </div>
+        }
+      />
 
       {/* Medicine Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -194,15 +184,15 @@ export const AddMedicineModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Medicine Schedule' : 'Add Medicine Schedule'}</h2>
-        <button onClick={() => setActiveSubScreen('medicine')} className="text-slate-400 hover:text-slate-600">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader
+        title={editing ? 'Edit Medicine Schedule' : 'Add Medicine Schedule'}
+        subtitle="Schedule family member prescriptions, dosage amounts, and timings"
+        showBack={true}
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-700">
+        <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Person Taking Medicine</label>
           <select
@@ -298,6 +288,7 @@ export const AddMedicineModal: React.FC = () => {
           </button>
         </div>
       </form>
+      </div>
     </div>
   );
 };
@@ -307,16 +298,11 @@ export const MedicineHistoryScreen: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <button
-          onClick={() => setActiveSubScreen('medicine')}
-          className="text-xs font-semibold text-slate-500 hover:text-slate-800 mb-1"
-        >
-          ← Back to Medicine Manager
-        </button>
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white">📜 Medicine Activity Log</h1>
-        <p className="text-xs text-slate-500">Explicit verification record of taken and missed doses</p>
-      </div>
+      <PageHeader
+        title="Medicine Activity Log"
+        subtitle="Verification history of taken and missed household prescription doses"
+        showBack={true}
+      />
 
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-card border border-slate-200 dark:border-slate-700 space-y-3">
         {medicineLogs.length === 0 ? (

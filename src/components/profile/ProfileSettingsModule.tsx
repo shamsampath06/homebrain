@@ -1,24 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { UserRole } from '../../types';
 import { InitialAvatar } from '../common/InitialAvatar';
-import { User, Users, Settings, Shield, Plus, Trash2, Check, Lock, Sun, Moon, LogOut, X, Bell, Download, FileSpreadsheet } from 'lucide-react';
+import { PageHeader } from '../layout/PageHeader';
+import { seedDemoFamilyData, removeDemoFamilyData, checkDemoSeedStatus } from '../../lib/demoData';
+import { User, Users, Settings, Shield, Plus, Trash2, Check, Lock, Sun, Moon, LogOut, X, Bell, Download, FileSpreadsheet, Sparkles, Database, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export const ProfileSettingsShell: React.FC = () => {
   const { activeSubScreen, setActiveSubScreen } = useHomeBrain();
-  const [currentTab, setCurrentTab] = useState<'profile' | 'members' | 'settings' | 'privacy'>('profile');
+  const [currentTab, setCurrentTab] = useState<'profile' | 'members' | 'settings' | 'privacy' | 'demo'>('profile');
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          👤 Profile & Settings
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Manage your personal account, connected family members, roles, preferences, and privacy controls
-        </p>
-      </div>
+      <PageHeader
+        title="Profile & Settings"
+        subtitle="Manage personal account, connected family members, roles, preferences, and demonstration data"
+      />
 
       {/* Sub-Navigation Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
@@ -62,6 +59,16 @@ export const ProfileSettingsShell: React.FC = () => {
         >
           <Shield className="w-4 h-4" /> Privacy & Security
         </button>
+        <button
+          onClick={() => setCurrentTab('demo')}
+          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${
+            currentTab === 'demo'
+              ? 'border-purple-600 text-purple-600 dark:text-purple-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-purple-500" /> Demo Family Data
+        </button>
       </div>
 
       {/* Tab Panels */}
@@ -69,6 +76,7 @@ export const ProfileSettingsShell: React.FC = () => {
       {currentTab === 'members' && <FamilyMembersPanel />}
       {currentTab === 'settings' && <SettingsPanel />}
       {currentTab === 'privacy' && <PrivacySecurityPanel />}
+      {currentTab === 'demo' && <DemoFamilyDataPanel />}
     </div>
   );
 };
@@ -571,6 +579,182 @@ const PrivacySecurityPanel: React.FC = () => {
           className="flex items-center gap-2 rounded-xl border border-rose-200 px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50"
         >
           <LogOut className="w-4 h-4" /> Sign out
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const DemoFamilyDataPanel: React.FC = () => {
+  const {
+    currentUser,
+    familyMembers,
+    events,
+    reminders,
+    medicines,
+    expenses,
+    bills,
+    groceries,
+    documents,
+    memories,
+    knowledgeList,
+    emergencyContacts,
+    refreshFamilyData
+  } = useHomeBrain();
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const seedStatus = checkDemoSeedStatus(familyMembers, events, medicines);
+
+  const handleSeed = async () => {
+    if (!currentUser.familyId) return;
+    setIsSeeding(true);
+    setMessage(null);
+    try {
+      const res = await seedDemoFamilyData(currentUser.familyId, currentUser.email);
+      await refreshFamilyData();
+      setMessage({
+        text: `✓ Demo Family successfully populated! Created ${res.seededCounts.members} family profiles, ${res.seededCounts.medicines} prescriptions, ${res.seededCounts.bills} bills, and records across all modules.`,
+        type: 'success'
+      });
+    } catch (err) {
+      setMessage({
+        text: err instanceof Error ? err.message : 'Demo data seeding failed.',
+        type: 'error'
+      });
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!currentUser.familyId) return;
+    if (!window.confirm('Remove all demo records? Any personal family data you created will remain untouched.')) {
+      return;
+    }
+    setIsRemoving(true);
+    setMessage(null);
+    try {
+      const res = await removeDemoFamilyData(currentUser.familyId, {
+        members: familyMembers,
+        events,
+        medicines,
+        expenses,
+        bills,
+        groceries,
+        documents,
+        memories,
+        knowledge: knowledgeList,
+        contacts: emergencyContacts,
+        reminders
+      });
+      await refreshFamilyData();
+      setMessage({
+        text: `✓ Cleaned up ${res.removedCount} demo records safely.`,
+        type: 'success'
+      });
+    } catch (err) {
+      setMessage({
+        text: err instanceof Error ? err.message : 'Demo cleanup failed.',
+        type: 'error'
+      });
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-card border border-slate-200 dark:border-slate-700 max-w-3xl space-y-6">
+      <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-700">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-purple-500" /> Demonstration Family Data
+          </h2>
+          <p className="text-xs text-slate-500">
+            Populate realistic multi-generational household data to demonstrate HomeBrain AI, clinical schedules, bills, and vault records
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold ${
+          seedStatus?.isSeeded
+            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+            : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+        }`}>
+          {seedStatus?.isSeeded ? '✓ Demo Data Loaded' : 'Clean State'}
+        </span>
+      </div>
+
+      {message && (
+        <div className={`p-4 rounded-2xl text-xs flex items-center gap-2 ${
+          message.type === 'success'
+            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border border-emerald-200'
+            : 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border border-rose-200'
+        }`}>
+          {message.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />}
+          <span>{message.text}</span>
+        </div>
+      )}
+
+      {/* 5-Member Household Profile Card */}
+      <div className="p-4 rounded-2xl bg-purple-50/60 dark:bg-purple-950/40 border border-purple-200/60 dark:border-purple-900/60 space-y-3">
+        <p className="text-xs font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide">
+          Included 5-Member Demo Household (Kumar Family)
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-950">
+            <p className="font-bold text-slate-900 dark:text-white">Rajesh Kumar (52)</p>
+            <p className="text-[11px] text-slate-500">Father • Parent • High Blood Pressure (Amlodipine 5mg)</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-950">
+            <p className="font-bold text-slate-900 dark:text-white">Sunita Kumar (49)</p>
+            <p className="text-[11px] text-slate-500">Mother • Parent • Hypothyroidism (Thyronorm 50mcg)</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-950">
+            <p className="font-bold text-slate-900 dark:text-white">Sarah Kumar (24)</p>
+            <p className="text-[11px] text-slate-500">Eldest Daughter • Admin • Financial & Legal records</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-950">
+            <p className="font-bold text-slate-900 dark:text-white">Sneha Kumar (19)</p>
+            <p className="text-[11px] text-slate-500">College Student • Severe Peanut Allergy (EpiPen alert)</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-950">
+            <p className="font-bold text-slate-900 dark:text-white">Sham Kumar (15)</p>
+            <p className="text-[11px] text-slate-500">Son • High School Student • Mild Asthma (Inhaler)</p>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-950">
+            <p className="font-bold text-slate-900 dark:text-white">Comprehensive Records</p>
+            <p className="text-[11px] text-slate-500">Bills, Prescriptions, Groceries, Deeds, Memories</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
+        <button
+          type="button"
+          onClick={handleRemove}
+          disabled={isRemoving || isSeeding}
+          className="px-4 py-2.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold transition-all disabled:opacity-50"
+        >
+          {isRemoving ? 'Removing Demo Records...' : 'Remove Demo Data'}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleSeed}
+          disabled={isSeeding || isRemoving}
+          className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-500/25 flex items-center gap-2 transition-all disabled:opacity-50"
+        >
+          {isSeeding ? (
+            <>
+              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>Seeding Demo Family...</span>
+            </>
+          ) : (
+            <>
+              <Database className="w-4 h-4" />
+              <span>Load 5-Member Demo Family</span>
+            </>
+          )}
         </button>
       </div>
     </div>

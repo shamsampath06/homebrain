@@ -40,6 +40,7 @@ import {
   handleOAuthCallback
 } from '../lib/supabase';
 import { formatIndiaDateTime, formatINR } from '../lib/display';
+import { SCREEN_META } from '../lib/navigation';
 
 export type MainTab = 'dashboard' | 'ai' | 'timeline' | 'profile';
 export type SubScreen =
@@ -91,6 +92,7 @@ interface HomeBrainContextType {
   selectedItemId: string | null;
   setSelectedItemId: (id: string | null) => void;
   navigateToSubScreen: (sub: SubScreen, itemId?: string) => void;
+  goBack: () => void;
 
   // Theme & User
   currentUser: User;
@@ -119,7 +121,7 @@ interface HomeBrainContextType {
 
   // Documents
   documents: DocumentItem[];
-  addDocument: (doc: Omit<DocumentItem, 'id' | 'uploadDate'>) => void;
+  addDocument: (doc: Omit<DocumentItem, 'id' | 'uploadDate'>) => Promise<void>;
   updateDocument: (id: string, updated: Partial<DocumentItem>) => void;
   deleteDocument: (id: string) => void;
 
@@ -177,8 +179,8 @@ interface HomeBrainContextType {
 
   // Family Timeline
   memories: FamilyMemory[];
-  addMemory: (mem: Omit<FamilyMemory, 'id'>) => void;
-  updateMemory: (id: string, updated: Partial<FamilyMemory>) => void;
+  addMemory: (mem: Omit<FamilyMemory, 'id'>) => Promise<void>;
+  updateMemory: (id: string, updated: Partial<FamilyMemory>) => Promise<void>;
   deleteMemory: (id: string) => void;
 
   // AI Assistant
@@ -219,8 +221,23 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const navigateToSubScreen = (sub: SubScreen, itemId?: string) => {
     setActiveSubScreen(sub);
-    if (itemId !== undefined) {
-      setSelectedItemId(itemId);
+    setSelectedItemId(itemId !== undefined ? itemId : null);
+  };
+
+  const goBack = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    if (activeSubScreen !== 'none') {
+      const meta = SCREEN_META[activeSubScreen as keyof typeof SCREEN_META];
+      if (meta && meta.parent !== 'none') {
+        setActiveSubScreen(meta.parent);
+      } else {
+        setActiveSubScreen('none');
+      }
+    } else if (activeTab !== 'dashboard') {
+      setActiveTab('dashboard');
     }
   };
 
@@ -472,15 +489,14 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Documents
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
-  const addDocument = (doc: Omit<DocumentItem, 'id' | 'uploadDate'>) => {
+  const addDocument = async (doc: Omit<DocumentItem, 'id' | 'uploadDate'>): Promise<void> => {
     const newDoc: DocumentItem = {
       ...doc,
       id: crypto.randomUUID(),
       uploadDate: new Date().toISOString().split('T')[0]
     };
-
+    await insertRow('documents', currentUser.familyId, newDoc);
     setDocuments(prev => [newDoc, ...prev]);
-    void persist(() => insertRow('documents', currentUser.familyId, newDoc).then(() => undefined));
   };
 
   const updateDocument = (id: string, updated: Partial<DocumentItem>) => {
@@ -813,15 +829,15 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Memories
   const [memories, setMemories] = useState<FamilyMemory[]>([]);
 
-  const addMemory = (mem: Omit<FamilyMemory, 'id'>) => {
+  const addMemory = async (mem: Omit<FamilyMemory, 'id'>): Promise<void> => {
     const newMem: FamilyMemory = { ...mem, id: crypto.randomUUID() };
+    await insertRow('family_memories', currentUser.familyId, newMem);
     setMemories(prev => [newMem, ...prev]);
-    void persist(() => insertRow('family_memories', currentUser.familyId, newMem).then(() => undefined));
   };
 
-  const updateMemory = (id: string, updated: Partial<FamilyMemory>) => {
+  const updateMemory = async (id: string, updated: Partial<FamilyMemory>): Promise<void> => {
+    await updateRow('family_memories', currentUser.familyId, id, updated);
     setMemories(prev => prev.map(m => (m.id === id ? { ...m, ...updated } : m)));
-    void persist(() => updateRow('family_memories', currentUser.familyId, id, updated));
   };
 
   const deleteMemory = (id: string) => {
@@ -989,6 +1005,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         selectedItemId,
         setSelectedItemId,
         navigateToSubScreen,
+        goBack,
         currentUser,
         updateCurrentUser,
         isDarkMode,

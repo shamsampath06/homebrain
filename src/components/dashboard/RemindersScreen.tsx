@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { ReminderItem } from '../../types';
 import { formatIndiaDateTime } from '../../lib/display';
+import { PageHeader } from '../layout/PageHeader';
+import { Plus } from 'lucide-react';
 
 const toLocalDateTimeInput = (value: string): string => {
   const date = new Date(value);
@@ -25,13 +27,18 @@ export const RemindersScreen: React.FC = () => {
   const sorted = [...reminders].sort((a, b) => a.dateTime.localeCompare(b.dateTime));
   return (
     <div className="max-w-4xl mx-auto space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <button onClick={() => setActiveSubScreen('none')} className="text-xs text-slate-500 hover:underline">← Back to Dashboard</button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Family Reminders</h1>
-        </div>
-        <button onClick={() => navigateToSubScreen('add-reminder')} className="px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold">Add Reminder</button>
-      </div>
+      <PageHeader
+        title="Family Reminders & Household Chores"
+        subtitle="Shared reminders, medicine alerts, and scheduled duties assigned across family members"
+        actions={
+          <button
+            onClick={() => navigateToSubScreen('add-reminder')}
+            className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md"
+          >
+            <Plus className="w-4 h-4" /> Add Reminder
+          </button>
+        }
+      />
       {sorted.length === 0 ? <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-slate-500">No reminders recorded yet.</div> : (
         <div className="space-y-3">{sorted.map(reminder => {
           const overdue = !reminder.completed && new Date(reminder.dateTime) < now;
@@ -69,21 +76,32 @@ export const ReminderForm: React.FC = () => {
     if (editing && existing) updateReminder(existing.id, value); else addReminder(value);
     setActiveSubScreen('reminders');
   };
-  return <div className="max-w-lg mx-auto rounded-3xl bg-white dark:bg-slate-800 p-6 shadow-xl">
-    <h2 className="text-lg font-bold mb-4">{editing ? 'Edit Reminder' : 'Add Reminder'}</h2>
-    <form onSubmit={submit} className="space-y-3">
-      <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Reminder title" className="w-full rounded-xl border px-3 py-2 text-sm" />
-      <input required type="datetime-local" value={dateTime} onChange={e => setDateTime(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" />
-      <select value={category} onChange={e => setCategory(e.target.value as ReminderItem['category'])} className="w-full rounded-xl border px-3 py-2 text-sm">
-        {['Birthday', 'Medicine', 'Appointment', 'Bill', 'Grocery', 'General'].map(value => <option key={value}>{value}</option>)}
-      </select>
-      <select value={assignedMemberName} onChange={e => setAssignedMemberName(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm">
-        {assignees.map(member => <option key={member.id} value={member.name}>{member.name}{member.id === currentUser.id ? ' (Me)' : ''}</option>)}
-      </select>
-      <select value={priority} onChange={e => setPriority(e.target.value as ReminderItem['priority'])} className="w-full rounded-xl border px-3 py-2 text-sm">
-        {['High', 'Medium', 'Low'].map(value => <option key={value}>{value}</option>)}
-      </select>
-      <div className="flex justify-end gap-2 pt-3"><button type="button" onClick={() => setActiveSubScreen('reminders')} className="px-4 py-2 text-xs">Cancel</button><button className="rounded-xl bg-brand-600 px-4 py-2 text-xs font-semibold text-white">{editing ? 'Save Changes' : 'Save Reminder'}</button></div>
-    </form>
-  </div>;
+  return (
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader
+        title={editing ? 'Edit Household Reminder' : 'Add Household Reminder'}
+        subtitle="Assign tasks, alerts, or chores to family members with priority levels"
+        showBack={true}
+      />
+      <div className="rounded-3xl bg-white dark:bg-slate-800 p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-700">
+        <form onSubmit={submit} className="space-y-3">
+          <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Reminder title" className="w-full rounded-xl border px-3 py-2 text-sm" />
+          <input required type="datetime-local" value={dateTime} onChange={e => setDateTime(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" />
+          <select value={category} onChange={e => setCategory(e.target.value as ReminderItem['category'])} className="w-full rounded-xl border px-3 py-2 text-sm">
+            {['Birthday', 'Medicine', 'Appointment', 'Bill', 'Grocery', 'General'].map(value => <option key={value}>{value}</option>)}
+          </select>
+          <select value={assignedMemberName} onChange={e => setAssignedMemberName(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm">
+            {assignees.map(member => <option key={member.id} value={member.name}>{member.name}{member.id === currentUser.id ? ' (Me)' : ''}</option>)}
+          </select>
+          <select value={priority} onChange={e => setPriority(e.target.value as ReminderItem['priority'])} className="w-full rounded-xl border px-3 py-2 text-sm">
+            {['High', 'Medium', 'Low'].map(value => <option key={value}>{value}</option>)}
+          </select>
+          <div className="flex justify-end gap-2 pt-3">
+            <button type="button" onClick={() => setActiveSubScreen('reminders')} className="px-4 py-2 text-xs font-semibold text-slate-600">Cancel</button>
+            <button className="rounded-xl bg-brand-600 px-5 py-2 text-xs font-bold text-white shadow-md">{editing ? 'Save Changes' : 'Save Reminder'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 };

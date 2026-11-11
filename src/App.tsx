@@ -19,6 +19,7 @@ import { EmergencyModeModal } from './components/modules/EmergencyModeModal';
 import { RemindersScreen, ReminderForm } from './components/dashboard/RemindersScreen';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { isSupabaseConfigured, signInWithGoogle } from './lib/supabase';
+import { parseHash, buildHash } from './lib/navigation';
 
 const AppContent: React.FC = () => {
   const {
@@ -26,6 +27,8 @@ const AppContent: React.FC = () => {
     setActiveTab,
     activeSubScreen,
     setActiveSubScreen,
+    selectedItemId,
+    setSelectedItemId,
     isDataLoading,
     dataError,
     clearDataError,
@@ -34,34 +37,34 @@ const AppContent: React.FC = () => {
     signUp
   } = useHomeBrain();
 
-  // URL Hash synchronization for browser history & deep linking (Phase 3 Routing)
+  // URL Hash synchronization for browser history & deep linking
   React.useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (!hash) return;
-      const validTabs = ['dashboard', 'ai', 'timeline', 'profile'];
-      if (validTabs.includes(hash)) {
-        setActiveTab(hash as any);
-        setActiveSubScreen('none');
-      } else if (hash) {
-        setActiveSubScreen(hash as any);
+      // Do not process OAuth access tokens in hash
+      if (window.location.hash && window.location.hash.includes('=')) return;
+      const parsed = parseHash(window.location.hash);
+      if (!parsed) return;
+      setActiveTab(parsed.tab);
+      setActiveSubScreen(parsed.sub);
+      if (parsed.itemId !== null) {
+        setSelectedItemId(parsed.itemId);
       }
     };
 
     window.addEventListener('hashchange', handleHashChange);
-    // initial check
     if (window.location.hash) handleHashChange();
 
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [setActiveTab, setActiveSubScreen]);
+  }, [setActiveTab, setActiveSubScreen, setSelectedItemId]);
 
   // Update hash when tab or subscreen changes
   React.useEffect(() => {
-    const targetHash = activeSubScreen !== 'none' ? `#${activeSubScreen}` : `#${activeTab}`;
+    if (window.location.hash && window.location.hash.includes('=')) return;
+    const targetHash = buildHash(activeTab, activeSubScreen, selectedItemId);
     if (window.location.hash !== targetHash) {
-      window.history.replaceState(null, '', targetHash);
+      window.history.pushState(null, '', targetHash);
     }
-  }, [activeTab, activeSubScreen]);
+  }, [activeTab, activeSubScreen, selectedItemId]);
 
   if (isSupabaseConfigured && !isAuthenticated) {
     return (

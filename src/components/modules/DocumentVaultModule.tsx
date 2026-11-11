@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { DocumentCategory, DocumentItem } from '../../types';
-import { createPrivateFileUrl, isSupabaseConfigured, uploadPrivateFile, getAccessToken } from '../../lib/supabase';
-import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode, Bot, Sparkles, ExternalLink } from 'lucide-react';
+import { createPrivateFileUrl, isSupabaseConfigured, uploadPrivateFile, getAccessToken, buildStoragePath } from '../../lib/supabase';
+import { PageHeader } from '../layout/PageHeader';
+import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode, Bot, Sparkles, ExternalLink, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export const DocumentVaultCard: React.FC = () => {
   const { documents, navigateToSubScreen } = useHomeBrain();
@@ -63,6 +64,7 @@ export const DocumentVaultScreen: React.FC = () => {
   const { documents, navigateToSubScreen, setActiveSubScreen, deleteDocument } = useHomeBrain();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [documentToDelete, setDocumentToDelete] = useState<DocumentItem | null>(null);
 
   const categories = ['All', 'Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'];
 
@@ -76,31 +78,56 @@ export const DocumentVaultScreen: React.FC = () => {
     return matchesSearch && matchesCat;
   });
 
+  const confirmDelete = async () => {
+    if (documentToDelete) {
+      await deleteDocument(documentToDelete.id);
+      setDocumentToDelete(null);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
+      {/* Header Bar with Breadcrumb Navigation */}
+      <PageHeader
+        title="Family Document Vault"
+        subtitle="Securely store, organize, and query passports, health insurance, deeds, and records"
+        actions={
           <button
-            onClick={() => setActiveSubScreen('none')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 mb-1 flex items-center gap-1"
+            onClick={() => navigateToSubScreen('upload-document')}
+            className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 shadow-md transition-all"
           >
-            ← Back to Dashboard
+            <Upload className="w-4 h-4" /> Upload Document
           </button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            📄 Family Document Vault
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Securely store, organize, and query passports, health insurance, deeds, and records
-          </p>
+        }
+      />
+
+      {/* Delete Confirmation Modal */}
+      {documentToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-200 dark:border-slate-700">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Delete Document?</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Are you sure you want to delete <span className="font-semibold text-slate-800 dark:text-slate-200">"{documentToDelete.title}"</span>? This will permanently remove the record and file from private storage.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDocumentToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/30"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
         </div>
-        <button
-          onClick={() => navigateToSubScreen('upload-document')}
-          className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm flex items-center gap-2 shadow-md"
-        >
-          <Upload className="w-4 h-4" /> Upload Document
-        </button>
-      </div>
+      )}
 
       {/* Search & AI Natural Language Query Bar */}
       <div className="relative">
@@ -169,7 +196,7 @@ export const DocumentVaultScreen: React.FC = () => {
                     <Eye className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => deleteDocument(doc.id)}
+                    onClick={() => setDocumentToDelete(doc)}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-700"
                     title="Delete Document"
                   >
@@ -193,42 +220,52 @@ export const UploadDocumentModal: React.FC = () => {
   const [fileName, setFileName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleFileSimulate = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      setFileName(file.name);
-      if (!title) setTitle(file.name);
+  const handleFileSelect = (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'docx', 'txt'];
+    if (!allowedExtensions.includes(ext)) {
+      setError('Supported file formats: PDF, DOCX, TXT, PNG, JPG, JPEG, WEBP.');
+      return;
+    }
+    const maxSizeBytes = 15 * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      setError('Documents must be 15 MB or smaller.');
+      return;
+    }
+    setError(null);
+    setSelectedFile(file);
+    setFileName(file.name);
+    if (!title) {
+      // Auto-set title from file name without extension
+      const baseName = file.name.replace(/\.[^/.]+$/, '');
+      setTitle(baseName);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !selectedFile) {
-      setError('Choose a PDF or image before uploading.');
+      setError('Choose a document or image before uploading.');
       return;
     }
     if (!isSupabaseConfigured) {
       setError('Supabase is not configured. Add the public Supabase variables to .env.local.');
       return;
     }
-    const allowedTypes = ['application/pdf', 'image/png', 'image/jpeg'];
-    const maxSizeBytes = 10 * 1024 * 1024;
-    if (!allowedTypes.includes(selectedFile.type)) {
-      setError('Only PDF, PNG, and JPEG files are supported.');
-      return;
-    }
-    if (selectedFile.size > maxSizeBytes) {
-      setError('Documents must be 10 MB or smaller.');
-      return;
-    }
+
     setIsUploading(true);
+    setUploadProgress(10);
     setError(null);
+
     try {
-      const path = `${currentUser.familyId}/${crypto.randomUUID()}-${selectedFile.name}`;
-      const fileUrl = await uploadPrivateFile('documents', path, selectedFile);
+      const path = buildStoragePath(currentUser.familyId, 'vault', selectedFile.name);
+      const fileUrl = await uploadPrivateFile('documents', path, selectedFile, pct => {
+        setUploadProgress(Math.min(90, Math.max(10, pct)));
+      });
 
       // Attempt AI document text extraction & summary
       let summaryContent: string | undefined = undefined;
@@ -253,7 +290,7 @@ export const UploadDocumentModal: React.FC = () => {
           },
           body: JSON.stringify({
             fileBase64,
-            mimeType: selectedFile.type,
+            mimeType: selectedFile.type || 'application/octet-stream',
             fileName: selectedFile.name
           })
         });
@@ -261,17 +298,19 @@ export const UploadDocumentModal: React.FC = () => {
         if (extractRes.ok) {
           const extractData = await extractRes.json();
           if (extractData.extractedText) {
-            summaryContent = extractData.extractedText.slice(0, 500);
+            summaryContent = extractData.extractedText.slice(0, 1000);
           }
         }
       } catch (extractErr) {
         console.warn('Text extraction skipped:', extractErr);
       }
 
-      addDocument({
-        title,
+      setUploadProgress(95);
+
+      await addDocument({
+        title: title.trim(),
         category,
-        fileType: selectedFile.type.split('/')[1]?.toUpperCase() || 'FILE',
+        fileType: selectedFile.name.split('.').pop()?.toUpperCase() || 'FILE',
         fileSize: `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`,
         fileUrl,
         storagePath: path,
@@ -279,6 +318,8 @@ export const UploadDocumentModal: React.FC = () => {
         summaryContent,
         uploaderName: currentUser.name
       });
+
+      setUploadProgress(100);
       setActiveSubScreen('documents');
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Document upload failed.');
@@ -288,87 +329,176 @@ export const UploadDocumentModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Upload Family Document</h2>
-        <button onClick={() => setActiveSubScreen('documents')} className="text-slate-400 hover:text-slate-600">
-          <X className="w-5 h-5" />
-        </button>
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader
+        title="Upload Family Document"
+        subtitle="Store official IDs, medical reports, deeds, or educational certificates in private encrypted storage"
+        showBack={true}
+      />
+
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200/80 dark:border-slate-700/80">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Drag & Drop Upload Zone */}
+          <div
+            onDragOver={e => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={e => {
+              e.preventDefault();
+              setIsDragging(false);
+              if (e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0]);
+            }}
+            className={`border-2 border-dashed rounded-3xl p-6 sm:p-8 text-center transition-all ${
+              isDragging
+                ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/20'
+                : selectedFile
+                ? 'border-emerald-400 bg-emerald-50/30 dark:bg-emerald-950/20'
+                : 'border-slate-200 dark:border-slate-700 hover:border-brand-400'
+            }`}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto mb-3">
+              <Upload className="w-6 h-6" />
+            </div>
+
+            {selectedFile ? (
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  {selectedFile.name}
+                </p>
+                <p className="text-[11px] text-slate-400 font-mono">
+                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB • {selectedFile.type || 'Document'}
+                </p>
+                <label className="inline-block mt-2 text-xs font-semibold text-brand-600 hover:underline cursor-pointer">
+                  Change file
+                  <input
+                    type="file"
+                    accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp"
+                    onChange={e => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Drag and drop your file here, or{' '}
+                  <label className="text-brand-600 hover:underline cursor-pointer">
+                    browse
+                    <input
+                      type="file"
+                      accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp"
+                      onChange={e => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+                      className="hidden"
+                    />
+                  </label>
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Supports PDF, DOCX, TXT, PNG, JPG, WEBP (up to 15 MB)
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Upload Progress Bar */}
+          {isUploading && (
+            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700 space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span>Encrypting and uploading to private storage...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-brand-500 to-indigo-600 transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Document Title
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Star Health Insurance Policy 2026, Flat 402 Deed"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Category
+            </label>
+            <select
+              value={category}
+              onChange={e => setCategory(e.target.value as DocumentCategory)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="Identity">Identity (Passports, Aadhaar, Driver License)</option>
+              <option value="Medical">Medical (Lab Reports, Prescriptions, Vaccination)</option>
+              <option value="Insurance">Insurance (Health, Life, Vehicle Policies)</option>
+              <option value="Financial">Financial (Tax Returns, Bank Statements)</option>
+              <option value="Home">Home (Property Deeds, Rent Agreements, Khata)</option>
+              <option value="Education">Education (Certificates, Marksheets, Degrees)</option>
+              <option value="Legal">Legal (Wills, Contracts, Affidavits)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Physical Location & Search Notes
+            </label>
+            <textarea
+              rows={3}
+              placeholder="e.g. Kept in Bedroom Steel Almirah Locker #2. Policy renewal date is November 30."
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
+            <button
+              type="button"
+              onClick={() => setActiveSubScreen('documents')}
+              className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isUploading}
+              className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-brand-500/25 transition-all flex items-center gap-2"
+            >
+              {isUploading ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Uploading to Vault...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload & Index to Vault</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
-
-      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-        {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
-        {/* Upload Dropzone */}
-        <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-6 text-center hover:border-brand-400 transition-colors">
-          <Upload className="w-8 h-8 text-brand-500 mx-auto mb-2" />
-          <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-            {fileName ? `Selected File: ${fileName}` : 'Click to choose PDF or Image file'}
-          </p>
-          <input
-            type="file"
-            accept=".pdf,.png,.jpg,.jpeg"
-            onChange={handleFileSimulate}
-            className="mt-2 text-xs text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-50 file:text-brand-700"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Document Title</label>
-          <input
-            type="text"
-            required
-            placeholder="e.g. Passport Copy, Star Health Insurance"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
-          <select
-            value={category}
-            onChange={e => setCategory(e.target.value as DocumentCategory)}
-            className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
-          >
-            <option value="Identity">Identity (Passports, IDs)</option>
-            <option value="Medical">Medical Records</option>
-            <option value="Insurance">Insurance Policies</option>
-            <option value="Financial">Financial Documents</option>
-            <option value="Home">Home & Property Deeds</option>
-            <option value="Education">Education & School Certificates</option>
-            <option value="Legal">Legal Contracts</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description / Location Notes</label>
-          <textarea
-            rows={3}
-            placeholder="e.g. Stored in Top Master Bedroom Safe #2..."
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
-          />
-        </div>
-
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
-          <button
-            type="button"
-            onClick={() => setActiveSubScreen('documents')}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isUploading}
-            className="px-5 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow-md"
-          >
-            {isUploading ? 'Uploading...' : 'Upload to Vault'}
-          </button>
-        </div>
-      </form>
     </div>
   );
 };
@@ -381,7 +511,26 @@ export const DocumentDetailsModal: React.FC = () => {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<DocumentCategory>('Identity');
   const [description, setDescription] = useState('');
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
   const doc = documents.find(d => d.id === selectedItemId);
+
+  React.useEffect(() => {
+    if (!doc) return;
+    const isImg = ['PNG', 'JPG', 'JPEG', 'WEBP'].includes(doc.fileType.toUpperCase());
+    if (isImg && doc.storagePath) {
+      setIsLoadingPreview(true);
+      void createPrivateFileUrl('documents', doc.storagePath)
+        .then(url => setPreviewUrl(url))
+        .catch(() => setPreviewUrl(doc.fileUrl || null))
+        .finally(() => setIsLoadingPreview(false));
+    } else if (isImg && doc.fileUrl) {
+      setPreviewUrl(doc.fileUrl);
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [doc]);
 
   if (!doc) return null;
   const startEditing = () => {
@@ -419,105 +568,131 @@ export const DocumentDetailsModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-xl mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
-          {doc.category}
-        </span>
-        <button onClick={() => setActiveSubScreen('documents')} className="text-slate-400 hover:text-slate-600">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
+    <div className="max-w-2xl mx-auto space-y-4">
+      <PageHeader
+        title={doc.title}
+        subtitle={`${doc.category} Document • Uploaded ${doc.uploadDate} by ${doc.uploaderName}`}
+        showBack={true}
+      />
 
-      <div className="mt-4 space-y-4">
-        {editing ? (
-          <form onSubmit={event => { event.preventDefault(); updateDocument(doc.id, { title, category, description }); setEditing(false); }} className="space-y-3">
-            <input required value={title} onChange={event => setTitle(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" />
-            <select value={category} onChange={event => setCategory(event.target.value as DocumentCategory)} className="w-full rounded-xl border px-3 py-2 text-sm">
-              {['Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'].map(value => <option key={value}>{value}</option>)}
-            </select>
-            <textarea value={description} onChange={event => setDescription(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" rows={3} />
-            <div className="flex gap-2"><button type="button" onClick={() => setEditing(false)} className="text-xs px-3 py-2">Cancel</button><button className="rounded-xl bg-brand-600 px-3 py-2 text-xs text-white">Save Metadata</button></div>
-          </form>
-        ) : <h2 className="text-xl font-bold text-slate-900 dark:text-white">{doc.title}</h2>}
-        {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
-        <p className="text-xs text-slate-500">Uploaded by {doc.uploaderName} on {doc.uploadDate}</p>
-
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-700/50 border border-slate-200/60 dark:border-slate-700 space-y-2">
-          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Description & Location:</p>
-          <p className="text-xs text-slate-600 dark:text-slate-300">{doc.description}</p>
-        </div>
-
-        {doc.summaryContent && (
-          <div className="p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900 space-y-1">
-            <p className="text-xs font-bold text-blue-800 dark:text-blue-300 flex items-center gap-1">
-              <ShieldCheck className="w-4 h-4" /> AI Grounding Summary:
-            </p>
-            <p className="text-xs text-blue-700 dark:text-blue-200">{doc.summaryContent}</p>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-700">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+              {doc.category}
+            </span>
+            <span className="text-xs font-mono text-slate-400">
+              {doc.fileType} • {doc.fileSize}
+            </span>
           </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-6 mt-6 border-t border-slate-100 dark:border-slate-700">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={startEditing}
-            className="text-xs font-semibold text-brand-600 hover:underline"
-          >
-            Edit Metadata
-          </button>
-          <button
-            onClick={() => {
-              if (window.confirm(`Delete ${doc.title}?`)) {
-                deleteDocument(doc.id);
-                setActiveSubScreen('documents');
-              }
-            }}
-            className="text-xs font-semibold text-rose-600 hover:underline"
-          >
-            Delete Document
+          <button onClick={() => setActiveSubScreen('documents')} className="text-slate-400 hover:text-slate-600">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleAskAI}
-            className="px-3.5 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-xs font-bold flex items-center gap-1.5 hover:bg-purple-100 transition-colors"
-          >
-            <Bot className="w-3.5 h-3.5" /> Ask HomeBrain AI
-          </button>
+        <div className="mt-4 space-y-4">
+          {editing ? (
+            <form onSubmit={event => { event.preventDefault(); updateDocument(doc.id, { title, category, description }); setEditing(false); }} className="space-y-3">
+              <input required value={title} onChange={event => setTitle(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" />
+              <select value={category} onChange={event => setCategory(event.target.value as DocumentCategory)} className="w-full rounded-xl border px-3 py-2 text-sm">
+                {['Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'].map(value => <option key={value}>{value}</option>)}
+              </select>
+              <textarea value={description} onChange={event => setDescription(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" rows={3} />
+              <div className="flex gap-2"><button type="button" onClick={() => setEditing(false)} className="text-xs px-3 py-2">Cancel</button><button className="rounded-xl bg-brand-600 px-3 py-2 text-xs text-white">Save Metadata</button></div>
+            </form>
+          ) : (
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{doc.title}</h2>
+          )}
 
-          <button
-            type="button"
-            disabled={isOpening}
-            onClick={handleDownload}
-            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 shadow-sm"
-          >
-            <Download className="w-3.5 h-3.5" /> Download
-          </button>
+          {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
 
-          <button
-            type="button"
-            disabled={isOpening}
-            onClick={async () => {
-              setIsOpening(true);
-              setError(null);
-              try {
-                const url = doc.storagePath
-                  ? await createPrivateFileUrl('documents', doc.storagePath)
-                  : doc.fileUrl;
-                window.open(url, '_blank', 'noopener,noreferrer');
-              } catch (openError) {
-                setError(openError instanceof Error ? openError.message : 'Unable to open document.');
-              } finally {
-                setIsOpening(false);
-              }
-            }}
-            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md"
-          >
-            <ExternalLink className="w-3.5 h-3.5" /> {isOpening ? 'Opening...' : 'View Document'}
-          </button>
+          {/* Inline Image Preview */}
+          {previewUrl && (
+            <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-2 max-h-80 flex items-center justify-center">
+              <img
+                src={previewUrl}
+                alt={doc.title}
+                className="max-h-72 object-contain rounded-xl shadow-sm"
+              />
+            </div>
+          )}
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-700/50 border border-slate-200/60 dark:border-slate-700 space-y-2">
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Physical Location & Notes:</p>
+            <p className="text-xs text-slate-600 dark:text-slate-300">{doc.description}</p>
+          </div>
+
+          {doc.summaryContent && (
+            <div className="p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900 space-y-1">
+              <p className="text-xs font-bold text-blue-800 dark:text-blue-300 flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4" /> AI Grounding & Extracted Content:
+              </p>
+              <p className="text-xs text-blue-700 dark:text-blue-200 whitespace-pre-wrap">{doc.summaryContent}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-6 mt-6 border-t border-slate-100 dark:border-slate-700">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={startEditing}
+              className="text-xs font-semibold text-brand-600 hover:underline"
+            >
+              Edit Metadata
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm(`Delete ${doc.title}?`)) {
+                  deleteDocument(doc.id);
+                  setActiveSubScreen('documents');
+                }
+              }}
+              className="text-xs font-semibold text-rose-600 hover:underline"
+            >
+              Delete Document
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleAskAI}
+              className="px-3.5 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-xs font-bold flex items-center gap-1.5 hover:bg-purple-100 transition-colors"
+            >
+              <Bot className="w-3.5 h-3.5" /> Ask HomeBrain AI
+            </button>
+
+            <button
+              type="button"
+              disabled={isOpening}
+              onClick={handleDownload}
+              className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+            >
+              <Download className="w-3.5 h-3.5" /> Download
+            </button>
+
+            <button
+              type="button"
+              disabled={isOpening}
+              onClick={async () => {
+                setIsOpening(true);
+                setError(null);
+                try {
+                  const url = doc.storagePath
+                    ? await createPrivateFileUrl('documents', doc.storagePath)
+                    : doc.fileUrl;
+                  window.open(url, '_blank', 'noopener,noreferrer');
+                } catch (openError) {
+                  setError(openError instanceof Error ? openError.message : 'Unable to open document.');
+                } finally {
+                  setIsOpening(false);
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> {isOpening ? 'Opening...' : 'View Document'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

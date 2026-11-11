@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { FamilyKnowledge, FamilyKnowledgeFile } from '../../types';
+import { PageHeader } from '../layout/PageHeader';
 import { Brain, Plus, Search, AlertCircle, Sparkles, Trash2, Edit3, X, User } from 'lucide-react';
 import { createPrivateFileUrl, deletePrivateFile, uploadPrivateFile } from '../../lib/supabase';
 
@@ -142,30 +143,18 @@ export const FamilyKnowledgeScreen: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
+      <PageHeader
+        title="Structured Family Knowledge Base"
+        subtitle="Important medical allergies, food preferences, exam schedules, and household facts retrieved by HomeBrain AI"
+        actions={
           <button
-            onClick={() => setActiveSubScreen('none')}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 mb-1 flex items-center gap-1"
+            onClick={() => navigateToSubScreen('add-knowledge')}
+            className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-purple-600/20"
           >
-            ← Back to Dashboard
+            <Plus className="w-4 h-4" /> Add Knowledge Fact
           </button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            🧠 Structured Family Knowledge Base
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Important medical allergies, food preferences, exam schedules, and household facts retrieved by HomeBrain AI
-          </p>
-        </div>
-
-        <button
-          onClick={() => navigateToSubScreen('add-knowledge')}
-          className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
-        >
-          <Plus className="w-4 h-4" /> Add Knowledge Fact
-        </button>
-      </div>
+        }
+      />
 
       {/* Search Bar */}
       <div className="relative">
@@ -306,15 +295,15 @@ export const AddKnowledgeModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-xl border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{editing ? 'Edit Family Knowledge Fact' : 'Add Family Knowledge Fact'}</h2>
-        <button onClick={() => setActiveSubScreen('knowledge')} className="text-slate-400 hover:text-slate-600">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
+    <div className="max-w-xl mx-auto space-y-4">
+      <PageHeader
+        title={editing ? 'Edit Family Knowledge Fact' : 'Add Family Knowledge Fact'}
+        subtitle="Record critical allergies, medical warnings, dietary preferences, or household rules"
+        showBack={true}
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-700">
+        <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Knowledge Title</label>
           <input
@@ -400,6 +389,7 @@ export const AddKnowledgeModal: React.FC = () => {
           </button>
         </div>
       </form>
+      </div>
     </div>
   );
 };

@@ -3,7 +3,9 @@ import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useHomeBrain } from '../../context/HomeBrainContext';
 import { formatIndiaDateTime } from '../../lib/display';
-import { ShieldAlert, AlertTriangle, MapPin, Share2, CheckCircle2, X, RefreshCw } from 'lucide-react';
+import { getAccessToken } from '../../lib/supabase';
+import { PageHeader } from '../layout/PageHeader';
+import { ShieldAlert, AlertTriangle, MapPin, Share2, CheckCircle2, X, RefreshCw, Mail, Send } from 'lucide-react';
 
 export const EmergencyModeModal: React.FC = () => {
   const { currentUser, emergencyContacts, emergencyLogs, emergencySession, addEmergencyContact, updateEmergencyContact, deleteEmergencyContact, triggerEmergencyAlert, startEmergencySession, updateEmergencySessionLocation, endEmergencySession, setActiveSubScreen } = useHomeBrain();
@@ -18,7 +20,9 @@ export const EmergencyModeModal: React.FC = () => {
   const [contactName, setContactName] = useState('');
   const [contactRelation, setContactRelation] = useState('');
   const [contactPhone, setContactPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
   const [contactPrimary, setContactPrimary] = useState(false);
+  const [emailResults, setEmailResults] = useState<{ email: string; status: string; message: string }[]>([]);
   const mapElement = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const watchId = useRef<number | null>(null);
@@ -103,7 +107,7 @@ export const EmergencyModeModal: React.FC = () => {
       return;
     }
 
-    setStep('sent');
+    setStep('sending');
     try {
       await startEmergencySession({
         address,
@@ -118,6 +122,39 @@ export const EmergencyModeModal: React.FC = () => {
         accuracyMeters: coordinates.accuracyMeters,
         mapUrl
       });
+
+      // Dispatch real/simulated email alerts via backend
+      try {
+        const token = getAccessToken();
+        const alertRes = await fetch('/api/emergency/alert', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            address,
+            latitude: coordinates.latitude,
+            longitude: coordinates.longitude,
+            accuracyMeters: coordinates.accuracyMeters,
+            mapUrl,
+            senderName: currentUser.name,
+            familyId: currentUser.familyId,
+            recipients: emergencyContacts.map(c => ({
+              name: c.name,
+              email: c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`,
+              phone: c.phone
+            }))
+          })
+        });
+        if (alertRes.ok) {
+          const alertData = await alertRes.json();
+          setEmailResults(alertData.results || []);
+        }
+      } catch (emailErr) {
+        console.warn('Backend SOS email dispatch skipped:', emailErr);
+      }
+
       watchId.current = navigator.geolocation.watchPosition(
         position => {
           const nextCoordinates = {
@@ -176,13 +213,20 @@ export const EmergencyModeModal: React.FC = () => {
     setContactName('');
     setContactRelation('');
     setContactPhone('');
+    setContactEmail('');
     setContactPrimary(false);
   };
 
   const saveContact = (event: React.FormEvent) => {
     event.preventDefault();
     if (!contactName.trim() || !contactRelation.trim() || !/^[+0-9][0-9 ()-]{6,}$/.test(contactPhone)) return;
-    const value = { name: contactName.trim(), relation: contactRelation.trim(), phone: contactPhone.trim(), isPrimary: contactPrimary };
+    const value = {
+      name: contactName.trim(),
+      relation: contactRelation.trim(),
+      phone: contactPhone.trim(),
+      email: contactEmail.trim() || undefined,
+      isPrimary: contactPrimary
+    };
     if (editingContactId) updateEmergencyContact(editingContactId, value);
     else addEmergencyContact(value);
     resetContactForm();
@@ -235,7 +279,9 @@ export const EmergencyModeModal: React.FC = () => {
                 <div key={c.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-between text-xs">
                   <div>
                     <p className="font-bold text-slate-900 dark:text-white">{c.name}</p>
-                    <p className="text-slate-500">{c.relation} • {c.phone}</p>
+                    <p className="text-slate-500">
+                      {c.relation} • {c.phone} {c.email ? `• ${c.email}` : ''}
+                    </p>
                   </div>
                   {c.isPrimary && (
                     <span className="text-[10px] font-extrabold text-rose-600 uppercase px-2 py-0.5 bg-rose-100 dark:bg-rose-950 rounded-full">
@@ -251,12 +297,13 @@ export const EmergencyModeModal: React.FC = () => {
                 <input required placeholder="Name" value={contactName} onChange={event => setContactName(event.target.value)} className="rounded-xl border px-3 py-2 text-xs" />
                 <input required placeholder="Relation" value={contactRelation} onChange={event => setContactRelation(event.target.value)} className="rounded-xl border px-3 py-2 text-xs" />
                 <input required type="tel" placeholder="Phone number" value={contactPhone} onChange={event => setContactPhone(event.target.value)} className="rounded-xl border px-3 py-2 text-xs" />
-                <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={contactPrimary} onChange={event => setContactPrimary(event.target.checked)} /> Primary contact</label>
+                <input type="email" placeholder="Email address (for SOS email dispatch)" value={contactEmail} onChange={event => setContactEmail(event.target.value)} className="rounded-xl border px-3 py-2 text-xs" />
+                <label className="flex items-center gap-2 text-xs sm:col-span-2"><input type="checkbox" checked={contactPrimary} onChange={event => setContactPrimary(event.target.checked)} /> Primary contact</label>
                 <div className="sm:col-span-2 flex gap-2"><button className="rounded-xl bg-rose-600 px-3 py-2 text-xs text-white">Save Contact</button><button type="button" onClick={resetContactForm} className="px-3 py-2 text-xs">Cancel</button></div>
               </form>
             )}
             {emergencyContacts.length > 0 && <div className="space-y-1">
-              {emergencyContacts.map(contact => <div key={contact.id} className="flex justify-end gap-2 text-[11px]"><button type="button" onClick={() => { setContactName(contact.name); setContactRelation(contact.relation); setContactPhone(contact.phone); setContactPrimary(contact.isPrimary); setEditingContactId(contact.id); setContactFormOpen(true); }} className="text-brand-600 hover:underline">Edit {contact.name}</button><button type="button" onClick={() => { if (window.confirm(`Delete ${contact.name}?`)) deleteEmergencyContact(contact.id); }} className="text-rose-600 hover:underline">Delete</button></div>)}
+              {emergencyContacts.map(contact => <div key={contact.id} className="flex justify-end gap-2 text-[11px]"><button type="button" onClick={() => { setContactName(contact.name); setContactRelation(contact.relation); setContactPhone(contact.phone); setContactEmail(contact.email || ''); setContactPrimary(contact.isPrimary); setEditingContactId(contact.id); setContactFormOpen(true); }} className="text-brand-600 hover:underline">Edit {contact.name}</button><button type="button" onClick={() => { if (window.confirm(`Delete ${contact.name}?`)) deleteEmergencyContact(contact.id); }} className="text-rose-600 hover:underline">Delete</button></div>)}
             </div>}
           </div>
 
@@ -344,25 +391,64 @@ export const EmergencyModeModal: React.FC = () => {
       )}
 
       {(step === 'sent' || isOwnActiveSession) && !isIncomingSession && (
-        <div className="text-center py-8 space-y-4">
+        <div className="text-center py-6 space-y-4">
           <CheckCircle2 className="w-14 h-14 text-emerald-500 mx-auto" />
-          <h3 className="text-xl font-bold text-slate-900 dark:text-white">Location sent</h3>
+          <h3 className="text-xl font-bold text-slate-900 dark:text-white">Emergency Location Dispatched</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Your current location has been sent to your family in HomeBrain.
+            Your live GPS location and alert broadcast have been recorded and sent to family accounts.
           </p>
-          <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-xs text-emerald-800 dark:text-emerald-200 font-semibold">
-            Address: {address}<br />
-            <a href={mapUrl} target="_blank" rel="noreferrer" className="underline">Open live map location</a>
+
+          <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-xs text-emerald-800 dark:text-emerald-200 font-semibold space-y-1 text-left">
+            <p className="font-bold flex items-center gap-1.5 text-emerald-900 dark:text-emerald-100">
+              <MapPin className="w-3.5 h-3.5" /> Dispatched Address:
+            </p>
+            <p className="text-emerald-700 dark:text-emerald-300 font-normal">{address}</p>
+            <div className="pt-1">
+              <a href={mapUrl} target="_blank" rel="noreferrer" className="underline text-brand-600 dark:text-brand-400 font-bold">
+                Open live map tracking location →
+              </a>
+            </div>
           </div>
-          {emergencySession?.initiatedBy === currentUser.id && emergencySession.status === 'active' && (
-            <button type="button" onClick={() => void stopTrackingAndEnd()} className="rounded-xl bg-rose-600 px-5 py-2.5 text-xs font-bold text-white">End Emergency</button>
+
+          {/* Email delivery results breakdown */}
+          {emailResults.length > 0 && (
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-left space-y-2">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-brand-500" /> Emergency Email Dispatch Results ({emailResults.length})
+              </p>
+              <div className="space-y-1.5 text-xs">
+                {emailResults.map((res, i) => (
+                  <div key={i} className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+                    <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[200px]">{res.email}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      res.status === 'sent'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                        : res.status === 'simulated_sandbox'
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                        : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                    }`}>
+                      {res.status === 'sent' ? '✓ Delivered via Resend' : res.status === 'simulated_sandbox' ? '✓ Sandbox Email Simulated' : 'Failed'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
-          <button
-            onClick={() => setActiveSubScreen('none')}
-            className="mt-4 px-6 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold"
-          >
-            Close Emergency Panel
-          </button>
+
+          {emergencySession?.initiatedBy === currentUser.id && emergencySession.status === 'active' && (
+            <button type="button" onClick={() => void stopTrackingAndEnd()} className="rounded-xl bg-rose-600 hover:bg-rose-700 px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-rose-600/30">
+              End Emergency Session
+            </button>
+          )}
+
+          <div>
+            <button
+              onClick={() => setActiveSubScreen('none')}
+              className="px-6 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors"
+            >
+              Close Emergency Panel
+            </button>
+          </div>
         </div>
       )}
     </div>
