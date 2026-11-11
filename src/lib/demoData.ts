@@ -1234,18 +1234,18 @@ export const getDemoFamilySnapshot = () => {
   const emergencyContacts: EmergencyContact[] = [
     {
       id: 'demo-con-1',
-      name: `${DEMO_TAG} Dr. Rajesh Mehta (Family Physician)`,
-      relation: 'Doctor',
+      name: `Harley Sham (Primary Emergency Contact)`,
+      relation: 'Emergency Lead',
       phone: '+91 98450 11223',
-      email: 'dr.mehta.demo@apollohospitals.test',
+      email: 'harleysham6925@gmail.com',
       isPrimary: true
     },
     {
       id: 'demo-con-2',
-      name: `${DEMO_TAG} Uncle Vikram (Father's Brother)`,
-      relation: 'Uncle',
+      name: `Sham Sampath (Family Member)`,
+      relation: 'Family',
       phone: '+91 98450 99887',
-      email: 'vikram.demo@homebrain.test',
+      email: 'shamsampth06@gmail.com',
       isPrimary: false
     }
   ];
@@ -1254,13 +1254,42 @@ export const getDemoFamilySnapshot = () => {
     {
       id: 'demo-elog-1',
       timestamp: new Date().toISOString(),
-      userLocation: 'Indiranagar 100ft Road, Bangalore, Karnataka, India',
-      latitude: 12.9716,
-      longitude: 77.6412,
+      userLocation: 'Kadambanallur, Chennai Metropolitan Area, Arakkonam, Ranipet, Tamil Nadu, 631151, India',
+      latitude: 13.014084,
+      longitude: 79.699829,
       accuracyMeters: 10,
       userName: 'Sarah',
       status: 'Logged',
-      recipients: [`${DEMO_TAG} Dr. Rajesh Mehta (+91 98450 11223)`, `${DEMO_TAG} Uncle Vikram (+91 98450 99887)`]
+      recipients: [`Harley Sham (+91 98450 11223)`, `Sham Sampath (+91 98450 99887)`]
+    }
+  ];
+
+  const documents: DocumentItem[] = [
+    {
+      id: 'demo-doc-passport-1',
+      title: `${DEMO_TAG} Father's Republic of India Passport`,
+      category: 'Identity',
+      fileType: 'PDF',
+      fileSize: '1.85 MB',
+      fileUrl: '#/documents/demo-doc-passport-1',
+      storagePath: 'passports/father-passport-2026.pdf',
+      description: 'Official Indian Passport for Father (Rajesh Kumar). Document No: Z4892107. Issued by RPO Bangalore. Valid: 14 Aug 2021 to 13 Aug 2031. Physical Location: Master Bedroom Study Safe Locker #2.',
+      summaryContent: '• Document Type: Republic of India Passport\n• Passport No: Z4892107\n• Holder: Rajesh Kumar (Father)\n• DOB: 15 Jun 1978\n• Place of Issue: Bangalore\n• Expiry Date: 13 Aug 2031\n• Physical House Storage: Master Bedroom Safe Locker #2, Shelf A\n• Emergency Contact: Priya Kumar (Mother)',
+      uploaderName: 'Sarah',
+      uploadDate: '2026-01-10'
+    },
+    {
+      id: 'demo-doc-insurance-2',
+      title: `${DEMO_TAG} Family Health Insurance Policy 2026 (Star Health)`,
+      category: 'Medical',
+      fileType: 'PDF',
+      fileSize: '3.2 MB',
+      fileUrl: '#/documents/demo-doc-insurance-2',
+      storagePath: 'insurance/star-health-floater-2026.pdf',
+      description: 'Comprehensive Family Floater Health Insurance Policy covering 5 members (Father, Mother, Sarah, Sneha, Sham). Sum Insured: ₹25,00,000. Policy No: SH-99201-2026. TPA: MediAssist India.',
+      summaryContent: '• Insurer: Star Health & Allied Insurance\n• Policy Number: SH-99201-2026\n• Sum Insured: ₹25,00,000 (Floater)\n• Beneficiaries: Rajesh Kumar, Priya Kumar, Sarah Kumar, Sneha Kumar, Sham Kumar\n• Renewal Date: 15 Dec 2026\n• Covered Hospitals: Apollo Hospitals, Manipal Hospitals, Fortis\n• TPA Helpline: 1800-425-2255 / 1800-102-4477\n• Physical Copy Location: Master Bedroom Filing Cabinet, Green Folder labeled "Insurance 2026"',
+      uploaderName: 'Sarah',
+      uploadDate: '2026-02-01'
     }
   ];
 
@@ -1285,7 +1314,7 @@ export const getDemoFamilySnapshot = () => {
     groceryHistory,
     knowledgeList,
     knowledgeFiles: [],
-    documents: [], // Document upload omitted as requested!
+    documents,
     memories,
     emergencyContacts,
     emergencyLogs

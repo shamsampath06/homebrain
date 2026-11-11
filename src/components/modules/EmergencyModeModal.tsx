@@ -27,10 +27,10 @@ import {
 import { EmergencyAlertLog } from '../../types';
 
 const DEFAULT_HOME_LOCATION = {
-  address: 'Kumar Family Residence, 100ft Road, Indiranagar, Bangalore, Karnataka 560038',
-  latitude: 12.9716,
-  longitude: 77.6412,
-  accuracyMeters: 15
+  address: 'Kadambanallur, Chennai Metropolitan Area, Arakkonam, Ranipet, Tamil Nadu, 631151, India',
+  latitude: 13.014084,
+  longitude: 79.699829,
+  accuracyMeters: 10
 };
 
 export const EmergencyModeModal: React.FC = () => {
@@ -786,29 +786,50 @@ export const EmergencyModeModal: React.FC = () => {
                 return (
                   <div
                     key={c.id}
-                    className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs"
+                    className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700 space-y-2 text-xs"
                   >
-                    <div>
-                      <p className="font-semibold text-slate-800 dark:text-slate-200">{c.name}</p>
-                      <p className="text-[11px] text-slate-500 font-mono">
-                        {c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`}
-                      </p>
-                    </div>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        status === 'ACCEPTED' || status === 'SENT'
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                    <div className="flex items-center justify-between flex-wrap gap-1">
+                      <div>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200">{c.name}</p>
+                        <p className="text-[11px] text-slate-500 font-mono">
+                          {c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`}
+                        </p>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                            : status === 'FAILED'
+                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                        }`}
+                      >
+                        {status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED'
+                          ? '✓ Delivered via Email Gateway'
                           : status === 'FAILED'
-                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                      }`}
-                    >
-                      {status === 'ACCEPTED' || status === 'SENT'
-                        ? '✓ Delivered via Resend'
-                        : status === 'FAILED'
-                        ? '✕ Email Failed'
-                        : '⚠️ RESEND_API_KEY Required'}
-                    </span>
+                          ? '✕ Email Failed'
+                          : '⚠️ SMTP/Resend Unconfigured'}
+                      </span>
+                    </div>
+
+                    {status === 'UNCONFIGURED' && (
+                      <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                        Automatic email gateway unconfigured in <code className="px-1 py-0.5 bg-amber-200/70 dark:bg-amber-900/80 rounded font-mono">.env.local</code>. Tap below to send directly via Gmail / your Email App:
+                      </p>
+                    )}
+
+                    <div className="pt-1">
+                      <a
+                        href={`mailto:${c.email}?subject=${encodeURIComponent(
+                          `🚨 URGENT EMERGENCY SOS ALERT – ${currentUser.name} Needs Help!`
+                        )}&body=${encodeURIComponent(
+                          `EMERGENCY SOS ALERT!\n\n${currentUser.name} has triggered an urgent emergency alert from HomeBrain.\n\n📍 Dispatched Address: ${address || DEFAULT_HOME_LOCATION.address}\n🌐 Coordinates: ${coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude}, ${coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude}\n🗺️ Live Google Map: ${mapUrl || `https://www.google.com/maps?q=${coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude},${coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude}`}\n⏰ Timestamp: ${new Date().toLocaleString('en-IN')}\n\nPlease contact immediately!`
+                        )}`}
+                        className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
+                      >
+                        <Mail className="w-3.5 h-3.5" /> Send Directly via Gmail / Email App
+                      </a>
+                    </div>
                   </div>
                 );
               })}

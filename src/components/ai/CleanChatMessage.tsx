@@ -99,6 +99,8 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
     const isGroceryList = items.some(it => /category:|kg|litre|pack|buy|grocery/i.test(it));
     // Check if these list items represent Allergies / Health warnings
     const isAllergyList = items.some(it => /critical|allergy|allergic|blood group|asthma/i.test(it));
+    // Check if these list items represent Document Vault Records
+    const isDocumentList = items.some(it => /passport|insurance|vault|policy|certificate|license|document|file size|file type/i.test(it));
 
     if (isEventList) {
       renderedElements.push(
@@ -248,6 +250,43 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
               >
                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 <div>{renderInlineFormatting(clean)}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+      return;
+    }
+
+    if (isDocumentList) {
+      renderedElements.push(
+        <div key={`docs-${renderedElements.length}`} className="space-y-2 my-2.5">
+          {items.map((rawItem, idx) => {
+            const clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
+            return (
+              <div
+                key={idx}
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex flex-col gap-2"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div className="text-xs leading-relaxed space-y-1">
+                      {renderInlineFormatting(clean)}
+                    </div>
+                  </div>
+                  {onNavigate && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('documents')}
+                      className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/50 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 font-bold text-[11px] shrink-0 transition-colors"
+                    >
+                      View in Vault →
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
