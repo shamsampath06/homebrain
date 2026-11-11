@@ -5,7 +5,7 @@ import { useHomeBrain } from '../../context/HomeBrainContext';
 import { formatIndiaDateTime } from '../../lib/display';
 import { getAccessToken } from '../../lib/supabase';
 import { PageHeader } from '../layout/PageHeader';
-import { ShieldAlert, AlertTriangle, MapPin, Share2, CheckCircle2, X, RefreshCw, Mail, Send, Phone, MessageSquare, Zap } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, MapPin, Share2, CheckCircle2, X, RefreshCw, Mail, Send, Phone, MessageSquare, Zap, Info } from 'lucide-react';
 
 const DEFAULT_HOME_LOCATION = {
   address: 'Kumar Family Residence, 100ft Road, Indiranagar, Bangalore, Karnataka 560038',
@@ -21,6 +21,8 @@ export const EmergencyModeModal: React.FC = () => {
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState('');
   const [address, setAddress] = useState('');
+  const [locationType, setLocationType] = useState<'home' | 'gps' | 'custom'>('home');
+  const [customAddress, setCustomAddress] = useState('');
   const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const [contactFormOpen, setContactFormOpen] = useState(false);
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export const EmergencyModeModal: React.FC = () => {
         pos => {
           const nextCoordinates = { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracyMeters: pos.coords.accuracy };
           setCoordinates(nextCoordinates);
+          setLocationType('gps');
           setIsLocating(false);
           setIsResolvingAddress(true);
           fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(nextCoordinates.latitude)}&lon=${encodeURIComponent(nextCoordinates.longitude)}&zoom=18&addressdetails=1`, {
@@ -59,30 +62,44 @@ export const EmergencyModeModal: React.FC = () => {
             .then(async response => {
               if (!response.ok) throw new Error('Address lookup failed.');
               const result = await response.json() as { display_name?: string };
-              setAddress(result.display_name || `GPS: ${nextCoordinates.latitude.toFixed(5)}, ${nextCoordinates.longitude.toFixed(5)}`);
+              setAddress(result.display_name || `Live GPS: ${nextCoordinates.latitude.toFixed(5)}, ${nextCoordinates.longitude.toFixed(5)}`);
               setStep('confirm');
             })
             .catch(() => {
-              setAddress(`GPS Location: ${nextCoordinates.latitude.toFixed(5)}° N, ${nextCoordinates.longitude.toFixed(5)}° E`);
+              setAddress(`Live Device GPS: ${nextCoordinates.latitude.toFixed(5)}° N, ${nextCoordinates.longitude.toFixed(5)}° E`);
               setStep('confirm');
             })
             .finally(() => setIsResolvingAddress(false));
         },
         err => {
-          console.warn('Geolocation blocked or unavailable, defaulting to verified home address:', err);
+          console.warn('Geolocation blocked or unavailable:', err);
+          setLocationError('Live GPS permission was not granted by your browser. Defaulting to registered Household Address.');
           setCoordinates({ latitude: DEFAULT_HOME_LOCATION.latitude, longitude: DEFAULT_HOME_LOCATION.longitude, accuracyMeters: DEFAULT_HOME_LOCATION.accuracyMeters });
           setAddress(DEFAULT_HOME_LOCATION.address);
+          setLocationType('home');
           setIsLocating(false);
           setStep('confirm');
         },
-        { enableHighAccuracy: false, timeout: 6000, maximumAge: 30000 }
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
     } else {
       setCoordinates({ latitude: DEFAULT_HOME_LOCATION.latitude, longitude: DEFAULT_HOME_LOCATION.longitude, accuracyMeters: DEFAULT_HOME_LOCATION.accuracyMeters });
       setAddress(DEFAULT_HOME_LOCATION.address);
+      setLocationType('home');
       setIsLocating(false);
       setStep('confirm');
     }
+  };
+
+  const handleUseCustomAddress = () => {
+    if (!customAddress.trim()) {
+      setLocationError('Please type a location or address to broadcast.');
+      return;
+    }
+    setLocationType('custom');
+    setCoordinates({ latitude: DEFAULT_HOME_LOCATION.latitude, longitude: DEFAULT_HOME_LOCATION.longitude, accuracyMeters: 50 });
+    setAddress(customAddress.trim());
+    setStep('confirm');
   };
 
   const handleInstantSOS = async () => {
@@ -338,9 +355,87 @@ export const EmergencyModeModal: React.FC = () => {
         <div className="space-y-4 mt-4">
           <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-900 dark:text-rose-200 leading-relaxed">
             <p className="font-bold text-sm mb-1">🚨 Safety Confirmation Step</p>
-            Emergency SOS records your current GPS location and shares it with authorized HomeBrain family accounts after you explicitly confirm.
+            Emergency SOS records your location and shares it with authorized HomeBrain family accounts. You can broadcast your live GPS or your registered household address.
           </div>
-          {locationError && <p className="text-xs text-rose-600">{locationError}</p>}
+          {locationError && <p className="text-xs text-rose-600 font-semibold">{locationError}</p>}
+
+          {/* Location Mode Selector */}
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-rose-500" /> Choose Location Source:
+              </span>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                {locationType === 'gps' ? '📍 Live GPS' : locationType === 'custom' ? '✏️ Custom Spot' : '🏠 Household Address'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <button
+                type="button"
+                onClick={handleFetchLocation}
+                disabled={isLocating}
+                className="p-2.5 rounded-xl border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-left font-semibold flex items-center gap-2 transition-all shadow-sm"
+              >
+                <MapPin className="w-4 h-4 text-rose-600 shrink-0" />
+                <div>
+                  <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
+                    {isLocating ? 'Acquiring GPS...' : '📍 Use Live Device GPS'}
+                  </p>
+                  <p className="text-[10px] text-slate-500 font-normal">Real physical location from browser</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCoordinates({ latitude: DEFAULT_HOME_LOCATION.latitude, longitude: DEFAULT_HOME_LOCATION.longitude, accuracyMeters: DEFAULT_HOME_LOCATION.accuracyMeters });
+                  setAddress(DEFAULT_HOME_LOCATION.address);
+                  setLocationType('home');
+                }}
+                className={`p-2.5 rounded-xl border text-left font-semibold flex items-center gap-2 transition-all shadow-sm ${
+                  locationType === 'home'
+                    ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/40 text-brand-800 dark:text-brand-200'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                }`}
+              >
+                <div className="text-base shrink-0">🏠</div>
+                <div>
+                  <p className="text-[11px] font-bold">Kumar Residence</p>
+                  <p className="text-[10px] text-slate-500 font-normal">Indiranagar, Bangalore 560038</p>
+                </div>
+              </button>
+            </div>
+
+            {/* Custom Location Field */}
+            <div className="pt-1 flex gap-2">
+              <input
+                type="text"
+                placeholder="Or type custom address / campus / landmark..."
+                value={customAddress}
+                onChange={e => setCustomAddress(e.target.value)}
+                className="flex-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-900"
+              />
+              <button
+                type="button"
+                onClick={handleUseCustomAddress}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 text-white font-bold text-xs shrink-0 hover:bg-slate-700"
+              >
+                Use Custom
+              </button>
+            </div>
+          </div>
+
+          {/* Contact Alert Notification Tip */}
+          <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-2">
+            <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Receive Alerts on Your Own Phone:</p>
+              <p className="font-normal mt-0.5">
+                The demo contacts (Dr. Mehta, Uncle Vikram) use placeholder demo numbers. Click <strong>+ Add emergency contact</strong> below to add your real phone number so you can test native SMS and calling!
+              </p>
+            </div>
+          </div>
 
           <div>
             <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Designated Emergency Contacts:</h4>
@@ -480,8 +575,13 @@ export const EmergencyModeModal: React.FC = () => {
           </p>
 
           <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-xs text-emerald-800 dark:text-emerald-200 font-semibold space-y-1 text-left">
-            <p className="font-bold flex items-center gap-1.5 text-emerald-900 dark:text-emerald-100">
-              <MapPin className="w-3.5 h-3.5" /> Dispatched Address:
+            <p className="font-bold flex items-center justify-between text-emerald-900 dark:text-emerald-100">
+              <span className="flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5" /> Dispatched Address:
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200/80 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100">
+                {locationType === 'gps' ? '📍 Live GPS' : locationType === 'custom' ? '✏️ Custom Location' : '🏠 Household Address'}
+              </span>
             </p>
             <p className="text-emerald-700 dark:text-emerald-300 font-normal">{address}</p>
             <div className="pt-1">
@@ -521,6 +621,10 @@ export const EmergencyModeModal: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300">
+              <span className="font-bold text-slate-800 dark:text-slate-200">⚡ Notification Delivery: </span>
+              In-app SOS notification broadcasted to all active family screens. Because external SMS gateways (e.g. Twilio) require paid API keys, click <strong>Call</strong> or <strong>SMS</strong> above to trigger a direct SMS or call from your device!
             </div>
           </div>
           {emailResults.length > 0 && (
