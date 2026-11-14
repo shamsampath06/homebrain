@@ -133,6 +133,10 @@ export function isAnsweringPendingAction(query: string, action: PendingAction): 
     return /^(?:yes|sure|ok|please|proceed)\b/i.test(clean);
   }
 
+  if (action.type === 'calendar_delete_confirm') {
+    return /^(?:yes|no|yep|nope|sure|cancel|confirm|abort|keep|do\s+it|please\s+delete|ok)$/i.test(clean) || clean.includes('yes') || clean.includes('no') || clean.includes('cancel');
+  }
+
   // New commands start with command verbs or full queries
   if (/^(add|schedule|plan|create|set|book|remind|cancel|delete|remove|move|reschedule|postpone|show|list|what|when|where|who|which|is|are|can|did|do|does|how|get|fetch|find|upload|mark|clear\s+my|birthday|birhtday|birtday|brithday|bday)/i.test(clean)) {
     return false;
@@ -243,8 +247,8 @@ export function extractCustomPersonName(cleanQuery: string): string | undefined 
   return undefined;
 }
 
-// Helper to cleanly extract Event Title and Category from natural phrasing
-export function extractCalendarEventDetails(rawQuery: string, entities: ExtractedEntities): { title: string; category: string } {
+// Helper to cleanly extract Event Title, Category, Location, and Description from natural phrasing
+export function extractCalendarEventDetails(rawQuery: string, entities: ExtractedEntities): { title: string; category: string; location?: string; description?: string } {
   const clean = (rawQuery || '').trim();
 
   const toTitleCase = (str: string) =>
@@ -253,6 +257,31 @@ export function extractCalendarEventDetails(rawQuery: string, entities: Extracte
       .split(/\s+/)
       .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
       .join(' ');
+
+  let location: string | undefined = undefined;
+  let description: string | undefined = undefined;
+
+  // Extract explicit location & description if present
+  const locMatch = clean.match(/(?:location|venue|at\s+venue)\s*[:=]\s*([^,;]+)/i) ||
+    clean.match(/\bat\s+([A-Z][a-zA-Z\s]+(?:Clinic|Hospital|Restaurant|Stadium|Center|Centre|Hall|Temple|Room|Office|Home|School|Academy))\b/i);
+  if (locMatch && locMatch[1]) {
+    location = locMatch[1].trim();
+  }
+
+  const descMatch = clean.match(/(?:description|desc|details|notes?)\s*[:=]\s*([^,;]+)/i) ||
+    clean.match(/\bwith\s+description\s+([^,;]+)/i);
+  if (descMatch && descMatch[1]) {
+    description = descMatch[1].trim();
+  }
+
+  // Key-value syntax check (e.g. "title: Quarterly Planning, category: Meeting, ...")
+  const titleFieldMatch = clean.match(/(?:title|event\s+title|name)\s*[:=]\s*([^,;]+)/i);
+  if (titleFieldMatch && titleFieldMatch[1]) {
+    const rawTitle = titleFieldMatch[1].trim();
+    const catMatch = clean.match(/(?:category|type)\s*[:=]\s*([^,;]+)/i);
+    let category = catMatch ? toTitleCase(catMatch[1].trim()) : 'General';
+    return { title: toTitleCase(rawTitle), category, location, description };
+  }
 
   let extractedTitle = '';
 
@@ -267,6 +296,10 @@ export function extractCalendarEventDetails(rawQuery: string, entities: Extracte
       .replace(/^(?:please\s+)?(?:schedule|add|plan|create|set|book|update|change|move|reschedule)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?/i, '')
       // Remove leading "event in/on <date>" if followed by title
       .replace(/^event\s+/i, '')
+      // Remove explicit description/location clauses
+      .replace(/(?:location|venue|at\s+venue)\s*[:=]\s*[^,;]+/gi, ' ')
+      .replace(/(?:description|desc|details|notes?)\s*[:=]\s*[^,;]+/gi, ' ')
+      .replace(/\bwith\s+description\s+[^,;]+/gi, ' ')
       // Remove date phrases like "date in 9 jan", "on 25 dec", "in december 25th", "on 2026-12-25"
       .replace(/\b(?:date\s+)?(?:on|in|for|to)\s+\d{4}-\d{1,2}-\d{1,2}\b/gi, ' ')
       .replace(/\b(?:date\s+)?(?:on|in|for|to)\s+\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b/gi, ' ')
@@ -297,12 +330,13 @@ export function extractCalendarEventDetails(rawQuery: string, entities: Extracte
 
   let category = 'General';
   if (BIRTHDAY_REGEX.test(lowerT)) category = 'Birthday';
-  else if (/holiday|vacation|festival|pongal|diwali|christmas|new\s*year|eid|ramzan|onam|ugadi|holi|navaratri|anniversary|puja|pooja/i.test(lowerT)) category = 'Holiday';
+  else if (/holiday|vacation|festival|pongal|diwali|christmas|new\s*year|eid|ramzan|onam|ugadi|holi|navaratri|anniversary|puja|pooja|trip|travel|temple/i.test(lowerT)) category = 'Holiday';
   else if (/doctor|appointment|checkup|clinic|hospital|dentist|medical/i.test(lowerT)) category = 'Appointment';
   else if (/meeting|conference|interview|seminar|workshop/i.test(lowerT)) category = 'Meeting';
   else if (/school|college|exam|match|interschool|class/i.test(lowerT)) category = 'School';
+  else if (/bill|reminder/i.test(lowerT)) category = 'Bill';
 
-  return { title: finalTitle, category };
+  return { title: finalTitle, category, location, description };
 }
 
 // -------------------------------------------------------------
@@ -320,6 +354,26 @@ export function parseDateAndRelativeTime(raw: string): { date?: string; time?: s
 
   const currentYear = 2026;
   const now = new Date();
+
+  // Extract time first so it is preserved alongside date
+  let extractedTime: string | undefined = undefined;
+  const timeMatch = cleaned.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1], 10);
+    const mins = timeMatch[2] || '00';
+    const ampm = timeMatch[3].toUpperCase();
+    if (ampm === 'PM' && hours < 12) hours += 12;
+    if (ampm === 'AM' && hours === 12) hours = 0;
+    extractedTime = `${String(hours).padStart(2, '0')}:${mins}`;
+  } else if (cleaned.includes('tonight')) {
+    extractedTime = '20:00';
+  } else if (cleaned.includes('morning')) {
+    extractedTime = '09:00';
+  } else if (cleaned.includes('afternoon')) {
+    extractedTime = '14:00';
+  } else if (cleaned.includes('evening')) {
+    extractedTime = '18:00';
+  }
 
   const months: Record<string, number> = {
     jan: 0, january: 0,
@@ -348,7 +402,7 @@ export function parseDateAndRelativeTime(raw: string): { date?: string; time?: s
     const d = isoMatch[3].padStart(2, '0');
     const mIdx = parseInt(m, 10) - 1;
     const mLabel = monthFullNames[mIdx] || m;
-    return { date: `${y}-${m}-${d}`, formattedDisplay: `${mLabel} ${parseInt(d, 10)}, ${y}` };
+    return { date: `${y}-${m}-${d}`, formattedDisplay: `${mLabel} ${parseInt(d, 10)}, ${y}`, ...(extractedTime ? { time: extractedTime } : {}) };
   }
 
   // DD/MM/YYYY or DD-MM-YYYY
@@ -362,12 +416,13 @@ export function parseDateAndRelativeTime(raw: string): { date?: string; time?: s
       const dayStr = String(day).padStart(2, '0');
       return {
         date: `${year}-${monthStr}-${dayStr}`,
-        formattedDisplay: `${monthFullNames[monthNum]} ${day}, ${year}`
+        formattedDisplay: `${monthFullNames[monthNum]} ${day}, ${year}`,
+        ...(extractedTime ? { time: extractedTime } : {})
       };
     }
   }
 
-  // Month then day: "dec 25", "december 25th", "december 10"
+  // Month then day: "dec 25", "december 25th", "december 10", "nov 15", "november 20"
   const monthDayMatch = cleaned.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*(\d{1,2})(?:st|nd|rd|th)?\b/i);
   if (monthDayMatch) {
     const monthName = monthDayMatch[1].toLowerCase();
@@ -378,12 +433,13 @@ export function parseDateAndRelativeTime(raw: string): { date?: string; time?: s
       const dayStr = String(day).padStart(2, '0');
       return {
         date: `${currentYear}-${monthStr}-${dayStr}`,
-        formattedDisplay: `${monthFullNames[monthNum]} ${day}, ${currentYear}`
+        formattedDisplay: `${monthFullNames[monthNum]} ${day}, ${currentYear}`,
+        ...(extractedTime ? { time: extractedTime } : {})
       };
     }
   }
 
-  // Day then month: "25th dec", "10 december", "15 jan", "9 jan", "25 dec"
+  // Day then month: "25th dec", "10 december", "15 jan", "9 jan", "25 dec", "20 november"
   const dayMonthMatch = cleaned.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i);
   if (dayMonthMatch) {
     const day = parseInt(dayMonthMatch[1], 10);
@@ -394,34 +450,28 @@ export function parseDateAndRelativeTime(raw: string): { date?: string; time?: s
       const dayStr = String(day).padStart(2, '0');
       return {
         date: `${currentYear}-${monthStr}-${dayStr}`,
-        formattedDisplay: `${monthFullNames[monthNum]} ${day}, ${currentYear}`
+        formattedDisplay: `${monthFullNames[monthNum]} ${day}, ${currentYear}`,
+        ...(extractedTime ? { time: extractedTime } : {})
       };
     }
   }
 
   if (cleaned.includes('tomorrow') || cleaned.includes('naalaiku')) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return { date: `${y}-${m}-${day}`, formattedDisplay: `Tomorrow (${day}-${m}-${y})` };
+    const tomDate = getKolkataDateString(1);
+    const [y, m, day] = tomDate.split('-');
+    return { date: tomDate, formattedDisplay: `Tomorrow (${day}-${m}-${y})`, ...(extractedTime ? { time: extractedTime } : {}) };
   }
 
   if (cleaned.includes('yesterday') || cleaned.includes('nethu')) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return { date: `${y}-${m}-${day}`, formattedDisplay: `Yesterday (${day}-${m}-${y})` };
+    const yestDate = getKolkataDateString(-1);
+    const [y, m, day] = yestDate.split('-');
+    return { date: yestDate, formattedDisplay: `Yesterday (${day}-${m}-${y})`, ...(extractedTime ? { time: extractedTime } : {}) };
   }
 
   if (cleaned.includes('today') || cleaned.includes('inniku')) {
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return { date: `${y}-${m}-${day}`, formattedDisplay: `Today (${day}-${m}-${y})` };
+    const todayDate = getKolkataDateString(0);
+    const [y, m, day] = todayDate.split('-');
+    return { date: todayDate, formattedDisplay: `Today (${day}-${m}-${y})`, ...(extractedTime ? { time: extractedTime } : {}) };
   }
 
   const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -437,26 +487,11 @@ export function parseDateAndRelativeTime(raw: string): { date?: string; time?: s
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
-      return { date: `${y}-${m}-${day}`, formattedDisplay: `${dayName.charAt(0).toUpperCase() + dayName.slice(1)} (${day}-${m}-${y})` };
+      return { date: `${y}-${m}-${day}`, formattedDisplay: `${dayName.charAt(0).toUpperCase() + dayName.slice(1)} (${day}-${m}-${y})`, ...(extractedTime ? { time: extractedTime } : {}) };
     }
   }
 
-  let extractedTime = '';
-  const timeMatch = cleaned.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
-  if (timeMatch) {
-    let hours = parseInt(timeMatch[1], 10);
-    const mins = timeMatch[2] || '00';
-    const ampm = timeMatch[3].toUpperCase();
-    if (ampm === 'PM' && hours < 12) hours += 12;
-    if (ampm === 'AM' && hours === 12) hours = 0;
-    extractedTime = `${String(hours).padStart(2, '0')}:${mins}`;
-  } else if (cleaned.includes('tonight')) {
-    extractedTime = '20:00';
-  } else if (cleaned.includes('morning')) {
-    extractedTime = '09:00';
-  }
-
-  return { time: extractedTime };
+  return extractedTime ? { time: extractedTime } : {};
 }
 
 // -------------------------------------------------------------
@@ -509,12 +544,13 @@ export function classifyIntentAndExtractEntities(rawQuery: string): ClassifiedIn
   // ==========================================================
   // 1. MULTI-TURN CONFIRMATIONS & RESOLUTION CHOICES
   // ==========================================================
-  if (/^(update(?:\s+it|\s+date)?|yes\s+update|change\s+it|update\s+existing|yes,\s*update\s+it)$/i.test(clean)) {
+  if (/^(?:yes\s+)?(?:please\s+)?(?:update|change|chnage|chagne)(?:\s+it|\s+date|\s+existing|\s+and\s+(?:change|chnage|chagne)|\s+into|\s+to)?(?:\s+.*)?$/i.test(clean) &&
+      (clean.includes('it') || clean.includes('into') || clean.includes('date') || clean.includes('existing') || clean.includes('change') || clean.includes('chnage'))) {
     return {
       operation: 'UPDATE',
       module: 'calendar',
       intentName: 'confirm_update_conflict',
-      entities: { actionChoice: 'update' },
+      entities: { actionChoice: 'update', ...dateInfo },
       confidence: 0.99,
       rawQuery,
       normalizedQuery: clean
@@ -555,17 +591,19 @@ export function classifyIntentAndExtractEntities(rawQuery: string): ClassifiedIn
     if (BIRTHDAY_REGEX.test(clean)) entities.eventType = 'birthday';
     else if (/anniversary/i.test(clean)) entities.eventType = 'anniversary';
     else if (/meeting/i.test(clean)) entities.eventType = 'meeting';
-    else if (/doctor|appointment|checkup/i.test(clean)) entities.eventType = 'doctor appointment';
+    else if (/doctor|appointment|checkup|dentist|clinic|hospital|medical/i.test(clean)) entities.eventType = 'doctor appointment';
     else if (/housewarming/i.test(clean)) entities.eventType = 'housewarming';
     else if (/holiday|vacation|festival|pongal|diwali|christmas|new\s*year|eid|ramzan|onam|ugadi|holi|navaratri/i.test(clean)) entities.eventType = 'holiday';
     else if (/marriage|wedding|reception|engagement/i.test(clean)) entities.eventType = 'marriage function';
     else if (/trip|tour|outing/i.test(clean)) entities.eventType = 'trip';
-    else if (/function|ceremony|puja|pooja|party|dinner|lunch/i.test(clean)) entities.eventType = 'family function';
+    else if (/dinner|lunch|breakfast/i.test(clean)) entities.eventType = 'family dinner';
+    else if (/function|ceremony|puja|pooja|party/i.test(clean)) entities.eventType = 'family function';
 
     const isCreateCalendar = (
       /^(?:add|schedule|plan|create|set|book)\b/i.test(clean) ||
       /\b(?:add\s+pannu|add\s+pannunga|podu)\b/i.test(clean) ||
-      /\badd\s+a\s+reminder\s+for\s+(?:my\s+)?(?:father|mother|brother)/i.test(clean)
+      /\badd\s+a\s+reminder\s+for\s+(?:my\s+)?(?:father|mother|brother)/i.test(clean) ||
+      /^(?:title|event\s+title)\s*[:=]/i.test(clean)
     );
 
     if (isCreateCalendar) {
@@ -593,7 +631,15 @@ export function classifyIntentAndExtractEntities(rawQuery: string): ClassifiedIn
     }
 
     operation = 'READ';
-    intentName = entities.eventType === 'birthday' ? 'get_birthday' : 'get_calendar_events';
+    if (entities.eventType === 'birthday') {
+      intentName = 'get_birthday';
+    } else if (entities.eventType === 'doctor appointment') {
+      intentName = 'get_medical_appointments';
+    } else if (/\b(?:summarize|summary|overview)\b/i.test(clean)) {
+      intentName = 'summarize_schedule';
+    } else {
+      intentName = 'get_calendar_events';
+    }
     return { operation, module, intentName, entities, confidence: 0.9, rawQuery, normalizedQuery: clean };
   }
 
@@ -1030,9 +1076,9 @@ export async function processIntelligentAction(
           data: {
             existingId: matchedExistingEvt?.id || pendingAction?.data?.existingId,
             existingTitle,
-            requestedDate: parsedReq.date || '2026-12-25',
+            requestedDate: parsedReq.date || pendingAction?.data?.requestedDate || '2026-12-25',
             requestedTitle: `${cleanPerson || 'Family Member'}'s Birthday`,
-            person: cleanPerson || pendingAction?.data?.person || 'Mother'
+            person: cleanPerson || pendingAction?.data?.person || (matchedExistingEvt ? matchedExistingEvt.title.replace(/['’]s.*$/i, '') : 'Family Member')
           },
           createdAt: Date.now()
         };
@@ -1054,6 +1100,36 @@ export async function processIntelligentAction(
 
   // Handle Pending Conflict Resolution
   if (pendingAction) {
+    if (pendingAction.type === 'calendar_delete_confirm') {
+      const isConfirmed = /^(?:yes|yep|sure|confirm|do\s+it|please\s+delete|ok)$/i.test(clean) || (clean.includes('yes') && !clean.includes('no'));
+      const isCancelled = /^(?:no|cancel|abort|keep|stop|don'?t)$/i.test(clean) || clean.includes('no') || clean.includes('cancel');
+
+      if (isConfirmed) {
+        clearPendingAction(sessionKey);
+        const { eventId, title, date } = pendingAction.data;
+        if (eventId) {
+          await dbMethods.deleteFamilyData('events', eventId, token);
+        }
+        const idx = events.findIndex((e: any) => e.id === eventId || (e.title || '').replace(/\[DEMO\]\s*/g, '').toLowerCase() === (title || '').toLowerCase());
+        if (idx >= 0) events.splice(idx, 1);
+
+        actionsExecuted.push({
+          type: 'add_event',
+          title: title || 'Calendar Event',
+          detail: `Deleted event scheduled on ${date}`,
+          status: 'success'
+        });
+
+        const reply = `🗑️ **Event Deleted**: **${title}** scheduled on ${date} has been removed from your calendar.`;
+        return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+      } else if (isCancelled) {
+        const { title } = pendingAction.data;
+        clearPendingAction(sessionKey);
+        const reply = `Action cancelled. **${title}** remains on your calendar.`;
+        return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+      }
+    }
+
     if (pendingAction.type === 'calendar_conflict') {
       const choice = (clean.includes('update') || clean.includes('change') || clean.includes('chnage')) ? 'update' : (clean.includes('separate') || clean.includes('both') ? 'separate' : null);
       if (choice === 'update') {
@@ -1308,9 +1384,9 @@ export async function processIntelligentAction(
         }
       }
 
-      // Non-birthday events (e.g., "add event in 25 dec as marriage function", "add holiday date in 9 jan")
-      const { title: eventTitle, category: eventCategory } = extractCalendarEventDetails(rawQuery, entities);
-      const targetDate = requestedDate || new Date().toISOString().split('T')[0];
+      // Non-birthday events (e.g., "add event in 25 dec as marriage function", "add a family dinner tomorrow at 7 PM", "schedule a doctor's appointment for November 20 at 10 AM", "schedule an event with a title, date, time, category, description and location")
+      const { title: eventTitle, category: eventCategory, location: eventLoc, description: eventDesc } = extractCalendarEventDetails(rawQuery, entities);
+      const targetDate = requestedDate || (entities.date) || getKolkataDateString(0);
       const targetTime = entities.time || '10:00';
 
       // Check for duplicate event on the same date
@@ -1325,12 +1401,15 @@ export async function processIntelligentAction(
         return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
       }
 
-      const payload = {
+      const payload: Record<string, any> = {
         title: eventTitle,
         date: targetDate,
         time: targetTime,
         category: eventCategory,
-        recurring: eventCategory === 'Birthday' || eventCategory === 'Holiday' ? 'Yearly' : 'None',
+        recurring: eventCategory === 'Birthday' || eventCategory === 'Holiday' ? 'Yearly' : (clean.includes('weekly') ? 'Weekly' : clean.includes('monthly') ? 'Monthly' : 'None'),
+        reminder: true,
+        location: eventLoc || '',
+        description: eventDesc || `${eventTitle} scheduled on ${targetDate}`,
         members_involved: [user.name || 'Family'],
         family_id: user.familyId
       };
@@ -1346,7 +1425,7 @@ export async function processIntelligentAction(
         status: 'success'
       });
       const formatted = formatDateHuman(payload.date);
-      const reply = `✅ **Added to Family Calendar**\n\nScheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${payload.time}**.\n\n• **${payload.date} at ${payload.time}**: ${payload.title} (${payload.category}) - Members: ${payload.members_involved.join(', ')}`;
+      const reply = `✅ **Added to Family Calendar**\n\nScheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${payload.time}**.\n\n• **${payload.date} at ${payload.time}**: ${payload.title} (${payload.category}) - Members: ${payload.members_involved.join(', ')}${payload.location ? `\n• **Location**: ${payload.location}` : ''}${payload.description ? `\n• **Description**: ${payload.description}` : ''}`;
       return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
     }
 
@@ -1357,7 +1436,7 @@ export async function processIntelligentAction(
       const requestedTime = entities.time;
 
       // 1. Updating a birthday (e.g. "change father bday to dec 12", "update luffy birthday to july 20")
-      if (isBirthday || person) {
+      if (isBirthday || (person && /birthday|bday/i.test(clean))) {
         const targetPerson = person || 'Father';
         const existingBday = events.find((e: any) => isEventForCelebrant(e, targetPerson, 'birthday')) ||
           events.find((e: any) => isEventForCelebrant(e, targetPerson));
@@ -1368,7 +1447,7 @@ export async function processIntelligentAction(
             type: 'calendar_missing_date',
             data: { person: targetPerson }
           });
-          const reply = 'What is the correct date?';
+          const reply = `What is the new date for ${targetPerson}'s birthday?`;
           return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
         }
 
@@ -1389,7 +1468,6 @@ export async function processIntelligentAction(
           const reply = `🎂 **Birthday Updated**: **${cleanTitle}** has been updated to **${reqFormatted}** (${requestedDate}).\n\n• **${requestedDate} at ${existingBday.time || '19:00'}**: ${cleanTitle} (Birthday) - Members: ${targetPerson}`;
           return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
         } else {
-          // If no existing record for this person, create it on the requested date
           const payload = {
             title: `${targetPerson}'s Birthday`,
             date: requestedDate,
@@ -1415,38 +1493,146 @@ export async function processIntelligentAction(
         }
       }
 
-      // 2. Updating a meeting time (e.g. "Move my meeting to 3 PM")
-      if (/meeting/i.test(clean) && (requestedTime || !requestedDate)) {
-        const targetTime = requestedTime || '15:00';
-        const meetingEvent = events.find((e: any) => (e.title || '').toLowerCase().includes('meeting') || (e.category || '').toLowerCase() === 'meeting');
-        if (meetingEvent) {
-          meetingEvent.time = targetTime;
-          if (requestedDate) meetingEvent.date = requestedDate;
-          if (meetingEvent.id) {
-            await dbMethods.updateFamilyData('events', meetingEvent.id, {
-              time: targetTime,
-              ...(requestedDate ? { date: requestedDate } : {})
-            }, token);
+      // 2. Updating / Moving Family Dinner
+      if (/dinner|lunch|breakfast|meal/i.test(clean)) {
+        const dinnerEv = events.find((e: any) => /dinner|lunch|breakfast|meal/i.test(e.title || ''));
+        if (dinnerEv) {
+          const cleanTitle = (dinnerEv.title || 'Family Dinner').replace(/\[DEMO\]\s*/g, '');
+          const patch: Record<string, any> = {};
+          if (requestedTime) {
+            dinnerEv.time = requestedTime;
+            patch.time = requestedTime;
+          }
+          if (requestedDate) {
+            dinnerEv.date = requestedDate;
+            patch.date = requestedDate;
+          }
+          if (dinnerEv.id) {
+            await dbMethods.updateFamilyData('events', dinnerEv.id, patch, token);
           }
           actionsExecuted.push({
             type: 'add_event',
-            title: meetingEvent.title || 'Meeting',
-            detail: `Moved to ${targetTime}`,
+            title: cleanTitle,
+            detail: `Updated dinner to ${dinnerEv.date} at ${dinnerEv.time || '20:00'}`,
             status: 'success'
           });
+          const formatted = formatDateHuman(dinnerEv.date);
+          const reply = `🍽️ **Event Updated**: **${cleanTitle}** has been moved to **${formatted}** (${dinnerEv.date}) at **${dinnerEv.time || '20:00'}**.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
         }
-        const reply = `Your meeting has been moved to ${targetTime === '15:00' ? '3 PM' : targetTime}.`;
-        return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
       }
 
-      // 3. Updating any other calendar event (e.g. "change marriage function to 28 dec", "move holiday to jan 10")
+      // 3. Updating Location specifically (e.g. "Update the event location to Apollo Clinic")
+      const explicitLocMatch = rawQuery.match(/(?:update|change|set)\s+(?:the\s+)?(?:event\s+)?location\s+(?:to\s+|as\s+)?(.+)/i);
+      if (explicitLocMatch) {
+        const newLocation = explicitLocMatch[1].replace(/^[to\s:]+/i, '').trim();
+        const targetEv = events.find((e: any) => e.date >= getKolkataDateString()) || events[0];
+        if (targetEv) {
+          targetEv.location = newLocation;
+          if (targetEv.id) {
+            await dbMethods.updateFamilyData('events', targetEv.id, { location: newLocation }, token);
+          }
+          const cleanTitle = (targetEv.title || 'Event').replace(/\[DEMO\]\s*/g, '');
+          actionsExecuted.push({
+            type: 'add_event',
+            title: cleanTitle,
+            detail: `Updated location to ${newLocation}`,
+            status: 'success'
+          });
+          const reply = `📍 **Location Updated**: Location for **${cleanTitle}** has been updated to **${newLocation}**.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 4. Updating Description specifically (e.g. "Change the event description to ...")
+      const explicitDescMatch = rawQuery.match(/(?:update|change|set)\s+(?:the\s+)?(?:event\s+)?description\s+(?:to\s+|as\s+)?(.+)/i);
+      if (explicitDescMatch) {
+        const newDesc = explicitDescMatch[1].replace(/^[to\s:]+/i, '').trim();
+        const targetEv = events.find((e: any) => e.date >= getKolkataDateString()) || events[0];
+        if (targetEv) {
+          targetEv.description = newDesc;
+          if (targetEv.id) {
+            await dbMethods.updateFamilyData('events', targetEv.id, { description: newDesc }, token);
+          }
+          const cleanTitle = (targetEv.title || 'Event').replace(/\[DEMO\]\s*/g, '');
+          actionsExecuted.push({
+            type: 'add_event',
+            title: cleanTitle,
+            detail: `Updated description`,
+            status: 'success'
+          });
+          const reply = `📝 **Description Updated**: Description for **${cleanTitle}** has been updated to: *"${newDesc}"*.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 5. Updating Title specifically (e.g. "Change the event title to ...")
+      const explicitTitleMatch = rawQuery.match(/(?:update|change|set)\s+(?:the\s+)?(?:event\s+)?title\s+(?:to\s+|as\s+)?(.+)/i);
+      if (explicitTitleMatch) {
+        const newTitle = explicitTitleMatch[1].replace(/^[to\s:]+/i, '').trim();
+        const targetEv = events.find((e: any) => e.date >= getKolkataDateString()) || events[0];
+        if (targetEv) {
+          const oldTitle = (targetEv.title || 'Event').replace(/\[DEMO\]\s*/g, '');
+          targetEv.title = newTitle;
+          if (targetEv.id) {
+            await dbMethods.updateFamilyData('events', targetEv.id, { title: newTitle }, token);
+          }
+          actionsExecuted.push({
+            type: 'add_event',
+            title: newTitle,
+            detail: `Renamed from ${oldTitle}`,
+            status: 'success'
+          });
+          const reply = `✏️ **Title Updated**: Event title has been changed from **${oldTitle}** to **${newTitle}**.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 6. Updating / Rescheduling Doctor / Medical Appointment
+      if (/appointment|doctor|dentist|clinic|hospital/i.test(clean)) {
+        const apptEv = events.find((e: any) =>
+          (e.category || '').toLowerCase() === 'appointment' ||
+          /doctor|dentist|appointment|clinic/i.test(e.title || '')
+        );
+        if (apptEv) {
+          const cleanTitle = (apptEv.title || 'Doctor Appointment').replace(/\[DEMO\]\s*/g, '');
+          const patch: Record<string, any> = {};
+          if (requestedDate) {
+            apptEv.date = requestedDate;
+            patch.date = requestedDate;
+          }
+          if (requestedTime) {
+            apptEv.time = requestedTime;
+            patch.time = requestedTime;
+          }
+          const newLocMatch = rawQuery.match(/(?:location|to|at)\s+([A-Z][a-zA-Z\s]+(?:Clinic|Hospital|Center|Centre|Hall))/i);
+          if (newLocMatch) {
+            apptEv.location = newLocMatch[1].replace(/^(?:to|at)\s+/i, '').trim();
+            patch.location = apptEv.location;
+          }
+          if (apptEv.id) {
+            await dbMethods.updateFamilyData('events', apptEv.id, patch, token);
+          }
+          actionsExecuted.push({
+            type: 'add_event',
+            title: cleanTitle,
+            detail: `Rescheduled to ${apptEv.date} at ${apptEv.time || '10:00'}`,
+            status: 'success'
+          });
+          const formatted = formatDateHuman(apptEv.date);
+          const reply = `🩺 **Appointment Updated**: **${cleanTitle}** has been rescheduled to **${formatted}** (${apptEv.date}) at **${apptEv.time || '10:00'}**${apptEv.location ? ` at **${apptEv.location}**` : ''}.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 7. General event matching and update
       const { title: targetTitle } = extractCalendarEventDetails(rawQuery, entities);
       const matchedEvent = events.find((e: any) => {
         const t = (e.title || '').replace(/\[DEMO\]\s*/g, '').toLowerCase();
         return t.includes(targetTitle.toLowerCase()) || targetTitle.toLowerCase().includes(t);
       });
 
-      if (matchedEvent && (requestedDate || requestedTime)) {
+      if (matchedEvent) {
         const cleanTitle = (matchedEvent.title || targetTitle).replace(/\[DEMO\]\s*/g, '');
         const patch: Record<string, any> = {};
         if (requestedDate) {
@@ -1467,7 +1653,7 @@ export async function processIntelligentAction(
           status: 'success'
         });
         const formatted = formatDateHuman(matchedEvent.date);
-        const reply = `✅ **Event Updated**: **${cleanTitle}** has been rescheduled to **${formatted}** (${matchedEvent.date}) at **${matchedEvent.time || '10:00'}**.\n\n• **${matchedEvent.date} at ${matchedEvent.time || '10:00'}**: ${cleanTitle} (${matchedEvent.category || 'General'}) - Members: ${(Array.isArray(matchedEvent.members_involved) ? matchedEvent.members_involved : [user.name]).join(', ')}`;
+        const reply = `✅ **Event Updated**: **${cleanTitle}** has been rescheduled to **${formatted}** (${matchedEvent.date}) at **${matchedEvent.time || '10:00'}**.`;
         return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
       }
     }
@@ -1479,6 +1665,12 @@ export async function processIntelligentAction(
 
       const matched = events.find((e: any) => {
         if (person && isEventForCelebrant(e, person, entities.eventType)) return true;
+        if (/dinner/i.test(clean) && /dinner|meal/i.test(e.title || '')) return true;
+        if (/birthday\s+reminder/i.test(clean) && (/reminder/i.test(e.title || '') || /birthday/i.test(e.title || ''))) return true;
+        if (/appointment/i.test(clean) && (/appointment|doctor|dentist/i.test(e.title || '') || e.category === 'Appointment')) {
+          if (requestedDate && e.date === requestedDate) return true;
+          if (!requestedDate) return true;
+        }
         if (requestedDate && e.date === requestedDate) return true;
         const t = (e.title || '').replace(/\[DEMO\]\s*/g, '').toLowerCase();
         if (targetTitle && targetTitle !== 'Family Event' && (t.includes(targetTitle.toLowerCase()) || targetTitle.toLowerCase().includes(t))) {
@@ -1489,13 +1681,24 @@ export async function processIntelligentAction(
 
       if (matched) {
         const cleanTitle = (matched.title || '').replace(/\[DEMO\]\s*/g, '');
-        if (matched.id) {
-          await dbMethods.deleteFamilyData('events', matched.id, token);
-        }
-        const idx = events.indexOf(matched);
-        if (idx >= 0) events.splice(idx, 1);
+        // Prompt for explicit confirmation per Phase 4 requirement
+        setPendingAction(sessionKey, {
+          sessionKey,
+          type: 'calendar_delete_confirm',
+          data: {
+            eventId: matched.id,
+            title: cleanTitle,
+            date: matched.date,
+            time: matched.time || '10:00',
+            category: matched.category || 'General'
+          }
+        });
 
-        const reply = `🗑️ **Removed from Family Calendar**: **${cleanTitle}** (scheduled on ${matched.date}) has been deleted.`;
+        const formatted = formatDateHuman(matched.date);
+        const reply = `⚠️ Are you sure you want to delete **${cleanTitle}** (${matched.category || 'General'}) scheduled on **${formatted}** (${matched.date}) at **${matched.time || '10:00'}**? Please reply "yes" to confirm or "no" to cancel.`;
+        return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+      } else {
+        const reply = `I couldn't find the specified event in your calendar to delete. Could you provide the event title or scheduled date?`;
         return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
       }
     }
@@ -1503,6 +1706,162 @@ export async function processIntelligentAction(
     if (operation === 'SEARCH' || operation === 'READ') {
       let person = entities.person;
       const isBirthday = entities.eventType === 'birthday';
+
+      // 1. FILTER: Medical & Doctor Appointments
+      if (/\b(?:medical|doctor|dentist|appointment|clinic|hospital|checkup)\b/i.test(clean)) {
+        const medicalEvents = events.filter((e: any) =>
+          (e.category || '').toLowerCase() === 'appointment' ||
+          /\b(?:medical|doctor|dentist|appointment|clinic|hospital|checkup)\b/i.test(`${e.title || ''} ${e.description || ''}`)
+        );
+        if (medicalEvents.length > 0) {
+          const reply = `🩺 **Medical & Doctor Appointments (${medicalEvents.length} scheduled)**:\n\n` +
+            medicalEvents.map((e: any) => {
+              const cleanT = (e.title || '').replace(/\[DEMO\]\s*/g, '');
+              const dStr = formatDateHuman(e.date);
+              const members = (Array.isArray(e.members_involved) ? e.members_involved : [user.name]).join(', ');
+              return `• **${cleanT}** (${e.category || 'Appointment'})\n  📅 **Date & Time**: ${dStr} (${e.date}) at ${e.time || '10:00'}\n  👥 **Members**: ${members}${e.location ? `\n  📍 **Location**: ${e.location}` : ''}${e.description ? `\n  📝 **Details**: ${e.description}` : ''}`;
+            }).join('\n\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        } else {
+          const reply = `🩺 There are no upcoming medical or doctor appointments recorded in your family calendar.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 2. FILTER: Family Dinners & Meals
+      if (/\b(?:dinners?|lunch|breakfast|meals?)\b/i.test(clean)) {
+        const dinnerEvents = events.filter((e: any) =>
+          /\b(?:dinner|lunch|breakfast|meal)\b/i.test(`${e.title || ''} ${e.description || ''}`)
+        );
+        if (dinnerEvents.length > 0) {
+          const reply = `🍽️ **Family Dinners & Meals (${dinnerEvents.length} found)**:\n\n` +
+            dinnerEvents.map((e: any) => {
+              const cleanT = (e.title || '').replace(/\[DEMO\]\s*/g, '');
+              const dStr = formatDateHuman(e.date);
+              return `• **${cleanT}**: ${dStr} (${e.date}) at ${e.time || '20:00'}${e.description ? ` - ${e.description}` : ''}`;
+            }).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 3. FILTER: Meetings & Discussions
+      if (/\b(?:meetings?|conference|interview)\b/i.test(clean)) {
+        const meetingEvents = events.filter((e: any) =>
+          (e.category || '').toLowerCase() === 'meeting' ||
+          /\b(?:meeting|conference|interview)\b/i.test(`${e.title || ''} ${e.description || ''}`)
+        );
+        if (meetingEvents.length > 0) {
+          const reply = `📋 **Family Meetings (${meetingEvents.length} scheduled)**:\n\n` +
+            meetingEvents.map((e: any) => {
+              const cleanT = (e.title || '').replace(/\[DEMO\]\s*/g, '');
+              const dStr = formatDateHuman(e.date);
+              return `• **${cleanT}**: ${dStr} (${e.date}) at ${e.time || '18:00'}${e.description ? ` - ${e.description}` : ''}`;
+            }).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 4. FILTER: Trips, Holidays, & Celebrations
+      if (/\b(?:trips?|travel|temple|holidays?|vacation|tour|outing|anniversar(?:y|ies))\b/i.test(clean)) {
+        const holidayEvents = events.filter((e: any) =>
+          (e.category || '').toLowerCase() === 'holiday' ||
+          /\b(?:trip|travel|temple|holiday|vacation|tour|outing|anniversary)\b/i.test(`${e.title || ''} ${e.description || ''}`)
+        );
+        if (holidayEvents.length > 0) {
+          const reply = `✈️ **Holidays, Trips & Special Events (${holidayEvents.length} found)**:\n\n` +
+            holidayEvents.map((e: any) => {
+              const cleanT = (e.title || '').replace(/\[DEMO\]\s*/g, '');
+              const dStr = formatDateHuman(e.date);
+              return `• **${cleanT}**: ${dStr} (${e.date}) at ${e.time || '09:00'}${e.description ? ` - ${e.description}` : ''}`;
+            }).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 5. FILTER: Reminders & Bills
+      if (/\b(?:reminders?|bills?)\b/i.test(clean)) {
+        const billEvents = events.filter((e: any) =>
+          (e.category || '').toLowerCase() === 'bill' ||
+          /\b(?:bill|reminder)\b/i.test(`${e.title || ''} ${e.description || ''}`)
+        );
+        if (billEvents.length > 0) {
+          const reply = `🔔 **Calendar Reminders & Bills (${billEvents.length} scheduled)**:\n\n` +
+            billEvents.map((e: any) => {
+              const cleanT = (e.title || '').replace(/\[DEMO\]\s*/g, '');
+              const dStr = formatDateHuman(e.date);
+              return `• **${cleanT}**: ${dStr} (${e.date}) at ${e.time || '09:00'}${e.description ? ` - ${e.description}` : ''}`;
+            }).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 6. FILTER: Month Filters (e.g. November, December)
+      if (/\b(?:in\s+)?(november|nov|december|dec|january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct)\b/i.test(clean)) {
+        const mMatch = clean.match(/\b(november|nov|december|dec|january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct)\b/i);
+        if (mMatch) {
+          const monthMap: Record<string, string> = {
+            jan: '01', january: '01', feb: '02', february: '02', mar: '03', march: '03', apr: '04', april: '04',
+            may: '05', jun: '06', june: '06', jul: '07', july: '07', aug: '08', august: '08', sep: '09', september: '09',
+            oct: '10', october: '10', nov: '11', november: '11', dec: '12', december: '12'
+          };
+          const mPrefix = `2026-${monthMap[mMatch[1].toLowerCase()]}`;
+          const monthEvents = events.filter((e: any) => (e.date || '').startsWith(mPrefix)).sort((a: any, b: any) => a.date.localeCompare(b.date));
+          const monthName = mMatch[1].charAt(0).toUpperCase() + mMatch[1].slice(1).toLowerCase();
+          if (monthEvents.length > 0) {
+            const reply = `📅 **Events in ${monthName} 2026 (${monthEvents.length} scheduled)**:\n\n` +
+              monthEvents.map((e: any) => `• **${e.date} at ${e.time || '10:00'}**: ${(e.title || '').replace(/\[DEMO\]\s*/g, '')} (${e.category || 'General'})`).join('\n');
+            return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+          } else {
+            const reply = `📅 There are no events scheduled in **${monthName} 2026**.`;
+            return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+          }
+        }
+      }
+
+      // 7. FILTER: Past & Overdue Events
+      if (/\b(?:past\s+events|overdue|previous\s+events)\b/i.test(clean)) {
+        const todayIST = getKolkataDateString();
+        const pastEvents = events.filter((e: any) => e.date < todayIST).sort((a: any, b: any) => b.date.localeCompare(a.date));
+        if (pastEvents.length > 0) {
+          const reply = `⏮️ **Past Calendar Events (${pastEvents.length} found)**:\n\n` +
+            pastEvents.map((e: any) => `• **${e.date} at ${e.time || '10:00'}**: ${(e.title || '').replace(/\[DEMO\]\s*/g, '')} (${e.category || 'General'})`).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        } else {
+          const reply = `There are no past or overdue events recorded before today.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 8. Tomorrow's Events
+      if (/\b(?:tomorrow|happening\s+tomorrow|tomorrow['’]?s\s+schedule)\b/i.test(clean)) {
+        const tomIST = getKolkataDateString(1);
+        const tomEvents = events.filter((e: any) => e.date === tomIST);
+        const formatted = formatDateHuman(tomIST);
+        if (tomEvents.length > 0) {
+          const reply = `📅 **Tomorrow's Schedule (${formatted})**:\n\n` +
+            tomEvents.map((e: any) => `• **${e.date} at ${e.time || '10:00'}**: ${(e.title || '').replace(/\[DEMO\]\s*/g, '')} (${e.category || 'General'}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : [user.name]).join(', ')}`).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        } else {
+          const reply = `📅 **Tomorrow's Schedule (${formatted})**:\n\nNo calendar events scheduled for tomorrow.`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // 9. Schedule Summary & Overview
+      if (/\b(?:summarize|summary|overview|schedule\s+breakdown)\b/i.test(clean)) {
+        const todayIST = getKolkataDateString();
+        const upcoming = events.filter((e: any) => e.date >= todayIST).sort((a: any, b: any) => a.date.localeCompare(b.date));
+        const catCounts: Record<string, number> = {};
+        for (const ev of upcoming) {
+          const cat = ev.category || 'General';
+          catCounts[cat] = (catCounts[cat] || 0) + 1;
+        }
+        const breakdownStr = Object.entries(catCounts).map(([c, count]) => `• **${c}**: ${count} event${count > 1 ? 's' : ''}`).join('\n');
+        const nextEv = upcoming[0];
+        const nextStr = nextEv ? `\n\n📌 **Next Up**: **${(nextEv.title || '').replace(/\[DEMO\]\s*/g, '')}** on **${formatDateHuman(nextEv.date)}** at **${nextEv.time || '10:00'}**` : '';
+        const reply = `📊 **Family Schedule Summary**:\n\nYou have **${upcoming.length} upcoming events** scheduled in your calendar:\n\n${breakdownStr}${nextStr}`;
+        return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+      }
 
       // If no person extracted yet, check if any birthday/event in `events` matches a word in `clean`
       if (!person && isBirthday) {
@@ -1559,7 +1918,7 @@ export async function processIntelligentAction(
         }
       }
 
-      // If asking about events on a specific date (e.g. "what events on 25 dec", "events in 9 jan")
+      // If asking about events on a specific date (e.g. "what events on 25 dec", "events in 9 jan", "events on 20 november")
       if (entities.date && !/\b(?:today|tomorrow)\b/i.test(clean)) {
         const dateEvents = events.filter((e: any) => e.date === entities.date);
         const formatted = formatDateHuman(entities.date);
@@ -1573,7 +1932,7 @@ export async function processIntelligentAction(
         }
       }
 
-      // If asking about a specific non-birthday event by name/keyword (e.g. "when is marriage function", "when is holiday")
+      // If asking about a specific non-birthday event by name/keyword (e.g. "when is marriage function", "find family dinner")
       if (!/\b(?:today|tomorrow|all|upcoming|this\s+month|this\s+week)\b/i.test(clean)) {
         const { title: searchTitle } = extractCalendarEventDetails(rawQuery, entities);
         if (searchTitle && searchTitle !== 'Family Event') {
