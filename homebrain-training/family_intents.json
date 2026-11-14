@@ -1,0 +1,39 @@
+{
+  "category": "Family Management",
+  "intents": [
+    {
+      "intent": "family_profile",
+      "examples": [
+        "Who is in my family?",
+        "Add my brother",
+        "Add my father to family",
+        "What is my father's birthday?",
+        "What is my mother's name?",
+        "Show father's details",
+        "Update father's phone number",
+        "What is my brother's age?",
+        "Add father's anniversary",
+        "Show all family birthdays",
+        "Is my brother's birthday saved?",
+        "When was the last family event?",
+        "Show my family timeline"
+      ],
+      "action": "family_action",
+      "responses": {
+        "who_is_in_family": "I'll show the family members saved in your Family Profile.",
+        "add_brother": "Sure! Please provide your brother's details.",
+        "add_father": "I'll check whether your father is already registered.",
+        "father_bday": "Your father's birthday is December 10.",
+        "mother_name": "Your mother's name is Sarah.",
+        "father_details": "I'll retrieve the authorized details from your Family Profile.",
+        "update_father_phone": "Please provide the new phone number.",
+        "brother_age": "I'll check your brother's saved date of birth.",
+        "add_anniversary": "What is the anniversary date?",
+        "all_birthdays": "Here are the saved birthdays of your family members.",
+        "brother_bday_saved": "I'll check the Family Calendar.",
+        "last_event": "Your most recent recorded family event was Diwal Gathering on November 01.",
+        "timeline": "Here is your family's saved timeline."
+      }
+    }
+  ]
+}

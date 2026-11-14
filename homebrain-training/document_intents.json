@@ -1,0 +1,87 @@
+{
+  "category": "Document Vault",
+  "intents": [
+    {
+      "intent": "fetch_document",
+      "examples": [
+        "Fetch Sham's Aadhaar card",
+        "Show my PAN card",
+        "Find father's passport",
+        "Get mother's voter ID",
+        "Fetch my 10th marksheet",
+        "Show my degree certificate",
+        "Find my bank statement",
+        "Get my insurance policy",
+        "Show my property papers",
+        "Find my birth certificate",
+        "Download my driving licence",
+        "Show all my PDFs"
+      ],
+      "action": "doc_fetch",
+      "responses": {
+        "sham_aadhaar": "I'll check the Document Vault for Sham's Aadhaar card.",
+        "my_pan": "I'll search your uploaded PAN card.",
+        "father_passport": "I'll check your father's available documents.",
+        "mother_voter": "I'll search for your mother's voter ID.",
+        "my_10th": "I'll check your educational documents.",
+        "my_degree": "I'll search your Document Vault.",
+        "bank_statement": "I'll check your uploaded bank statements.",
+        "insurance_policy": "I'll search your insurance documents.",
+        "property_papers": "I'll check your property records.",
+        "birth_certificate": "I'll search for your birth certificate.",
+        "driving_licence": "I'll check its availability and access permissions.",
+        "all_pdfs": "I'll list the PDFs you are authorized to access."
+      }
+    },
+    {
+      "intent": "missing_document_scenarios",
+      "examples": [
+        "Fetch my Aadhaar",
+        "Do you have father's PAN?",
+        "Find my passport",
+        "Show my degree certificate",
+        "Fetch a document I never uploaded",
+        "Where is my old certificate?",
+        "Find Sham's documents"
+      ],
+      "action": "doc_missing",
+      "responses": {
+        "my_aadhaar_missing": "I couldn't find your Aadhaar card. Please upload it first.",
+        "father_pan_missing": "Your father's PAN card is not currently available in the Document Vault.",
+        "my_passport_missing": "I couldn't find an uploaded passport. Would you like to upload it?",
+        "degree_missing": "Your degree certificate hasn't been found in the Document Vault.",
+        "never_uploaded": "I couldn't find that document. Please upload it before requesting retrieval.",
+        "old_cert_missing": "I couldn't locate that certificate. Could you provide its name or type?",
+        "sham_docs": "I'll list the available documents belonging to Sham that you can access."
+      }
+    },
+    {
+      "intent": "upload_manage_document",
+      "examples": [
+        "Upload Aadhaar",
+        "Save father's PAN",
+        "Add my new certificate",
+        "Replace my old Aadhaar",
+        "Delete old passport",
+        "Summarize my PDF",
+        "Read this document",
+        "Search for a word in my PDF",
+        "When did I upload Aadhaar?",
+        "Is my passport expired?"
+      ],
+      "action": "doc_manage",
+      "responses": {
+        "upload_aadhaar": "Please select your Aadhaar document to upload.",
+        "save_father_pan": "Please upload the PAN document and confirm the document owner's details.",
+        "add_cert": "Please upload the certificate.",
+        "replace_aadhaar": "Please upload the new document. I'll ask you to confirm before replacing the existing one.",
+        "delete_passport": "Which passport record should I delete? I'll ask for confirmation first.",
+        "summarize_pdf": "Please select the PDF you'd like me to summarize.",
+        "read_doc": "I'll extract and explain the readable content.",
+        "search_word": "Which word or phrase should I search for?",
+        "when_uploaded": "I'll check the Aadhaar upload date.",
+        "is_expired": "I'll check its expiry date, if available."
+      }
+    }
+  ]
+}

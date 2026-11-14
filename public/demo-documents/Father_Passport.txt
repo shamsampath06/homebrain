@@ -1,0 +1,10 @@
+REPUBLIC OF INDIA - PASSPORT
+Type: P, Country Code: IND, Passport No: Z9876543
+Surname: KUMAR, Given Name: RAJESH
+Nationality: INDIAN, Sex: M
+Date of Birth: 15/06/1974
+Place of Birth: CHENNAI, TAMIL NADU
+Place of Issue: CHENNAI, Date of Issue: 15/06/2014, Date of Expiry: 14/06/2034
+Address: 42 Palm Grove Avenue, Anna Nagar, Chennai 600040
+Spouse: PRIYA KUMAR
+[DEMO] Fictional synthetic document for HomeBrain Document Vault testing.

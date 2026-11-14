@@ -1,0 +1,11 @@
+Household Electricity Bill
+- Billing month: November 2026
+- Consumer: Demo Household
+- Amount: ₹3,450
+- Due date: November 25, 2026
+- Payment status: Unpaid
+- Category: Utilities
+- Consumer No: 01-234-567-890
+- Tariff: LT-1A Domestic
+- Units Consumed: 420 kWh
+Synthetic document content for OCR and document-question-answering tests.

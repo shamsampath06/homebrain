@@ -18,11 +18,13 @@ import { FamilyKnowledgeScreen, AddKnowledgeModal } from './components/modules/F
 import { EmergencyModeModal } from './components/modules/EmergencyModeModal';
 import { RemindersScreen, ReminderForm } from './components/dashboard/RemindersScreen';
 import { AuthScreen } from './components/auth/AuthScreen';
+import { CommandPaletteModal } from './components/common/CommandPaletteModal';
 import { isSupabaseConfigured, signInWithGoogle } from './lib/supabase';
 import { parseHash, buildHash } from './lib/navigation';
 
 const AppContent: React.FC = () => {
   const {
+    currentUser,
     activeTab,
     setActiveTab,
     activeSubScreen,
@@ -67,13 +69,26 @@ const AppContent: React.FC = () => {
     }
   }, [activeTab, activeSubScreen, selectedItemId]);
 
-  if (isSupabaseConfigured && !isAuthenticated) {
+  if ((isSupabaseConfigured && !isAuthenticated) || activeSubScreen === 'auth' || activeSubScreen === 'login') {
     return (
       <AuthScreen
-        onSignedIn={signIn}
-        onSignedUp={signUp}
+        onSignedIn={async (email, password) => {
+          await signIn(email, password);
+          setActiveSubScreen('none');
+        }}
+        onSignedUp={async (email, password, name, familyName) => {
+          await signUp(email, password, name, familyName);
+          setActiveSubScreen('none');
+        }}
         onGoogleSignIn={signInWithGoogle}
-        onEnterDemo={enterDemoMode}
+        onEnterDemo={() => {
+          enterDemoMode();
+          setActiveSubScreen('none');
+        }}
+        canGoBack={isAuthenticated}
+        onGoBack={() => setActiveSubScreen('none')}
+        currentUserName={currentUser?.name}
+        currentFamilyName={currentUser?.familyName}
       />
     );
   }
@@ -156,33 +171,46 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#fcfbf9] dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+    <div className="relative flex h-screen overflow-hidden bg-family-warm text-slate-900 dark:bg-[#080B12] dark:text-slate-100">
+      {/* Ambient Animated Depth Orbs */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-brand-300/15 dark:bg-brand-500/10 rounded-full blur-3xl animate-float-slow" />
+        <div className="absolute top-1/3 -right-40 w-96 h-96 bg-amber-200/20 dark:bg-purple-500/10 rounded-full blur-3xl animate-float-slow [animation-delay:-4s]" />
+        <div className="absolute -bottom-40 left-1/3 w-96 h-96 bg-brand-200/15 dark:bg-amber-500/5 rounded-full blur-3xl animate-float-slow [animation-delay:-2s]" />
+      </div>
+
       {/* Sidebar for Desktop */}
       <Sidebar />
 
       {/* Main App Container */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header />
 
-        {/* Dynamic Screen Viewport */}
+        {/* Dynamic Screen Viewport with Staggered Entrance */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
           {isDataLoading && (
-            <div className="max-w-7xl mx-auto mb-4 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-700">
-              Syncing your family data...
+            <div className="max-w-7xl mx-auto mb-4 rounded-2xl bg-brand-50/90 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 px-4 py-3 text-sm text-brand-700 dark:text-brand-300 flex items-center gap-2 shadow-sm animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-brand-500 animate-ping" />
+              <span>Syncing live family cognitive data...</span>
             </div>
           )}
           {dataError && (
-            <div className="max-w-7xl mx-auto mb-4 flex items-center justify-between gap-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className="max-w-7xl mx-auto mb-4 flex items-center justify-between gap-4 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 px-4 py-3 text-sm text-rose-700 dark:text-rose-300 shadow-sm">
               <span>{dataError}</span>
               <button onClick={clearDataError} className="font-semibold hover:underline">Dismiss</button>
             </div>
           )}
-          {renderMainContent()}
+          <div key={`${activeTab}-${activeSubScreen}`} className="animate-fadeIn transition-opacity duration-300">
+            {renderMainContent()}
+          </div>
         </main>
       </div>
 
       {/* Mobile Bottom Navigation Bar */}
       <MobileNav />
+
+      {/* Spotlight Command Palette (Ctrl+K / Cmd+K) */}
+      <CommandPaletteModal />
     </div>
   );
 };

@@ -1,0 +1,33 @@
+{
+  "category": "Home & Household",
+  "intents": [
+    {
+      "intent": "manage_household",
+      "examples": [
+        "Add gas cylinder booking reminder",
+        "When did I last book gas?",
+        "Add a maintenance expense",
+        "Remind me to service my bike",
+        "Add AC service on Sunday",
+        "Show house expenses",
+        "Add water can to grocery list",
+        "Is gas booking due?",
+        "Add electricity meter reading",
+        "Show my household inventory"
+      ],
+      "action": "household_action",
+      "responses": {
+        "gas_reminder": "I'll create a reminder for your gas cylinder booking.",
+        "last_gas": "I'll check your saved gas booking records.",
+        "maintenance": "What was the amount and purpose?",
+        "bike_service": "When should I remind you?",
+        "ac_service": "I'll add AC servicing to your schedule for Sunday.",
+        "house_expenses": "I'll retrieve your recorded household expenses.",
+        "water_can": "Water can has been added to your grocery list.",
+        "gas_due": "I'll check your saved booking schedule.",
+        "meter_reading": "Please provide the meter reading and date.",
+        "inventory": "I'll list the household items saved in your records."
+      }
+    }
+  ]
+}

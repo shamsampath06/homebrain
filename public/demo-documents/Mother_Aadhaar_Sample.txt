@@ -1,0 +1,8 @@
+GOVERNMENT OF INDIA - UNIQUE IDENTIFICATION AUTHORITY OF INDIA
+Aadhaar - Ordinary Resident Proof
+Aadhaar Number: 0000 1111 2222 (Fictional Demo Identity)
+Name: Demo Mother (Priya Kumar)
+DOB: 22/09/1977 | Gender: Female
+Address: 42 Palm Grove Avenue, Anna Nagar, Chennai - 600040, Tamil Nadu
+Issued by: Unique Identification Authority of India (UIDAI)
+[DEMO] Synthetic fictional record for Document Vault verification.

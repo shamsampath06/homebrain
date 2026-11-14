@@ -61,15 +61,31 @@ export const CalendarCard: React.FC = () => {
 };
 
 export const CalendarScreen: React.FC = () => {
-  const { events, navigateToSubScreen, setActiveSubScreen } = useHomeBrain();
+  const { events, familyMembers, navigateToSubScreen, setActiveSubScreen } = useHomeBrain();
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  const [selectedMember, setSelectedMember] = useState<string>('All');
+  const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
 
   const categories = ['All', 'Birthday', 'Appointment', 'Holiday', 'School', 'Bill', 'General'];
 
-  const filteredEvents = events.filter(
-    e => selectedCategory === 'All' || e.category === selectedCategory
-  );
+  const filteredEvents = events.filter(e => {
+    const matchesCategory = selectedCategory === 'All' || e.category === selectedCategory;
+    const matchesMember =
+      selectedMember === 'All' ||
+      (e.membersInvolved && e.membersInvolved.some(m => m.toLowerCase().includes(selectedMember.toLowerCase())));
+
+    if (viewMode === 'day') {
+      const todayStr = new Date().toISOString().split('T')[0];
+      return matchesCategory && matchesMember && e.date === todayStr;
+    }
+    if (viewMode === 'week') {
+      const now = new Date();
+      const eventDate = new Date(`${e.date}T00:00:00`);
+      const diffDays = Math.round((eventDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      return matchesCategory && matchesMember && diffDays >= -1 && diffDays <= 7;
+    }
+    return matchesCategory && matchesMember;
+  });
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -85,6 +101,43 @@ export const CalendarScreen: React.FC = () => {
           </button>
         }
       />
+
+      {/* View Switcher & Family Member Filter Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+        {/* Day / Week / Month View Switcher */}
+        <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+          {(['month', 'week', 'day'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${
+                viewMode === mode
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {mode} View
+            </button>
+          ))}
+        </div>
+
+        {/* Member Filter Dropdown */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-semibold text-slate-500 dark:text-slate-400">Filter Member:</span>
+          <select
+            value={selectedMember}
+            onChange={e => setSelectedMember(e.target.value)}
+            className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200"
+          >
+            <option value="All">All Family Members</option>
+            {familyMembers.map(m => (
+              <option key={m.id} value={m.name}>
+                {m.name} ({m.role})
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {/* Category Filters */}
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">

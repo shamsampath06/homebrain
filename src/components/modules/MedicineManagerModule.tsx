@@ -93,6 +93,30 @@ export const MedicineManagerScreen: React.FC = () => {
         }
       />
 
+      {/* Clinical Adherence Progress Bar */}
+      {medicines.length > 0 && (
+        <div className="spatial-card p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 w-full space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-700 dark:text-slate-300">Clinical Adherence Rate</span>
+              <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
+                {Math.min(100, Math.round((medicineLogs.length / medicines.length) * 100))}% Confirmed
+              </span>
+            </div>
+            <div className="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, (medicineLogs.length / medicines.length) * 100)}%` }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs shrink-0 font-medium text-slate-500 dark:text-slate-400">
+            <span>Prescriptions: <strong className="text-slate-900 dark:text-white font-bold">{medicines.length}</strong></span>
+            <span>Logged: <strong className="text-emerald-600 font-bold">{medicineLogs.length}</strong></span>
+          </div>
+        </div>
+      )}
+
       {/* Medicine Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {medicines.map(med => (

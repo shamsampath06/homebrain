@@ -3,7 +3,7 @@ import { useHomeBrain } from '../../context/HomeBrainContext';
 import { DocumentCategory, DocumentItem } from '../../types';
 import { createPrivateFileUrl, isSupabaseConfigured, uploadPrivateFile, getAccessToken, buildStoragePath } from '../../lib/supabase';
 import { PageHeader } from '../layout/PageHeader';
-import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode, Bot, Sparkles, ExternalLink, CheckCircle2, AlertCircle } from 'lucide-react';
+import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode, Bot, Sparkles, ExternalLink, CheckCircle2, AlertCircle, Clock, Calendar } from 'lucide-react';
 
 export const DocumentVaultCard: React.FC = () => {
   const { documents, navigateToSubScreen } = useHomeBrain();
@@ -68,6 +68,18 @@ export const DocumentVaultScreen: React.FC = () => {
 
   const categories = ['All', 'Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'];
 
+  const getExpiryDays = (expiryDate?: string) => {
+    if (!expiryDate) return null;
+    const target = new Date(expiryDate).getTime();
+    const now = Date.now();
+    return Math.ceil((target - now) / (1000 * 60 * 60 * 24));
+  };
+
+  const expiringDocs = documents.filter(d => {
+    const days = getExpiryDays(d.expiryDate);
+    return days !== null && days <= 60;
+  });
+
   const filteredDocs = documents.filter(doc => {
     const matchesSearch =
       doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -94,12 +106,68 @@ export const DocumentVaultScreen: React.FC = () => {
         actions={
           <button
             onClick={() => navigateToSubScreen('upload-document')}
-            className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 shadow-md transition-all"
+            className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 shadow-md transition-all hover:scale-105"
           >
             <Upload className="w-4 h-4" /> Upload Document
           </button>
         }
       />
+
+      {/* Document Expiry Warnings & Countdown Banner */}
+      {expiringDocs.length > 0 && (
+        <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-amber-500/10 border border-amber-300 dark:border-amber-700/60 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-2xl bg-amber-500 text-white shrink-0">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  Document Expiry Warnings & Renewals
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                    {expiringDocs.length} Action Required
+                  </span>
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Passports, driving licenses, or insurance policies with upcoming renewals in the next 60 days
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+            {expiringDocs.map(d => {
+              const days = getExpiryDays(d.expiryDate)!;
+              const isExpired = days <= 0;
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => navigateToSubScreen('document-details', d.id)}
+                  className="p-3 rounded-2xl bg-white/90 dark:bg-slate-800/90 border border-amber-200 dark:border-amber-900/50 flex items-center justify-between cursor-pointer hover:border-amber-400 dark:hover:border-amber-500 transition-all shadow-sm hover:shadow"
+                >
+                  <div className="min-w-0 pr-2">
+                    <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{d.title}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5">
+                      <Calendar className="w-3 h-3" /> Expiry: {d.expiryDate}
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-xl text-[10px] font-extrabold shrink-0 ${
+                      isExpired
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                        : days <= 30
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 animate-pulse'
+                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300'
+                    }`}
+                  >
+                    {isExpired ? '🚨 Expired' : `⚠️ ${days}d left`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {documentToDelete && (
@@ -169,43 +237,85 @@ export const DocumentVaultScreen: React.FC = () => {
             </p>
           </div>
         ) : (
-          filteredDocs.map(doc => (
-            <div
-              key={doc.id}
-              className="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-card border border-slate-200/80 dark:border-slate-700/80 hover:border-blue-400 transition-all flex flex-col justify-between group"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300">
-                    {doc.category}
-                  </span>
-                  <span className="text-xs font-semibold text-slate-400">{doc.fileSize}</span>
-                </div>
-                <h3 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">{doc.title}</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">{doc.description}</p>
-              </div>
+          filteredDocs.map(doc => {
+            const expiryDays = getExpiryDays(doc.expiryDate);
+            return (
+              <div
+                key={doc.id}
+                className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl rounded-3xl p-5 shadow-card hover:shadow-xl border border-slate-200/80 dark:border-slate-700/80 hover:border-brand-400 dark:hover:border-brand-500 transition-all duration-300 transform hover:-translate-y-1 flex flex-col justify-between group"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-200/50 dark:border-blue-900/50">
+                      {doc.category}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-400">{doc.fileSize}</span>
+                  </div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                    {doc.title}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                    {doc.description}
+                  </p>
 
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs">
-                <span className="text-slate-400 text-[11px]">Uploaded {doc.uploadDate}</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => navigateToSubScreen('document-details', doc.id)}
-                    className="p-1.5 rounded-lg text-slate-500 hover:text-brand-600 hover:bg-slate-100 dark:hover:bg-slate-700"
-                    title="View Document"
-                  >
-                    <Eye className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setDocumentToDelete(doc)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-700"
-                    title="Delete Document"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {/* Circular SVG Expiry Countdown Gauge */}
+                  {doc.expiryDate && expiryDays !== null && (
+                    <div className="flex items-center gap-2.5 mt-3.5 p-2 rounded-2xl bg-slate-50/90 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700/60">
+                      <div className="relative w-8 h-8 flex items-center justify-center shrink-0">
+                        <svg className="w-8 h-8 -rotate-90" viewBox="0 0 36 36">
+                          <path
+                            className="text-slate-200 dark:text-slate-700 stroke-current"
+                            strokeWidth="3.2"
+                            fill="none"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                          <path
+                            className={`${expiryDays <= 0 ? 'text-rose-500 animate-pulse' : expiryDays <= 60 ? 'text-amber-500' : 'text-emerald-500'} stroke-current transition-all duration-700`}
+                            strokeDasharray={`${Math.min(100, Math.max(8, (expiryDays / 365) * 100))}, 100`}
+                            strokeWidth="3.2"
+                            strokeLinecap="round"
+                            fill="none"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                        </svg>
+                        <span className="absolute text-[9px] font-extrabold text-slate-800 dark:text-slate-200">
+                          {expiryDays <= 0 ? '!' : expiryDays > 99 ? '99+' : expiryDays}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                          {expiryDays <= 0 ? 'Expired' : expiryDays <= 60 ? 'Renewal Required' : 'Valid Document'}
+                        </p>
+                        <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                          {expiryDays <= 0 ? `Expired on ${doc.expiryDate}` : `${expiryDays}d left (${doc.expiryDate})`}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs">
+                  <span className="text-slate-400 text-[11px]">Uploaded {doc.uploadDate}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => navigateToSubScreen('document-details', doc.id)}
+                      className="p-1.5 rounded-xl text-slate-500 hover:text-brand-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all hover:scale-110 active:scale-95"
+                      title="View Document"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setDocumentToDelete(doc)}
+                      className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all hover:scale-110 active:scale-95"
+                      title="Delete Document"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -217,6 +327,7 @@ export const UploadDocumentModal: React.FC = () => {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<DocumentCategory>('Identity');
   const [description, setDescription] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
   const [fileName, setFileName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -252,41 +363,59 @@ export const UploadDocumentModal: React.FC = () => {
       setError('Choose a document or image before uploading.');
       return;
     }
-    if (!isSupabaseConfigured) {
-      setError('Supabase is not configured. Add the public Supabase variables to .env.local.');
-      return;
-    }
 
     setIsUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(15);
     setError(null);
 
     try {
-      const path = buildStoragePath(currentUser.familyId, 'vault', selectedFile.name);
-      const fileUrl = await uploadPrivateFile('documents', path, selectedFile, pct => {
-        setUploadProgress(Math.min(90, Math.max(10, pct)));
-      });
+      let fileUrl = '';
+      let storagePath = buildStoragePath(currentUser.familyId, 'vault', selectedFile.name);
+
+      // Attempt Supabase storage upload if configured, with graceful fallback
+      if (isSupabaseConfigured) {
+        try {
+          fileUrl = await uploadPrivateFile('documents', storagePath, selectedFile, pct => {
+            setUploadProgress(Math.min(85, Math.max(15, pct)));
+          });
+        } catch (storageErr) {
+          console.warn('Direct Supabase storage upload was blocked by security rules or network, falling back to local base64:', storageErr);
+        }
+      }
+
+      // If Supabase upload was blocked by security rules or not configured, encode as base64 Data URL so the document is NEVER lost!
+      if (!fileUrl) {
+        setUploadProgress(60);
+        const dataUrlPromise = new Promise<string>((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result as string);
+          reader.onerror = rej;
+          reader.readAsDataURL(selectedFile);
+        });
+        fileUrl = await dataUrlPromise;
+      }
 
       // Attempt AI document text extraction & summary
       let summaryContent: string | undefined = undefined;
       try {
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((res, rej) => {
-          reader.onload = () => {
-            const result = reader.result as string;
-            res(result.split(',')[1] || result);
-          };
-          reader.onerror = rej;
-          reader.readAsDataURL(selectedFile);
-        });
-        const fileBase64 = await base64Promise;
+        const fileBase64 = fileUrl.startsWith('data:')
+          ? fileUrl.split(',')[1]
+          : await new Promise<string>((res, rej) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result as string;
+                res(result.split(',')[1] || result);
+              };
+              reader.onerror = rej;
+              reader.readAsDataURL(selectedFile);
+            });
 
         const token = getAccessToken();
         const extractRes = await fetch('/api/documents/extract', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
           },
           body: JSON.stringify({
             fileBase64,
@@ -313,10 +442,11 @@ export const UploadDocumentModal: React.FC = () => {
         fileType: selectedFile.name.split('.').pop()?.toUpperCase() || 'FILE',
         fileSize: `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`,
         fileUrl,
-        storagePath: path,
+        storagePath,
         description: description || 'Family uploaded record.',
         summaryContent,
-        uploaderName: currentUser.name
+        uploaderName: currentUser.name,
+        expiryDate: expiryDate ? expiryDate : undefined
       });
 
       setUploadProgress(100);
@@ -336,7 +466,7 @@ export const UploadDocumentModal: React.FC = () => {
         showBack={true}
       />
 
-      <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200/80 dark:border-slate-700/80">
+      <div className="spatial-card rounded-3xl p-6 sm:p-8">
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
             <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
@@ -459,6 +589,19 @@ export const UploadDocumentModal: React.FC = () => {
           </div>
 
           <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+              <span>Expiry or Renewal Date (Optional)</span>
+              <span className="text-[11px] font-normal text-slate-400">For Passports, Licenses & Insurance</span>
+            </label>
+            <input
+              type="date"
+              value={expiryDate}
+              onChange={e => setExpiryDate(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Physical Location & Search Notes
             </label>
@@ -511,6 +654,7 @@ export const DocumentDetailsModal: React.FC = () => {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<DocumentCategory>('Identity');
   const [description, setDescription] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
@@ -537,6 +681,7 @@ export const DocumentDetailsModal: React.FC = () => {
     setTitle(doc.title);
     setCategory(doc.category);
     setDescription(doc.description);
+    setExpiryDate(doc.expiryDate || '');
     setEditing(true);
   };
 
@@ -592,19 +737,69 @@ export const DocumentDetailsModal: React.FC = () => {
 
         <div className="mt-4 space-y-4">
           {editing ? (
-            <form onSubmit={event => { event.preventDefault(); updateDocument(doc.id, { title, category, description }); setEditing(false); }} className="space-y-3">
-              <input required value={title} onChange={event => setTitle(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" />
-              <select value={category} onChange={event => setCategory(event.target.value as DocumentCategory)} className="w-full rounded-xl border px-3 py-2 text-sm">
-                {['Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'].map(value => <option key={value}>{value}</option>)}
-              </select>
-              <textarea value={description} onChange={event => setDescription(event.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm" rows={3} />
-              <div className="flex gap-2"><button type="button" onClick={() => setEditing(false)} className="text-xs px-3 py-2">Cancel</button><button className="rounded-xl bg-brand-600 px-3 py-2 text-xs text-white">Save Metadata</button></div>
+            <form onSubmit={event => { event.preventDefault(); updateDocument(doc.id, { title, category, description, expiryDate: expiryDate || undefined }); setEditing(false); }} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Document Title</label>
+                <input required value={title} onChange={event => setTitle(event.target.value)} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Category</label>
+                <select value={category} onChange={event => setCategory(event.target.value as DocumentCategory)} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 px-3 py-2 text-sm">
+                  {['Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'].map(value => <option key={value}>{value}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Expiry / Renewal Date (Optional)</label>
+                <input type="date" value={expiryDate} onChange={event => setExpiryDate(event.target.value)} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Physical Location & Notes</label>
+                <textarea value={description} onChange={event => setDescription(event.target.value)} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 px-3 py-2 text-sm" rows={3} />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <button type="button" onClick={() => setEditing(false)} className="text-xs px-3 py-2 rounded-xl text-slate-600 hover:bg-slate-100">Cancel</button>
+                <button className="rounded-xl bg-brand-600 px-4 py-2 text-xs font-bold text-white shadow-md">Save Changes</button>
+              </div>
             </form>
           ) : (
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">{doc.title}</h2>
           )}
 
           {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
+
+          {/* Expiry Warning Callout */}
+          {doc.expiryDate && (
+            <div className="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <div>
+                  <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                    Expiry / Renewal Date
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    {doc.expiryDate}
+                  </p>
+                </div>
+              </div>
+              {(() => {
+                const days = Math.ceil((new Date(doc.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                const isExpired = days <= 0;
+                return (
+                  <span
+                    className={`px-3 py-1 rounded-xl text-xs font-extrabold ${
+                      isExpired
+                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200'
+                        : days <= 30
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 animate-pulse'
+                        : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
+                    }`}
+                  >
+                    {isExpired ? '🚨 Expired' : `⚠️ ${days} days remaining`}
+                  </span>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Inline Image Preview */}
           {previewUrl && (

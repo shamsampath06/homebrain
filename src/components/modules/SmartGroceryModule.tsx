@@ -108,6 +108,31 @@ export const GroceryListScreen: React.FC = () => {
         }
       />
 
+      {/* Progress & Pantry Fulfillment Gauge */}
+      {groceries.length > 0 && (
+        <div className="spatial-card p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 w-full space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-700 dark:text-slate-300">Pantry Fulfillment Progress</span>
+              <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
+                {Math.round((purchasedItems.length / groceries.length) * 100)}% Fulfilled
+              </span>
+            </div>
+            <div className="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
+                style={{ width: `${(purchasedItems.length / groceries.length) * 100}%` }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs shrink-0 font-medium text-slate-500 dark:text-slate-400">
+            <span>Pending: <strong className="text-amber-500 font-bold">{pendingItems.length}</strong></span>
+            <span>Purchased: <strong className="text-emerald-500 font-bold">{purchasedItems.length}</strong></span>
+            <span>Total: <strong className="text-slate-800 dark:text-white font-bold">{groceries.length}</strong></span>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700">
         <button

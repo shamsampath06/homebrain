@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import confetti from 'canvas-confetti';
 import {
   Calendar,
   Clock,
@@ -12,14 +13,28 @@ import {
   FileText,
   Tag,
   Sparkles,
-  Info
+  Info,
+  Download,
+  Eye,
+  ExternalLink,
+  ArrowDownToLine,
+  Upload,
+  Check,
+  Volume2,
+  Square,
+  VolumeX
 } from 'lucide-react';
 import { formatIndiaDateTime, formatINR } from '../../lib/display';
+import { useHomeBrain } from '../../context/HomeBrainContext';
+import { createPrivateFileUrl, isSupabaseConfigured } from '../../lib/supabase';
+import { DocumentItem } from '../../types';
 
 interface CleanChatMessageProps {
   text: string;
   isUser: boolean;
   onNavigate?: (screen: any, itemId?: string) => void;
+  isSpeaking?: boolean;
+  onToggleSpeak?: () => void;
 }
 
 // Helper to format ISO date or time cleanly
@@ -74,10 +89,115 @@ function renderInlineFormatting(rawText: string): React.ReactNode[] {
   });
 }
 
-export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser, onNavigate }) => {
+export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
+  text,
+  isUser,
+  onNavigate,
+  isSpeaking: propIsSpeaking,
+  onToggleSpeak
+}) => {
   if (isUser) {
     return <div className="text-sm font-medium leading-relaxed">{text}</div>;
   }
+
+  const {
+    documents,
+    groceries,
+    toggleGroceryPurchased,
+    medicines,
+    logMedicineStatus,
+    reminders,
+    toggleReminder,
+    navigateToSubScreen
+  } = useHomeBrain();
+  const navigate = onNavigate || navigateToSubScreen;
+  const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
+  const [adherenceSuccessId, setAdherenceSuccessId] = useState<string | null>(null);
+  const [localIsSpeaking, setLocalIsSpeaking] = useState(false);
+  const isSpeaking = propIsSpeaking !== undefined ? propIsSpeaking : localIsSpeaking;
+
+  const toggleSpeech = () => {
+    if (onToggleSpeak) {
+      onToggleSpeak();
+      return;
+    }
+    if (!('speechSynthesis' in window)) return;
+    if (isSpeaking || window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      setLocalIsSpeaking(false);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const cleanText = text.replace(/[*#_`]/g, '').trim();
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.onend = () => setLocalIsSpeaking(false);
+    utterance.onerror = () => setLocalIsSpeaking(false);
+    setLocalIsSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const triggerCelebration = () => {
+    try {
+      confetti({
+        particleCount: 35,
+        spread: 65,
+        origin: { y: 0.75 },
+        colors: ['#0284c7', '#10b981', '#8b5cf6', '#f59e0b']
+      });
+    } catch {}
+  };
+
+  const isUnavailableNotice = text.includes('Not Available in Document Vault') || text.includes('is not available in your Family Document Vault');
+
+  const handleDownloadDoc = async (doc: DocumentItem) => {
+    setDownloadingDocId(doc.id);
+    try {
+      let downloadUrl = doc.fileUrl;
+      if (doc.storagePath && isSupabaseConfigured) {
+        try {
+          downloadUrl = await createPrivateFileUrl('documents', doc.storagePath);
+        } catch (storageErr) {
+          console.warn('Storage URL generation error:', storageErr);
+        }
+      }
+
+      if (downloadUrl) {
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `${doc.title}.${(doc.fileType || 'png').toLowerCase()}`;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+
+      // If document record exists without binary blob, generate verified record file
+      const content = `HOMEBRAIN FAMILY DOCUMENT RECORD\n=================================\n` +
+        `Title: ${doc.title}\n` +
+        `Category: ${doc.category}\n` +
+        `File Type: ${doc.fileType}\n` +
+        `File Size: ${doc.fileSize}\n` +
+        `Uploaded By: ${doc.uploaderName} on ${doc.uploadDate}\n\n` +
+        `Extracted Information & Notes:\n${doc.summaryContent || doc.description || 'Verified Household Record'}\n`;
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const fallbackUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = fallbackUrl;
+      a.download = `${doc.title.replace(/[^a-zA-Z0-9_-]/g, '_')}_record.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(fallbackUrl);
+    } catch (err) {
+      console.error('Download failed, navigating to document details:', err);
+      if (navigate) navigate('document-details', doc.id);
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
 
   // Parse lines to detect structured sections and clean cards
   const lines = text.split('\n');
@@ -91,16 +211,78 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
 
     // Check if these list items represent Events
     const isEventList = items.some(it => /\d{4}-\d{2}-\d{2}/.test(it) || /birthday|anniversary|exam|match|appointment|doctor|checkup/i.test(it));
+    // Check if these list items represent Reminders / Tasks
+    const isReminderList = !isEventList && (
+      items.some(it => /remind|task|todo|priority|assigned/i.test(it)) ||
+      text.includes('Reminders') ||
+      text.includes('Household Tasks') ||
+      text.includes('Pending Tasks')
+    );
     // Check if these list items represent Medicines
     const isMedicineList = items.some(it => /for |mg|tablet|capsule|frequency|inhaler/i.test(it) && !it.includes('₹'));
     // Check if these list items represent Bills
     const isBillList = items.some(it => /(?:₹|rs\.|inr)\s*\d+/i.test(it) && /due|bill|electric|water|maintenance|gas/i.test(it));
+    const isAssistantSummary = text.includes('Autonomous Cognitive Assistant Summary') || text.includes('live records across') || text.includes('tables consulted');
     // Check if these list items represent Groceries
-    const isGroceryList = items.some(it => /category:|kg|litre|pack|buy|grocery/i.test(it));
+    const isGroceryList = !isAssistantSummary && items.some(it => /category:|kg|litre|pack|buy|grocery/i.test(it));
     // Check if these list items represent Allergies / Health warnings
-    const isAllergyList = items.some(it => /critical|allergy|allergic|blood group|asthma/i.test(it));
+    const isAllergyList = !isAssistantSummary && items.some(it => /critical allergy|allergic to|blood group|asthma|penicillin|anaphyla/i.test(it));
+    const isUnavailableNotice = text.includes('Not Available in Document Vault') || text.includes('is not available in your Family Document Vault');
     // Check if these list items represent Document Vault Records
-    const isDocumentList = items.some(it => /passport|insurance|vault|policy|certificate|license|document|file size|file type/i.test(it));
+    const isDocumentList = !isAssistantSummary && !isUnavailableNotice && (
+      items.some(it =>
+        /file size|file type|uploaded by|\b(?:png|jpg|jpeg|pdf|docx|txt)\b/i.test(it)
+      ) || text.includes('Document Vault Records') || text.includes('Retrieved Document')
+    );
+
+    if (isReminderList) {
+      renderedElements.push(
+        <div key={`reminders-${renderedElements.length}`} className="grid grid-cols-1 gap-2 my-2.5">
+          {items.map((rawItem, idx) => {
+            const clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
+            const matchedRem = reminders.find(r => {
+              const rt = r.title.toLowerCase().replace(/\[demo\]\s*/g, '').trim();
+              return clean.toLowerCase().includes(rt) || rt.includes(clean.toLowerCase());
+            });
+
+            return (
+              <div
+                key={idx}
+                className="p-3 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex items-center justify-between gap-2.5 hover:border-brand-400 transition-all"
+              >
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 shrink-0">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                  <div className={`text-xs space-y-0.5 leading-relaxed ${matchedRem?.completed ? 'line-through text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                    {renderInlineFormatting(clean)}
+                  </div>
+                </div>
+
+                {matchedRem && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!matchedRem.completed) triggerCelebration();
+                      toggleReminder(matchedRem.id);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all active:scale-95 ${
+                      matchedRem.completed
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                        : 'bg-brand-50 hover:bg-brand-100 dark:bg-brand-950/60 dark:hover:bg-brand-900 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800 shadow-sm'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{matchedRem.completed ? 'Completed ✓' : 'Complete Task'}</span>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+      return;
+    }
 
     if (isEventList) {
       renderedElements.push(
@@ -120,6 +302,11 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
               const title = catMatch ? catMatch[1].trim() : rest;
               const category = catMatch && catMatch[2] ? catMatch[2].trim() : 'Event';
               const members = catMatch && catMatch[3] ? catMatch[3].split(',').map(m => m.trim()) : [];
+
+              const matchedRem = reminders.find(r => {
+                const rt = r.title.toLowerCase().replace(/\[demo\]\s*/g, '').trim();
+                return title.toLowerCase().includes(rt) || rt.includes(title.toLowerCase());
+              });
 
               return (
                 <div
@@ -153,6 +340,21 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
                       <Clock className="w-3 h-3 text-slate-400" />
                       {formattedDate} {formattedTime ? `• ${formattedTime}` : ''}
                     </span>
+
+                    {matchedRem && (
+                      <button
+                        type="button"
+                        onClick={() => toggleReminder(matchedRem.id)}
+                        className={`px-2.5 py-1 rounded-xl font-bold text-[11px] flex items-center gap-1 transition-all ${
+                          matchedRem.completed
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                            : 'bg-brand-50 hover:bg-brand-100 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 border border-brand-200'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>{matchedRem.completed ? 'Done ✓' : 'Complete'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -175,17 +377,45 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
         <div key={`meds-${renderedElements.length}`} className="grid grid-cols-1 gap-2 my-2.5">
           {items.map((rawItem, idx) => {
             const clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
+            const matchedMed = medicines.find(m => {
+              const mn = m.name.toLowerCase().replace('[demo] ', '').trim();
+              return clean.toLowerCase().includes(mn);
+            });
+            const isLogged = matchedMed ? adherenceSuccessId === matchedMed.id : false;
+
             return (
               <div
                 key={idx}
-                className="p-3 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex items-start gap-2.5"
+                className="p-3 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex items-start justify-between gap-2.5"
               >
-                <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
-                  <Pill className="w-4 h-4" />
+                <div className="flex items-start gap-2.5">
+                  <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
+                    <Pill className="w-4 h-4" />
+                  </div>
+                  <div className="text-xs space-y-0.5 leading-relaxed">
+                    {renderInlineFormatting(clean)}
+                  </div>
                 </div>
-                <div className="text-xs space-y-0.5 leading-relaxed">
-                  {renderInlineFormatting(clean)}
-                </div>
+
+                {matchedMed && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerCelebration();
+                      logMedicineStatus(matchedMed.id, 'Taken');
+                      setAdherenceSuccessId(matchedMed.id);
+                      setTimeout(() => setAdherenceSuccessId(null), 3000);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shrink-0 transition-all ${
+                      isLogged
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300'
+                    }`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isLogged ? 'Taken ✓' : 'Mark Taken'}</span>
+                  </button>
+                )}
               </div>
             );
           })}
@@ -223,13 +453,35 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
         <div key={`groceries-${renderedElements.length}`} className="grid grid-cols-1 sm:grid-cols-2 gap-2 my-2.5">
           {items.map((rawItem, idx) => {
             const clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
+            const matchedG = groceries.find(g => clean.toLowerCase().includes(g.name.toLowerCase()));
+
             return (
               <div
                 key={idx}
-                className="p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex items-center gap-2 text-xs"
+                className="p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex items-center justify-between gap-2 text-xs"
               >
-                <ShoppingCart className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span className="truncate">{renderInlineFormatting(clean)}</span>
+                <div className="flex items-center gap-2 truncate">
+                  <ShoppingCart className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span className={`truncate ${matchedG?.isPurchased ? 'line-through text-slate-400' : ''}`}>
+                    {renderInlineFormatting(clean)}
+                  </span>
+                </div>
+                {matchedG && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!matchedG.isPurchased) triggerCelebration();
+                      toggleGroceryPurchased(matchedG.id);
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors ${
+                      matchedG.isPurchased
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {matchedG.isPurchased ? 'Bought ✓' : 'Bought?'}
+                  </button>
+                )}
               </div>
             );
           })}
@@ -260,30 +512,71 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
 
     if (isDocumentList) {
       renderedElements.push(
-        <div key={`docs-${renderedElements.length}`} className="space-y-2 my-2.5">
+        <div key={`docs-${renderedElements.length}`} className="space-y-2.5 my-2.5">
           {items.map((rawItem, idx) => {
             const clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
+            // Extract title before the parenthesis: e.g. "aadhar (Identity, PNG - 1.68 MB)..."
+            const rawTitle = clean.split('(')[0].replace(/[*•-]/g, '').trim().toLowerCase();
+            const matchedDoc = documents.find(d => {
+              const dt = (d.title || '').toLowerCase();
+              return dt === rawTitle || rawTitle.includes(dt) || dt.includes(rawTitle) || clean.toLowerCase().includes(dt);
+            });
+
+            const isDownloading = matchedDoc ? downloadingDocId === matchedDoc.id : false;
+
             return (
               <div
                 key={idx}
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex flex-col gap-2"
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex flex-col gap-2.5 hover:border-brand-400 dark:hover:border-brand-500 transition-all"
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start justify-between gap-2.5">
                   <div className="flex items-start gap-2.5">
-                    <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 shrink-0">
-                      <FileText className="w-4 h-4" />
+                    <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 shrink-0">
+                      <FileText className="w-5 h-5" />
                     </div>
                     <div className="text-xs leading-relaxed space-y-1">
                       {renderInlineFormatting(clean)}
                     </div>
                   </div>
-                  {onNavigate && (
+                </div>
+
+                {/* Expiry Warning if present */}
+                {matchedDoc?.expiryDate && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-900/60 text-[11px] text-amber-800 dark:text-amber-300 font-semibold">
+                    <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>Expiry / Renewal Date: <strong className="font-bold">{matchedDoc.expiryDate}</strong></span>
+                  </div>
+                )}
+
+                {/* Instant Download & View Actions */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                  <button
+                    type="button"
+                    onClick={() => matchedDoc && handleDownloadDoc(matchedDoc)}
+                    disabled={!matchedDoc || isDownloading}
+                    className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-[0.98] disabled:opacity-50"
+                  >
+                    <Download className={`w-3.5 h-3.5 ${isDownloading ? 'animate-bounce' : ''}`} />
+                    <span>{isDownloading ? 'Downloading...' : 'Download Document'}</span>
+                  </button>
+
+                  {matchedDoc && navigate && (
                     <button
                       type="button"
-                      onClick={() => onNavigate('documents')}
-                      className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/50 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 font-bold text-[11px] shrink-0 transition-colors"
+                      onClick={() => navigate('document-details', matchedDoc.id)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition-colors"
                     >
-                      View in Vault →
+                      <Eye className="w-3.5 h-3.5" /> View Details
+                    </button>
+                  )}
+
+                  {navigate && (
+                    <button
+                      type="button"
+                      onClick={() => navigate('documents')}
+                      className="ml-auto text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold"
+                    >
+                      Vault Records →
                     </button>
                   )}
                 </div>
@@ -330,10 +623,56 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
     // Flush any pending list
     flushList();
 
+    // Is it a single retrieved document banner?
+    if (rawLine.includes('📄') && rawLine.includes('Retrieved Document')) {
+      const docName = rawLine.replace(/📄|\*\*|Retrieved Document:?/gi, '').split('(')[0].trim().toLowerCase();
+      const matchedDoc = documents.find(d => {
+        const dt = (d.title || '').toLowerCase();
+        return dt === docName || dt.includes(docName) || docName.includes(dt);
+      });
+
+      const isDownloading = matchedDoc ? downloadingDocId === matchedDoc.id : false;
+
+      renderedElements.push(
+        <div key={`retrieved-doc-banner-${renderedElements.length}`} className="p-3 my-2 rounded-2xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-base">📄</span>
+            <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white">
+              {rawLine.replace(/📄/g, '').trim()}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {matchedDoc && (
+              <button
+                type="button"
+                onClick={() => handleDownloadDoc(matchedDoc)}
+                disabled={isDownloading}
+                className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-[0.98]"
+              >
+                <Download className={`w-3.5 h-3.5 ${isDownloading ? 'animate-bounce' : ''}`} />
+                <span>{isDownloading ? 'Downloading...' : 'Download Document'}</span>
+              </button>
+            )}
+            {matchedDoc && navigate && (
+              <button
+                type="button"
+                onClick={() => navigate('document-details', matchedDoc.id)}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1 transition-colors"
+              >
+                <Eye className="w-3.5 h-3.5" /> View
+              </button>
+            )}
+          </div>
+        </div>
+      );
+      continue;
+    }
+
     // Is it a header? (e.g. 📅 **Upcoming Family Events** or ### Header)
-    const headerMatch = rawLine.match(/^(?:###|##|\*\*|📅|💊|🛒|💳|⚡|⚠️)\s*(.+?)(?:\*\*)?:?$/i);
+    const headerMatch = rawLine.match(/^(?:###|##|\*\*|📅|💊|🛒|💳|⚡|⚠️|📄|❌)\s*(.+?)(?:\*\*)?:?$/i);
     const isExplicitHeader = rawLine.startsWith('###') || rawLine.startsWith('##') || (rawLine.startsWith('**') && rawLine.endsWith('**') && rawLine.length < 80);
-    const hasLeadingEmoji = /^(?:📅|💊|🛒|💳|⚡|⚠️|🧠|🎂|🩺|📊|✅|📁)/.test(rawLine);
+    const hasLeadingEmoji = /^(?:📅|💊|🛒|💳|⚡|⚠️|🧠|🎂|🩺|📊|✅|📁|📄|❌)/.test(rawLine);
 
     if (isExplicitHeader || hasLeadingEmoji) {
       const emojiMatch = rawLine.match(/^([\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
@@ -360,5 +699,44 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({ text, isUser
   // Flush remaining
   flushList();
 
-  return <div className="space-y-2">{renderedElements}</div>;
+  return (
+    <div className="space-y-2">
+      {renderedElements}
+      {isUnavailableNotice && navigate && (
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={() => navigate('upload-document')}
+            className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-brand-600/20 transition-all hover:scale-105 active:scale-95"
+          >
+            <Upload className="w-4 h-4" /> Upload Missing Document to Vault
+          </button>
+        </div>
+      )}
+      <div className="flex items-center justify-end pt-1">
+        <button
+          type="button"
+          onClick={toggleSpeech}
+          className={`flex items-center gap-1.5 text-[11px] font-bold py-1 px-3 rounded-xl transition-all shadow-sm ${
+            isSpeaking
+              ? 'bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 shadow-md animate-pulse active:scale-95'
+              : 'text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+          title={isSpeaking ? 'Stop speaking audio immediately' : 'Listen to response (Text-to-Speech)'}
+        >
+          {isSpeaking ? (
+            <>
+              <Square className="w-3 h-3 fill-current text-white" />
+              <span>Stop Speaking</span>
+            </>
+          ) : (
+            <>
+              <Volume2 className="w-3.5 h-3.5" />
+              <span>Listen</span>
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
 };

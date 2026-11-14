@@ -3,9 +3,129 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply bg-[#fcfbf9] text-slate-800 antialiased font-sans selection:bg-brand-500 selection:text-white;
+  :focus-visible {
+    outline: 3px solid rgba(183, 121, 15, 0.55);
+    outline-offset: 2px;
   }
+
+  input,
+  textarea,
+  select {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-[#fbf7ec] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 antialiased font-sans selection:bg-brand-500 selection:text-white transition-colors duration-200;
+  }
+}
+
+@layer components {
+  .theme-button {
+    @apply inline-flex items-center justify-center rounded-xl font-semibold transition-colors focus-visible:outline-none;
+  }
+
+  .theme-button-primary {
+    @apply theme-button bg-brand-700 text-white shadow-sm hover:bg-brand-800 active:bg-brand-900;
+  }
+
+  .theme-input {
+    @apply bg-white text-slate-900 border border-[#eadfbe] placeholder:text-slate-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15;
+  }
+}
+
+/* Luxury Micro-animations */
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(1deg);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(14, 165, 233, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes sound-wave {
+  0%, 100% {
+    height: 6px;
+  }
+  50% {
+    height: 24px;
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 8s ease-in-out infinite;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.glass-panel {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background-color: rgba(255, 254, 248, 0.9);
+  border: 1px solid rgba(234, 205, 124, 0.45);
+}
+
+.dark .glass-panel {
+  background-color: rgba(17, 24, 39, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Modern Card with Subtle Elevation (Polished Light & Dark) */
+.spatial-card {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid #eee3c5;
+  box-shadow: 0 4px 14px -6px rgba(122, 91, 24, 0.16), 0 1px 2px -1px rgba(122, 91, 24, 0.08);
+  border-radius: 1.25rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark .spatial-card {
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.spatial-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -8px rgba(122, 91, 24, 0.22);
+}
+
+.dark .spatial-card:hover {
+  border-color: rgba(14, 165, 233, 0.4);
+  box-shadow: 0 12px 30px -5px rgba(0, 0, 0, 0.6);
 }
 
 /* Custom Scrollbar */

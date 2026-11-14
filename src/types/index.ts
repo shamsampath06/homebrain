@@ -47,7 +47,7 @@ export interface ReminderItem {
   assignedMemberName: string;
 }
 
-export type DocumentCategory = 'Identity' | 'Medical' | 'Financial' | 'Home' | 'Education' | 'Legal' | 'Insurance';
+export type DocumentCategory = 'Identity' | 'Medical' | 'Financial' | 'Home' | 'Education' | 'Legal' | 'Insurance' | 'General';
 
 export interface DocumentItem {
   id: string;
@@ -61,6 +61,7 @@ export interface DocumentItem {
   description: string;
   summaryContent?: string;
   uploaderName: string;
+  expiryDate?: string; // YYYY-MM-DD
 }
 
 export type GroceryCategory = 'Dairy' | 'Produce' | 'Bakery' | 'Meat' | 'Pantry' | 'Household' | 'Beverages';
@@ -163,10 +164,12 @@ export interface EmergencyContact {
   isPrimary: boolean;
 }
 
+export type EmergencySMSStatus = 'SOS_CREATED' | 'SMS_PENDING' | 'SMS_SENT' | 'SMS_DELIVERED' | 'SMS_FAILED' | 'ACCEPTED' | 'FAILED' | 'UNCONFIGURED';
+
 export interface SMSDeliveryResult {
   recipient: string;
   recipientName: string;
-  status: 'ACCEPTED' | 'SENT' | 'DELIVERED' | 'FAILED' | 'UNCONFIGURED';
+  status: EmergencySMSStatus;
   provider: 'twilio' | 'fast2sms' | 'none';
   messageId?: string;
   error?: string;
@@ -177,7 +180,7 @@ export interface EmailDeliveryResult {
   recipient: string;
   recipientName: string;
   status: 'ACCEPTED' | 'SENT' | 'DELIVERED' | 'FAILED' | 'UNCONFIGURED';
-  provider: 'resend' | 'none';
+  provider: 'resend' | 'nodemailer' | 'none';
   messageId?: string;
   error?: string;
   dispatchedAt: string;
@@ -191,7 +194,7 @@ export interface EmergencyAlertLog {
   longitude: number;
   accuracyMeters?: number;
   userName?: string;
-  status: 'Logged' | 'Sent' | 'Delivered' | 'Cancelled' | 'Failed';
+  status: 'SOS_CREATED' | 'EMAIL_DELIVERED' | 'EMAIL_SENT' | 'EMAIL_FAILED' | 'SMS_PENDING' | 'SMS_SENT' | 'SMS_DELIVERED' | 'SMS_FAILED' | 'Logged' | 'Sent' | 'Delivered' | 'Cancelled' | 'Failed';
   recipients: string[];
   locationSource?: 'gps' | 'home' | 'custom' | string;
   idempotencyKey?: string;
@@ -247,10 +250,11 @@ export interface FamilyMemory {
   documentUrls?: string[];
   taggedMembers?: string[];
   tags?: string[];
+  album?: string;
 }
 
 export interface AIAgentAction {
-  type: 'add_grocery' | 'add_event' | 'add_reminder' | 'add_expense' | 'log_medicine' | 'vault_search';
+  type: 'add_grocery' | 'add_event' | 'add_reminder' | 'add_expense' | 'log_medicine' | 'vault_search' | 'pay_bill' | 'add_bill' | 'save_document';
   title: string;
   detail: string;
   status: 'success' | 'pending' | 'failed';
@@ -278,4 +282,14 @@ export interface AIMessage {
     nodesEvaluated?: number;
     ragPipelines?: string[];
   };
+}
+
+export interface HealthVitalLog {
+  id: string;
+  personName: string;
+  vitalType: 'Blood Pressure' | 'Blood Sugar' | 'Temperature' | 'Heart Rate' | 'Weight';
+  value: string;
+  status: 'Normal' | 'Elevated' | 'Low' | 'Requires Attention';
+  timestamp: string;
+  notes?: string;
 }

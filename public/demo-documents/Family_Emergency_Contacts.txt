@@ -1,0 +1,9 @@
+HOUSEHOLD EMERGENCY ACTION DIRECTORY - CHENNAI RESIDENCE
+Address: 42 Palm Grove Avenue, Anna Nagar West, Chennai 600040
+Local Police Station: Anna Nagar Police Station (Phone: 044-26151100 / 100)
+Nearest Emergency Care: Apollo Clinic Anna Nagar (Phone: 044-28290200 / 1066)
+Family Physician: Dr. K. Sharma (Mobile: +91 98400 12345)
+City Ambulance Hotline: 108
+Fire & Rescue Service: 101
+Trusted Neighbor: Mr. V. Raman (Plot 15, Phone: +91 94440 98765)
+[DEMO] Synthetic household emergency directory.

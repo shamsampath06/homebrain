@@ -1,0 +1,10 @@
+APOLLO HOSPITALS CLINICAL CONSULTATION REPORT
+Department of Endocrinology & Metabolic Wellness
+Patient Name: Demo Mother (Priya Kumar)
+Age: 49 Years | Gender: Female | UHID: APL-9921048
+Consultation Date: 17/11/2026
+Attending Physician: Dr. K. Sharma, MD (Endocrinology)
+Chief Complaints: Routine diabetic management review
+Clinical Observations: HbA1c: 6.8%, Blood Pressure: 122/80 mmHg, Fasting Blood Sugar: 112 mg/dL
+Recommendations: Continue prescribed diet and physical exercise. Next follow-up in 3 months.
+[DEMO] Synthetic medical report.

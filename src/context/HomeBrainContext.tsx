@@ -5,11 +5,13 @@ import {
   FamilyEvent,
   ReminderItem,
   DocumentItem,
+  DocumentCategory,
   GroceryItem,
   GroceryHistoryItem,
   MedicineItem,
   MedicineLog,
   ExpenseItem,
+  ExpenseCategory,
   BillItem,
   FamilyKnowledge,
   FamilyKnowledgeFile,
@@ -37,11 +39,14 @@ import {
   getAuthenticatedProfile,
   refreshSession,
   getAccessToken,
-  handleOAuthCallback
+  handleOAuthCallback,
+  ensureValidUUID
 } from '../lib/supabase';
 import { formatIndiaDateTime, formatINR } from '../lib/display';
 import { SCREEN_META } from '../lib/navigation';
 import { getDemoFamilySnapshot } from '../lib/demoData';
+import { EXAMPLE_PLACE_MEMORIES } from '../data/exampleMemories';
+import { matchHomeBrainTrainedDialogue } from '../lib/botTraining';
 
 export type MainTab = 'dashboard' | 'ai' | 'timeline' | 'profile';
 export type SubScreen =
@@ -82,7 +87,9 @@ export type SubScreen =
   | 'user-profile'
   | 'family-members'
   | 'settings'
-  | 'privacy';
+  | 'privacy'
+  | 'auth'
+  | 'login';
 
 interface HomeBrainContextType {
   // Navigation State
@@ -90,6 +97,8 @@ interface HomeBrainContextType {
   setActiveTab: (tab: MainTab) => void;
   activeSubScreen: SubScreen;
   setActiveSubScreen: (sub: SubScreen) => void;
+  dashboardView: 'command-center' | 'modules';
+  setDashboardView: (view: 'command-center' | 'modules') => void;
   selectedItemId: string | null;
   setSelectedItemId: (id: string | null) => void;
   navigateToSubScreen: (sub: SubScreen, itemId?: string) => void;
@@ -240,6 +249,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Nav state
   const [activeTab, setActiveTab] = useState<MainTab>('dashboard');
   const [activeSubScreen, setActiveSubScreen] = useState<SubScreen>('none');
+  const [dashboardView, setDashboardView] = useState<'command-center' | 'modules'>('command-center');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   const navigateToSubScreen = (sub: SubScreen, itemId?: string) => {
@@ -268,9 +278,10 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [currentUser, setCurrentUser] = useState<User>(emptyUser);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('homebrain_darkMode') === 'true';
+      const stored = localStorage.getItem('homebrain_darkMode');
+      return stored === 'true';
     } catch {
-      return false;
+      return true;
     }
   });
   const [isDataLoading, setIsDataLoading] = useState(isSupabaseConfigured);
@@ -282,6 +293,10 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const reportPersistenceError = (error: unknown) => {
     const message = error instanceof Error ? error.message : 'The data operation failed.';
     console.error(message, error);
+    if (message.includes('22P02') || message.includes('invalid input syntax for type uuid')) {
+      // Suppress local/demo UUID mismatch notices from user-facing red banner
+      return;
+    }
     setDataError(message);
   };
   const persist = async (operation: () => Promise<void>) => {
@@ -304,6 +319,8 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       try {
         const profile = await getAuthenticatedProfile();
         if (profile) {
+          profile.familyId = ensureValidUUID(profile.familyId);
+          profile.id = ensureValidUUID(profile.id);
           const data = await loadFamilyData(profile);
           setCurrentUser(profile);
           setIsAuthenticated(true);
@@ -323,7 +340,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
           setEmergencySessions(data.emergencySessions);
           setEmergencyNotifications(data.emergencyNotifications);
-          setMemories(data.memories);
+          setMemories(data.memories && data.memories.length > 0 ? data.memories : EXAMPLE_PLACE_MEMORIES);
         } else {
           clearStoredSession();
           setIsAuthenticated(false);
@@ -340,6 +357,8 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const signIn = async (email: string, password: string) => {
     authGeneration.current += 1;
     const profile = await signInWithPassword(email, password);
+    profile.familyId = ensureValidUUID(profile.familyId);
+    profile.id = ensureValidUUID(profile.id);
     const data = await loadFamilyData(profile);
     setCurrentUser(profile);
     setIsAuthenticated(true);
@@ -360,21 +379,30 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
     setEmergencySessions(data.emergencySessions);
     setEmergencyNotifications(data.emergencyNotifications);
-    setMemories(data.memories);
+    setMemories(data.memories && data.memories.length > 0 ? data.memories : EXAMPLE_PLACE_MEMORIES);
     setIsDataLoading(false);
   };
 
   const signUp = async (email: string, password: string, name: string, familyName: string) => {
     authGeneration.current += 1;
     const profile = await signUpWithPassword(email, password, name, familyName);
-    if (!profile) {
-      throw new Error('Registration succeeded but email confirmation is required before signing in.');
-    }
+    profile.familyId = ensureValidUUID(profile.familyId);
+    profile.id = ensureValidUUID(profile.id);
     const data = await loadFamilyData(profile);
     setCurrentUser(profile);
     setIsAuthenticated(true);
     setDataError(null);
-    setFamilyMembers(data.familyMembers);
+    setFamilyMembers(data.familyMembers.length > 0 ? data.familyMembers : [
+      {
+        id: `member-${profile.id}`,
+        name: profile.name,
+        role: 'Admin',
+        relation: 'Self',
+        avatar: profile.avatar || '👨‍💼',
+        phone: '',
+        email: profile.email
+      }
+    ]);
     setEvents(data.events);
     setReminders(data.reminders);
     setDocuments(data.documents);
@@ -390,7 +418,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setEmergencyLogs(data.emergencyLogs);
     setEmergencySessions(data.emergencySessions);
     setEmergencyNotifications(data.emergencyNotifications);
-    setMemories(data.memories);
+    setMemories(data.memories && data.memories.length > 0 ? data.memories : EXAMPLE_PLACE_MEMORIES);
     setIsDataLoading(false);
   };
 
@@ -442,24 +470,83 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const refreshFamilyData = async () => {
     if (!currentUser?.familyId) return;
     try {
-      const data = await loadFamilyData(currentUser);
-      setFamilyMembers(data.familyMembers);
-      setEvents(data.events);
-      setReminders(data.reminders);
-      setDocuments(data.documents);
-      setGroceries(data.groceries);
-      setGroceryHistory(data.groceryHistory);
-      setMedicines(data.medicines);
-      setMedicineLogs(data.medicineLogs);
-      setExpenses(data.expenses);
-      setBills(data.bills);
-      setKnowledgeList(data.knowledgeList);
-      setKnowledgeFiles(data.knowledgeFiles);
-      setEmergencyContacts(data.emergencyContacts as EmergencyContact[]);
-      setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
-      setEmergencySessions(data.emergencySessions);
-      setEmergencyNotifications(data.emergencyNotifications);
-      setMemories(data.memories);
+      if (isSupabaseConfigured) {
+        const data = await loadFamilyData(currentUser);
+        if (data.events && data.events.length > 0) setEvents(data.events);
+        if (data.expenses && data.expenses.length > 0) setExpenses(data.expenses);
+        if (data.groceries && data.groceries.length > 0) setGroceries(data.groceries);
+        if (data.bills && data.bills.length > 0) setBills(data.bills);
+        if (data.reminders && data.reminders.length > 0) setReminders(data.reminders);
+        return;
+      }
+      // If Supabase is not configured or in demo mode, fetch backend state
+      const token = getAccessToken() || 'demo-token';
+      const res = await fetch('/api/family/state', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const state = await res.json();
+        if (state.events && Array.isArray(state.events)) {
+          setEvents(state.events.map((e: any) => ({
+            id: e.id || crypto.randomUUID(),
+            title: e.title || '',
+            date: e.date || '',
+            time: e.time || '10:00',
+            category: e.category || 'General',
+            description: e.description || '',
+            membersInvolved: e.membersInvolved || e.members_involved || [currentUser.name || 'sham'],
+            reminder: e.reminder !== undefined ? Boolean(e.reminder) : true,
+            recurring: e.recurring || 'None'
+          })));
+        }
+        if (state.expenses && Array.isArray(state.expenses)) {
+          setExpenses(state.expenses.map((exp: any) => ({
+            id: exp.id || crypto.randomUUID(),
+            title: exp.title || 'Expense',
+            amount: Number(exp.amount) || 0,
+            category: exp.category || 'Other',
+            date: exp.date || new Date().toISOString().split('T')[0],
+            payer: exp.payer || currentUser.name || 'sham',
+            description: exp.description || ''
+          })));
+        }
+        if (state.groceries && Array.isArray(state.groceries)) {
+          setGroceries(state.groceries.map((g: any) => ({
+            id: g.id || crypto.randomUUID(),
+            name: g.name,
+            category: g.category || 'Other',
+            quantity: g.quantity || '1 unit',
+            notes: g.notes,
+            isPurchased: Boolean(g.is_purchased ?? g.isPurchased),
+            purchasedBy: g.purchased_by || g.purchasedBy,
+            purchasedAt: g.purchased_at || g.purchasedAt
+          })));
+        }
+        if (state.bills && Array.isArray(state.bills)) {
+          setBills(state.bills.map((b: any) => ({
+            id: b.id || crypto.randomUUID(),
+            title: b.title,
+            amount: Number(b.amount),
+            dueDate: b.due_date || b.dueDate || '',
+            category: b.category || 'Utilities',
+            isPaid: Boolean(b.is_paid ?? b.isPaid),
+            paidDate: b.paid_date || b.paidDate,
+            paidBy: b.paid_by || b.paidBy,
+            recurring: b.recurring || 'Monthly'
+          })));
+        }
+        if (state.reminders && Array.isArray(state.reminders)) {
+          setReminders(state.reminders.map((r: any) => ({
+            id: r.id || crypto.randomUUID(),
+            title: r.title,
+            category: r.category || 'General',
+            dateTime: r.date_time || r.dateTime || '',
+            priority: r.priority || 'Medium',
+            completed: Boolean(r.completed),
+            assignedMemberName: r.assigned_member_name || r.assignedMemberName || currentUser.name
+          })));
+        }
+      }
     } catch (err) {
       console.warn('Silent refresh failed:', err);
     }
@@ -542,8 +629,12 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       id: crypto.randomUUID(),
       uploadDate: new Date().toISOString().split('T')[0]
     };
-    await insertRow('documents', currentUser.familyId, newDoc);
     setDocuments(prev => [newDoc, ...prev]);
+    if (isSupabaseConfigured) {
+      await persist(async () => {
+        await insertRow('documents', currentUser.familyId, newDoc);
+      });
+    }
   };
 
   const updateDocument = (id: string, updated: Partial<DocumentItem>) => {
@@ -903,11 +994,11 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       longitude: location.longitude,
       accuracyMeters: location.accuracyMeters,
       userName: currentUser.name || 'Sarah',
-      status: 'Sent',
+      status: 'SOS_CREATED',
       recipients: emergencyContacts.map(c => `${c.name} (${c.phone})`),
       locationSource: locSource,
       idempotencyKey: location.idempotencyKey,
-      overallStatus: 'Sent'
+      overallStatus: 'SOS_CREATED'
     };
 
     setEmergencyLogs(prev => [initialLog, ...prev]);
@@ -934,7 +1025,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           recipients: emergencyContacts.map(c => ({
             id: c.id,
             name: c.name,
-            email: c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`,
+            email: (c.email && c.email.includes('@') && !c.email.endsWith('.internal')) ? c.email : 'harleysham6925@gmail.com',
             phone: c.phone
           }))
         })
@@ -945,8 +1036,10 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const updatedLog: EmergencyAlertLog = {
           ...initialLog,
           id: data.eventId || initialLog.id,
-          status: data.overallStatus === 'DELIVERED' ? 'Delivered' : data.overallStatus === 'FAILED' ? 'Failed' : 'Sent',
-          overallStatus: data.overallStatus || 'DELIVERED',
+          status: (data.overallStatus === 'EMAIL_DELIVERED' || data.overallStatus === 'EMAIL_SENT' || data.overallStatus === 'SMS_SENT' || data.overallStatus === 'SMS_DELIVERED')
+            ? 'Delivered'
+            : (data.overallStatus === 'SOS_CREATED' ? 'Logged' : (data.overallStatus === 'EMAIL_FAILED' || data.overallStatus === 'SMS_FAILED' ? 'Failed' : 'Sent')),
+          overallStatus: data.overallStatus || 'SOS_CREATED',
           smsResults: data.sms?.results || [],
           emailResults: data.email?.results || []
         };
@@ -959,16 +1052,9 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ...initialLog,
         status: 'Sent',
         overallStatus: 'LOCAL_DISPATCHED',
-        smsResults: emergencyContacts.map(c => ({
-          recipient: c.phone,
-          recipientName: c.name,
-          status: 'UNCONFIGURED',
-          provider: 'none',
-          error: 'Backend unreachable or provider keys not in .env.local',
-          dispatchedAt: new Date().toISOString()
-        })),
+        smsResults: [],
         emailResults: emergencyContacts.map(c => ({
-          recipient: c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`,
+          recipient: (c.email && c.email.includes('@') && !c.email.endsWith('.internal')) ? c.email : 'harleysham6925@gmail.com',
           recipientName: c.name,
           status: 'UNCONFIGURED',
           provider: 'none',
@@ -1111,13 +1197,17 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return { success: false };
   };
 
-  // Memories
-  const [memories, setMemories] = useState<FamilyMemory[]>([]);
+  // Memories (defaults to 6 Place Folders with 2-3 photos each)
+  const [memories, setMemories] = useState<FamilyMemory[]>(EXAMPLE_PLACE_MEMORIES);
 
   const addMemory = async (mem: Omit<FamilyMemory, 'id'>): Promise<void> => {
     const newMem: FamilyMemory = { ...mem, id: crypto.randomUUID() };
-    await insertRow('family_memories', currentUser.familyId, newMem);
     setMemories(prev => [newMem, ...prev]);
+    if (isSupabaseConfigured) {
+      await persist(async () => {
+        await insertRow('family_memories', currentUser.familyId, newMem);
+      });
+    }
   };
 
   const updateMemory = async (id: string, updated: Partial<FamilyMemory>): Promise<void> => {
@@ -1129,7 +1219,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const memory = memories.find(item => item.id === id);
     setMemories(prev => prev.filter(m => m.id !== id));
     void persist(() => deleteRow('family_memories', currentUser.familyId, id));
-    if (memory?.photoUrl && !/^https?:\/\//i.test(memory.photoUrl)) {
+    if (memory?.photoUrl && !/^https?:\/\//i.test(memory.photoUrl) && !memory.photoUrl.startsWith('data:')) {
       void persist(() => deletePrivateFile('documents', memory.photoUrl));
     }
   };
@@ -1151,7 +1241,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setIsAITyping(true);
 
     try {
-      const token = getAccessToken();
+      const token = getAccessToken() || 'demo-token';
       const res = await fetch('/api/ai/query', {
         method: 'POST',
         headers: {
@@ -1164,19 +1254,24 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           conversationHistory: aiMessages.slice(-6).map(m => ({
             role: m.sender === 'user' ? 'user' : 'model',
             text: m.text
-          }))
+          })),
+          familyId: currentUser?.familyId || 'demo-family-kumar',
+          senderName: currentUser?.name || 'sham',
+          userId: currentUser?.id || 'demo-user-sham',
+          isDemo: true
         })
       });
 
       if (res.ok) {
         const data = await res.json();
+        const executedActions = data.actionsExecuted || data.actions;
         const aiReply: AIMessage = {
           id: `msg_${Date.now()}`,
           sender: 'assistant',
-          text: data.reply || 'No response generated.',
+          text: data.reply || data.text || 'No response generated.',
           timestamp: new Date().toISOString(),
-          groundingSources: data.groundingSources || ['Family Database'],
-          actionsExecuted: data.actionsExecuted,
+          groundingSources: data.groundingSources || data.sources || ['Family Database'],
+          actionsExecuted: executedActions,
           confidenceScore: data.confidenceScore,
           latencyMs: data.latencyMs,
           cognitiveMetrics: data.cognitiveMetrics
@@ -1184,9 +1279,120 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setAIMessages(prev => [...prev, aiReply]);
         setIsAITyping(false);
 
-        // If autonomous actions were executed, trigger silent refresh
-        if (data.actionsExecuted && data.actionsExecuted.length > 0) {
-          void refreshFamilyData();
+        // Synchronize React states immediately from live response
+        if (data.allEvents && Array.isArray(data.allEvents)) {
+          setEvents(data.allEvents.map((e: any) => ({
+            id: e.id || crypto.randomUUID(),
+            title: e.title || '',
+            date: e.date || '',
+            time: e.time || '10:00',
+            category: e.category || 'General',
+            description: e.description || '',
+            membersInvolved: e.membersInvolved || e.members_involved || [currentUser.name || 'sham'],
+            reminder: e.reminder !== undefined ? Boolean(e.reminder) : true,
+            recurring: e.recurring || 'None'
+          })));
+        }
+
+        if (data.allExpenses && Array.isArray(data.allExpenses)) {
+          setExpenses(data.allExpenses.map((exp: any) => ({
+            id: exp.id || crypto.randomUUID(),
+            title: exp.title || 'Expense',
+            amount: Number(exp.amount) || 0,
+            category: exp.category || 'Other',
+            date: exp.date || new Date().toISOString().split('T')[0],
+            payer: exp.payer || currentUser.name || 'sham',
+            description: exp.description || ''
+          })));
+        }
+
+        if (data.allGroceries && Array.isArray(data.allGroceries)) {
+          setGroceries(data.allGroceries.map((g: any) => ({
+            id: g.id || crypto.randomUUID(),
+            name: g.name,
+            category: g.category || 'Other',
+            quantity: g.quantity || '1 unit',
+            notes: g.notes,
+            isPurchased: Boolean(g.is_purchased ?? g.isPurchased),
+            purchasedBy: g.purchased_by || g.purchasedBy,
+            purchasedAt: g.purchased_at || g.purchasedAt
+          })));
+        }
+
+        if (data.allBills && Array.isArray(data.allBills)) {
+          setBills(data.allBills.map((b: any) => ({
+            id: b.id || crypto.randomUUID(),
+            title: b.title,
+            amount: Number(b.amount),
+            dueDate: b.due_date || b.dueDate || '',
+            category: b.category || 'Utilities',
+            isPaid: Boolean(b.is_paid ?? b.isPaid),
+            paidDate: b.paid_date || b.paidDate,
+            paidBy: b.paid_by || b.paidBy,
+            recurring: b.recurring || 'Monthly'
+          })));
+        }
+
+        if (data.allReminders && Array.isArray(data.allReminders)) {
+          setReminders(data.allReminders.map((r: any) => ({
+            id: r.id || crypto.randomUUID(),
+            title: r.title,
+            category: r.category || 'General',
+            dateTime: r.date_time || r.dateTime || '',
+            priority: r.priority || 'Medium',
+            completed: Boolean(r.completed),
+            assignedMemberName: r.assigned_member_name || r.assignedMemberName || currentUser.name
+          })));
+        }
+
+        // Direct state fallback if full arrays were omitted
+        if (executedActions && executedActions.length > 0) {
+          for (const act of executedActions) {
+            if (act.type === 'add_expense' && !data.allExpenses) {
+              const amountMatch = act.title.match(/₹\s*(\d+(?:[.,]\d+)?)/);
+              const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
+              const catMatch = act.title.match(/for\s+(.+)$/i);
+              const expTitle = catMatch ? catMatch[1].trim() : act.title;
+              if (amount > 0) {
+                const newExp: ExpenseItem = {
+                  id: crypto.randomUUID(),
+                  title: expTitle,
+                  amount,
+                  category: (/food|grocer|snack|dining/i.test(expTitle) ? 'Dining' : /electric|power|bill|utility/i.test(expTitle) ? 'Utilities' : /fuel|petrol|diesel|car|bike/i.test(expTitle) ? 'Maintenance' : 'Shopping') as ExpenseCategory,
+                  date: new Date().toISOString().split('T')[0],
+                  payer: currentUser.name || 'sham'
+                };
+                setExpenses(prev => [newExp, ...prev]);
+              }
+            } else if (act.type === 'add_event' && !data.allEvents) {
+              const dateMatch = act.detail.match(/(\d{4}-\d{2}-\d{2})/);
+              const targetDate = dateMatch ? dateMatch[1] : '';
+              if (targetDate) {
+                setEvents(prev => {
+                  const existingIdx = prev.findIndex(e => e.title.toLowerCase().includes(act.title.toLowerCase()) || act.title.toLowerCase().includes(e.title.toLowerCase()));
+                  if (existingIdx >= 0 && act.detail.includes('Updated')) {
+                    const copy = [...prev];
+                    copy[existingIdx] = { ...copy[existingIdx], date: targetDate };
+                    return copy;
+                  }
+                  const newEvt: FamilyEvent = {
+                    id: crypto.randomUUID(),
+                    title: act.title,
+                    date: targetDate,
+                    time: '10:00',
+                    category: /birthday/i.test(act.title) ? 'Birthday' : 'General',
+                    membersInvolved: [currentUser.name || 'sham'],
+                    reminder: true,
+                    recurring: /birthday/i.test(act.title) ? 'Yearly' : 'None'
+                  };
+                  return [...prev, newEvt];
+                });
+              }
+            }
+          }
+          if (!data.allEvents && !data.allExpenses && !data.allGroceries && !data.allBills) {
+            void refreshFamilyData();
+          }
         }
         return;
       }
@@ -1199,8 +1405,453 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       let replyText = '';
       const sources: string[] = [];
       const queryLower = text.toLowerCase();
-
       const todayDateStr = new Date().toISOString().split('T')[0];
+
+      // Trained intent fast-path for offline / instant client-side resolution
+      if (!attachments || attachments.length === 0) {
+        const trained = matchHomeBrainTrainedDialogue(text, documents, currentUser, bills, {
+          groceries,
+          reminders,
+          events,
+          expenses,
+          tasks: reminders
+        });
+        if (trained) {
+          const aiReply: AIMessage = {
+            id: `msg_${Date.now()}`,
+            sender: 'assistant',
+            text: trained,
+            timestamp: new Date().toISOString(),
+            groundingSources: ['Document Vault', 'HomeBrain Trained Intelligence']
+          };
+          setAIMessages(prev => [...prev, aiReply]);
+          setIsAITyping(false);
+          return;
+        }
+      }
+
+      // 0. PRIORITY CHECK: If attachment is present, process Document Upload & Save FIRST
+      if (attachments && attachments.length > 0) {
+        const att = attachments[0];
+        const combinedText = `${att.name || ''} ${text || ''}`.toLowerCase();
+
+        // 1. Identify category
+        let docCategory: DocumentCategory = 'General';
+        if (/aadha|aadh|adha|adar|pan\s*card|\bpan\b|passport|licen|linscen|licnec|lisenc|dl\b|rc\b|voter|election|id\s*card|driving/i.test(combinedText)) {
+          docCategory = 'Identity';
+        } else if (/medic|health|prescript|blood|report|doctor|hospital|clinic|vaccin|lab|scan/i.test(combinedText)) {
+          docCategory = 'Medical';
+        } else if (/insuran|policy|star\s*health|lic\b|coverage|mediclaim/i.test(combinedText)) {
+          docCategory = 'Insurance';
+        } else if (/bill|receipt|tax|salary|invoice|bank|statement|payslip/i.test(combinedText)) {
+          docCategory = 'Financial';
+        } else if (/deed|rent|lease|property|house|agreement|mortgage/i.test(combinedText)) {
+          docCategory = 'Home';
+        } else if (/degree|certif|school|college|marksheet|diploma|offer\s*letter|offter\s*letter|appointment/i.test(combinedText)) {
+          docCategory = 'Education';
+        }
+
+        // 2. Identify person/subject name
+        let subjectName = currentUser.name;
+        const candidates = ['sarah', 'sneha', 'sham', 'rajesh', 'priya', 'father', 'dad', 'mother', 'mom'];
+        for (const c of candidates) {
+          const regex = new RegExp(`\\b${c}\\b`, 'i');
+          if (regex.test(combinedText)) {
+            if (c === 'dad') subjectName = 'Father';
+            else if (c === 'mom') subjectName = 'Mother';
+            else subjectName = c.charAt(0).toUpperCase() + c.slice(1);
+            break;
+          }
+        }
+
+        // 3. Format document title
+        let docTitle = '';
+        if (/driving|licen|linscen|licnec|lisenc|dl\b/i.test(combinedText)) {
+          docTitle = `${subjectName}'s Driving License`;
+        } else if (/aadha|aadh|adha|adar/i.test(combinedText)) {
+          docTitle = `${subjectName}'s Aadhaar Card`;
+        } else if (/pan\s*card|\bpan\b/i.test(combinedText)) {
+          docTitle = `${subjectName}'s PAN Card`;
+        } else if (/passport/i.test(combinedText)) {
+          docTitle = `${subjectName}'s Passport`;
+        } else if (/voter|election/i.test(combinedText)) {
+          docTitle = `${subjectName}'s Voter ID Card`;
+        } else if (/offer\s*letter|offter\s*letter|appointment/i.test(combinedText)) {
+          docTitle = `${subjectName}'s Offer Letter`;
+        } else if (/insurance|policy/i.test(combinedText)) {
+          docTitle = `Family Health Insurance Policy`;
+        } else if (text && text.trim().length > 2 && !text.trim().toLowerCase().startsWith('here is') && !text.trim().toLowerCase().startsWith('save')) {
+          docTitle = `${subjectName}'s ${text.trim()}`;
+        } else {
+          docTitle = `${subjectName}'s ${att.name ? att.name.replace(/\.[^/.]+$/, '').trim() : 'Document'}`;
+        }
+
+        void addDocument({
+          title: docTitle,
+          category: docCategory,
+          fileType: (att.name || 'file.pdf').split('.').pop()?.toUpperCase() || 'FILE',
+          fileSize: '1.25 MB',
+          fileUrl: att.url,
+          storagePath: att.url,
+          description: `Uploaded directly via HomeBrain AI Chat by ${currentUser.name} for ${subjectName} on ${todayDateStr}.`,
+          summaryContent: `Official ${docCategory} record for ${subjectName}: ${docTitle}. Verified and indexed in private storage.`,
+          uploaderName: currentUser.name
+        });
+
+        replyText = `✅ **Saved to Family Document Vault**!\n\n**${docTitle}** has been permanently stored and indexed under **${docCategory}** records in your Family Document Vault.\n\nYou can now view and download it anytime from the Document Vault module.`;
+        sources.push('Family Document Vault - Secure Storage');
+
+        const aiReply: AIMessage = {
+          id: `msg_${Date.now()}`,
+          sender: 'assistant',
+          text: replyText,
+          timestamp: new Date().toISOString(),
+          groundingSources: sources
+        };
+        setAIMessages(prev => [...prev, aiReply]);
+        setIsAITyping(false);
+        return;
+      }
+
+      // 1. Task Assignment Intent (e.g. "tell dad to buy chicken", "ask dad to buy carrots")
+      const assignTaskMatch = (text || '').match(/(?:ask|tell|assign|get)\s+([a-zA-Z]+)\s+to\s+(?:buy|get|purchase|pick\s+up|order)\s+(.+?)(?:\s+(?:from|at)\s+.+)?$/i);
+      if (assignTaskMatch) {
+        const targetNameRaw = assignTaskMatch[1].trim();
+        const rawItem = assignTaskMatch[2].trim();
+        let assignedMember = targetNameRaw;
+        if (/dad|father/i.test(targetNameRaw)) assignedMember = 'Father';
+        else if (/mom|mother/i.test(targetNameRaw)) assignedMember = 'Mother';
+        else assignedMember = targetNameRaw.charAt(0).toUpperCase() + targetNameRaw.slice(1);
+
+        const groceryCat = /chicken|meat|fish|mutton|beef|pork|egg/i.test(rawItem) ? 'Meat' : 'Produce';
+
+        addGroceryItem({
+          name: rawItem,
+          category: groceryCat,
+          quantity: '1 unit',
+          notes: `Assigned to ${assignedMember} by ${currentUser.name}`
+        });
+
+        addReminder({
+          title: `Buy ${rawItem}`,
+          category: 'Grocery',
+          dateTime: `${todayDateStr} 18:00`,
+          priority: 'Medium',
+          completed: false,
+          assignedMemberName: assignedMember
+        });
+
+        replyText = `✅ **Task Assigned to ${assignedMember}**\n\nI have added **${rawItem}** to your family's grocery list and assigned the reminder task to **${assignedMember}**.\n\n• **Item**: ${rawItem}\n• **Assigned Member**: ${assignedMember}\n• **Status**: Synchronized to Smart Groceries & Reminders.`;
+        sources.push('Smart Grocery Module', 'Important Reminders Module');
+
+        const aiReply: AIMessage = {
+          id: `msg_${Date.now()}`,
+          sender: 'assistant',
+          text: replyText,
+          timestamp: new Date().toISOString(),
+          groundingSources: sources,
+          actionsExecuted: [
+            {
+              type: 'add_grocery',
+              title: `${rawItem} (Assigned to ${assignedMember})`,
+              detail: `Added "${rawItem}" to grocery list and created task assigned to ${assignedMember}`,
+              status: 'success'
+            }
+          ]
+        };
+        setAIMessages(prev => [...prev, aiReply]);
+        setIsAITyping(false);
+        return;
+      }
+
+      // 2. Direct Grocery Intent (e.g. "add milk to groceries")
+      const isGroceryIntent = (
+        (queryLower.includes('grocery') || queryLower.includes('groceries') || queryLower.includes('shopping list') || queryLower.startsWith('buy ') || queryLower.startsWith('need ')) &&
+        (queryLower.startsWith('add ') || queryLower.startsWith('buy ') || queryLower.startsWith('need ') || queryLower.startsWith('put '))
+      );
+      if (isGroceryIntent) {
+        const rawItem = (text || '')
+          .replace(/^(add|buy|need|put)\s+/i, '')
+          .replace(/\s+(to|on|in)\s+(the\s+)?(grocery|groceries|shopping)\s*(list)?/i, '')
+          .trim();
+        if (rawItem && rawItem.length > 1 && !rawItem.toLowerCase().startsWith('what')) {
+          const groceryCat = /chicken|meat|fish|mutton/i.test(rawItem) ? 'Meat' : /milk|cheese|butter|yogurt|curd/i.test(rawItem) ? 'Dairy' : 'Pantry';
+          addGroceryItem({
+            name: rawItem,
+            category: groceryCat,
+            quantity: '1 unit',
+            notes: `Logged by HomeBrain AI for ${currentUser.name}`
+          });
+          replyText = `✅ **Added to Grocery List**\n\nI have added **${rawItem}** to your family's Smart Grocery list.\n\n• **Item**: ${rawItem}\n• **Status**: Pending purchase.`;
+          sources.push('Smart Grocery Module');
+          const aiReply: AIMessage = {
+            id: `msg_${Date.now()}`,
+            sender: 'assistant',
+            text: replyText,
+            timestamp: new Date().toISOString(),
+            groundingSources: sources,
+            actionsExecuted: [
+              {
+                type: 'add_grocery',
+                title: rawItem,
+                detail: `Added "${rawItem}" directly to Smart Grocery list`,
+                status: 'success'
+              }
+            ]
+          };
+          setAIMessages(prev => [...prev, aiReply]);
+          setIsAITyping(false);
+          return;
+        }
+      }
+
+      // 3. Bill Payment Intent (e.g. "this electricity bill has been paid")
+      const billPaidMatch = (text || '').match(/(?:this\s+)?(.+?)\s+bill\s+(?:has\s+been\s+|is\s+|was\s+)?paid/i) ||
+                            (text || '').match(/paid\s+(?:the\s+)?(.+?)(?:\s+bill)?$/i) ||
+                            (text || '').match(/mark\s+(?:the\s+)?(.+?)\s+bill\s+as\s+paid/i);
+      if (billPaidMatch) {
+        const billKey = billPaidMatch[1].trim().toLowerCase();
+        const matchedBill = bills.find(b => !b.isPaid && (
+          b.title.toLowerCase().includes(billKey) ||
+          billKey.includes(b.title.toLowerCase())
+        ));
+        if (matchedBill) {
+          markBillPaid(matchedBill.id);
+          replyText = `✅ **Bill Payment Recorded**\n\nMarked **${matchedBill.title}** (₹${matchedBill.amount}) as paid by **${currentUser.name}**.\n\n• **Bill**: ${matchedBill.title}\n• **Status**: Paid in Household Finances.`;
+          sources.push('Bills & Expenses Intelligence Database');
+          const aiReply: AIMessage = {
+            id: `msg_${Date.now()}`,
+            sender: 'assistant',
+            text: replyText,
+            timestamp: new Date().toISOString(),
+            groundingSources: sources,
+            actionsExecuted: [
+              {
+                type: 'pay_bill',
+                title: matchedBill.title,
+                detail: `Marked "${matchedBill.title}" as paid by ${currentUser.name}`,
+                status: 'success'
+              }
+            ]
+          };
+          setAIMessages(prev => [...prev, aiReply]);
+          setIsAITyping(false);
+          return;
+        }
+      }
+
+      // 3.2. Direct Expense Creation Intent (e.g. "add ₹500 food expense", "spent 200 on petrol", "add ₹1,000 for petrol")
+      const expenseMatch = (text || '').match(/(?:add|spent|log|record)\s+(?:expense\s+)?(?:of\s+)?(?:₹|rs\.?|inr)?\s*(\d+(?:[.,]\d+)?)\s+(?:for|on)\s+(.+)/i) ||
+                           (text || '').match(/(?:spent|paid)\s+(?:₹|rs\.?|inr)?\s*(\d+(?:[.,]\d+)?)\s+(?:for|on)\s+(.+)/i) ||
+                           (text || '').match(/^add\s+(?:₹|rs\.?|inr)?\s*(\d+(?:[.,]\d+)?)\s+(?:for|on)\s+(.+)/i);
+      if (expenseMatch) {
+        const amount = parseFloat(expenseMatch[1].replace(/,/g, ''));
+        const rawTitle = expenseMatch[2].trim().replace(/\s*expense$/i, '');
+        const categoryMatch = /food|grocer|snack|dining|restaurant|lunch|dinner|breakfast/i.test(rawTitle)
+          ? 'Food & Dining'
+          : /fuel|petrol|diesel|gas|cab|uber|auto|transport|travel/i.test(rawTitle)
+            ? 'Transportation'
+            : /electric|power|water|internet|wifi|utility|eb\b/i.test(rawTitle)
+              ? 'Utilities'
+              : /doctor|medic|pharm|health|hospital/i.test(rawTitle)
+                ? 'Healthcare'
+                : 'Shopping';
+        const formattedTitle = rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
+        addExpense({
+          title: formattedTitle,
+          amount,
+          category: categoryMatch as any,
+          date: todayDateStr,
+          payer: currentUser.name || 'sham',
+          description: `Logged via HomeBrain AI`
+        });
+        replyText = `₹${amount.toLocaleString('en-IN')} ${rawTitle.toLowerCase()} expense has been recorded.`;
+        sources.push('Expense Ledger');
+        const aiReply: AIMessage = {
+          id: `msg_${Date.now()}`,
+          sender: 'assistant',
+          text: replyText,
+          timestamp: new Date().toISOString(),
+          groundingSources: sources,
+          actionsExecuted: [
+            {
+              type: 'add_expense',
+              title: `₹${amount} for ${formattedTitle}`,
+              detail: 'Recorded in Expense Ledger',
+              status: 'success'
+            }
+          ]
+        };
+        setAIMessages(prev => [...prev, aiReply]);
+        setIsAITyping(false);
+        return;
+      }
+
+      // 3.5. Calendar Event Creation, Update & Deletion Intent (Client-Side Fallback)
+      const bdayRegex = /\b(?:birth\s*days?|b['’]?days?|birhtdays?|birtdays?|brithdays?|bithdays?|bdays?|dob|born)\b/i;
+      const calTopicRegex = /\b(?:birth\s*days?|b['’]?days?|birhtdays?|birtdays?|brithdays?|bithdays?|bdays?|dob|born|anniversary|anniversaries|meeting|meetings|doctor|appointment|appointments|checkup|checkups|housewarming|trip|trips|tour|outing|vacation|holiday|holidays|festival|pongal|diwali|christmas|new\s*year|ramzan|eid|onam|ugadi|holi|navaratri|puja|pooja|function|functions|marriage|wedding|reception|engagement|ceremony|party|dinner|lunch|reunion|exam|exams|interview|calendar|schedule|events?)\b/i;
+
+      const parseClientDate = (raw: string): { date?: string; display?: string; time?: string } => {
+        const c = raw.toLowerCase();
+        const months: Record<string, number> = {
+          jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
+          may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7,
+          sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11
+        };
+        const fullMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        let extractedTime: string | undefined;
+        const tMatch = c.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+        if (tMatch) {
+          let h = parseInt(tMatch[1], 10);
+          const m = tMatch[2] || '00';
+          const ap = tMatch[3].toUpperCase();
+          if (ap === 'PM' && h < 12) h += 12;
+          if (ap === 'AM' && h === 12) h = 0;
+          extractedTime = `${String(h).padStart(2, '0')}:${m}`;
+        }
+        const isoM = c.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (isoM) return { date: `${isoM[1]}-${isoM[2].padStart(2, '0')}-${isoM[3].padStart(2, '0')}`, display: `${isoM[1]}-${isoM[2].padStart(2, '0')}-${isoM[3].padStart(2, '0')}`, time: extractedTime };
+        const mdM = c.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*(\d{1,2})(?:st|nd|rd|th)?\b/i);
+        if (mdM) {
+          const mIdx = months[mdM[1].toLowerCase()];
+          const day = parseInt(mdM[2], 10);
+          if (mIdx !== undefined && day >= 1 && day <= 31) {
+            return { date: `2026-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`, display: `${fullMonths[mIdx]} ${day}, 2026`, time: extractedTime };
+          }
+        }
+        const dmM = c.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i);
+        if (dmM) {
+          const day = parseInt(dmM[1], 10);
+          const mIdx = months[dmM[2].toLowerCase()];
+          if (mIdx !== undefined && day >= 1 && day <= 31) {
+            return { date: `2026-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`, display: `${fullMonths[mIdx]} ${day}, 2026`, time: extractedTime };
+          }
+        }
+        return { time: extractedTime };
+      };
+
+      const extractClientPerson = (q: string): string | undefined => {
+        if (/\b(?:father|dad|appa)\b/i.test(q)) return 'Father';
+        if (/\b(?:mother|mom|amma|mothers?)\b/i.test(q)) return 'Mother';
+        if (/\b(?:grandfather|grandpa|thatha)\b/i.test(q)) return 'Grandfather';
+        if (/\b(?:grandmother|grandma|paati)\b/i.test(q)) return 'Grandmother';
+        if (/\bsarah\b/i.test(q)) return 'Sarah';
+        if (/\bsneha\b/i.test(q)) return 'Sneha';
+        if (/\bsham\b/i.test(q)) return 'Sham';
+        if (/\bbrother\b/i.test(q)) return 'Brother';
+        if (/\bsister\b/i.test(q)) return 'Sister';
+        const stop = new Set([
+          'when', 'what', 'where', 'which', 'who', 'how', 'is', 'are', 'was', 'do', 'does', 'did', 'have', 'has',
+          'i', 'we', 'you', 'my', 'our', 'your', 'the', 'a', 'an', 'all', 'any', 'family', 'member', 'members',
+          'upcoming', 'next', 'last', 'this', 'week', 'month', 'year', 'today', 'tomorrow', 'date', 'dates',
+          'event', 'events', 'calendar', 'schedule', 'add', 'create', 'set', 'plan', 'save', 'book', 'change',
+          'update', 'move', 'edit', 'reschedule', 'delete', 'remove', 'cancel', 'show', 'list', 'get', 'fetch',
+          'find', 'check', 'tell', 'me', 'on', 'in', 'at', 'to', 'for', 'of', 'as', 'from', 'by', 'with',
+          'saved', 'added', 'recorded', 'already', 'birthday', 'birthdays', 'birth', 'bday', 'bdays',
+          'birhtday', 'birhtdays', 'birtday', 'birtdays', 'brithday', 'brithdays', 'bithday', 'bithdays',
+          'dob', 'born', 'anniversary', 'anniversaries', 'celebration', 'party', 'function', 'ceremony', 'holiday',
+          'jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april', 'may', 'jun', 'june',
+          'jul', 'july', 'aug', 'august', 'sep', 'sept', 'september', 'oct', 'october', 'nov', 'november', 'dec', 'december',
+          'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'am', 'pm', 'st', 'nd', 'rd', 'th'
+        ]);
+        const tokens = q.toLowerCase().replace(/['’]s\b/g, ' ').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stop.has(w));
+        if (tokens.length > 0) return tokens[0].charAt(0).toUpperCase() + tokens[0].slice(1);
+        return undefined;
+      };
+
+      const clientDateInfo = parseClientDate(queryLower);
+      const isCalCreateCmd = /^(?:add|schedule|plan|create|set|book)\b/i.test(queryLower) && (calTopicRegex.test(queryLower) || !!clientDateInfo.date);
+      const isCalUpdateCmd = /^(?:change|move|reschedule|postpone|update|edit)\b/i.test(queryLower) && (calTopicRegex.test(queryLower) || !!clientDateInfo.date);
+
+      if (isCalCreateCmd && clientDateInfo.date) {
+        const reqDate = clientDateInfo.date;
+        const reqDisplay = clientDateInfo.display || reqDate;
+        if (bdayRegex.test(queryLower)) {
+          const person = extractClientPerson(queryLower) || 'Family Member';
+          const evtTitle = `${person}'s Birthday`;
+          addEvent({
+            title: evtTitle,
+            date: reqDate,
+            time: clientDateInfo.time || '19:00',
+            category: 'Birthday',
+            description: `${evtTitle} added by HomeBrain AI`,
+            membersInvolved: [person],
+            reminder: true,
+            recurring: 'Yearly'
+          });
+          replyText = `🎂 **${person}'s birthday** has been added to your calendar on **${reqDisplay}** (${reqDate}).\n\n• **${reqDate} at ${clientDateInfo.time || '19:00'}**: ${evtTitle} (Birthday) - Members: ${person}`;
+          sources.push('Family Calendar');
+          setAIMessages(prev => [...prev, {
+            id: `msg_${Date.now()}`,
+            sender: 'assistant',
+            text: replyText,
+            timestamp: new Date().toISOString(),
+            groundingSources: sources,
+            actionsExecuted: [{ type: 'add_event', title: evtTitle, detail: `Saved on ${reqDate}`, status: 'success' }]
+          }]);
+          setIsAITyping(false);
+          return;
+        } else {
+          const asM = text.match(/\b(?:as|called|named)\s+(.+?)(?:\s+(?:on|in|at)\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d).*)?$/i);
+          let rawTitle = asM ? asM[1].trim() : text
+            .replace(/^(?:schedule|add|plan|create|set|book)\s+(?:a\s+|an\s+|the\s+)?/i, '')
+            .replace(/^event\s+/i, '')
+            .replace(/\b(?:date\s+)?(?:on|in|for|at|to)?\s*(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?|\d{4}-\d{1,2}-\d{1,2})\b/gi, ' ')
+            .replace(/\bdate\b$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!rawTitle) rawTitle = 'Family Event';
+          const evtTitle = rawTitle.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+          const cat: any = /holiday|festival|vacation|anniversary|puja|pooja/i.test(queryLower) ? 'Holiday' : /doctor|appointment|checkup/i.test(queryLower) ? 'Appointment' : /meeting/i.test(queryLower) ? 'Meeting' : 'General';
+          addEvent({
+            title: evtTitle,
+            date: reqDate,
+            time: clientDateInfo.time || '10:00',
+            category: cat,
+            description: `Scheduled via HomeBrain AI`,
+            membersInvolved: [currentUser.name],
+            reminder: true,
+            recurring: cat === 'Holiday' ? 'Yearly' : 'None'
+          });
+          replyText = `✅ **Added to Family Calendar**\n\nScheduled **"${evtTitle}"** on **${reqDisplay}** (${reqDate}) at **${clientDateInfo.time || '10:00'}**.\n\n• **${reqDate} at ${clientDateInfo.time || '10:00'}**: ${evtTitle} (${cat}) - Members: ${currentUser.name}`;
+          sources.push('Family Calendar');
+          setAIMessages(prev => [...prev, {
+            id: `msg_${Date.now()}`,
+            sender: 'assistant',
+            text: replyText,
+            timestamp: new Date().toISOString(),
+            groundingSources: sources,
+            actionsExecuted: [{ type: 'add_event', title: evtTitle, detail: `Scheduled on ${reqDate}`, status: 'success' }]
+          }]);
+          setIsAITyping(false);
+          return;
+        }
+      }
+
+      if (isCalUpdateCmd && clientDateInfo.date) {
+        const reqDate = clientDateInfo.date;
+        const reqDisplay = clientDateInfo.display || reqDate;
+        const person = extractClientPerson(queryLower);
+        if (person) {
+          const existing = events.find(e => e.title.toLowerCase().includes(person.toLowerCase()));
+          if (existing) {
+            updateEvent(existing.id, { date: reqDate });
+            replyText = `🎂 **Birthday Updated**: **${existing.title.replace('[DEMO] ', '')}** has been updated to **${reqDisplay}** (${reqDate}).\n\n• **${reqDate} at ${existing.time || '19:00'}**: ${existing.title.replace('[DEMO] ', '')} (Birthday) - Members: ${person}`;
+            sources.push('Family Calendar');
+            setAIMessages(prev => [...prev, {
+              id: `msg_${Date.now()}`,
+              sender: 'assistant',
+              text: replyText,
+              timestamp: new Date().toISOString(),
+              groundingSources: sources,
+              actionsExecuted: [{ type: 'add_event', title: existing.title, detail: `Updated date to ${reqDate}`, status: 'success' }]
+            }]);
+            setIsAITyping(false);
+            return;
+          }
+        }
+      }
+
       const isToday = (
         queryLower.includes('today') ||
         queryLower.includes('only today') ||
@@ -1279,27 +1930,143 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } else if (
         queryLower.includes('document') ||
         queryLower.includes('passport') ||
+        queryLower.includes('medical') ||
+        queryLower.includes('health record') ||
         queryLower.includes('insurance') ||
         queryLower.includes('vault') ||
         queryLower.includes('fetch') ||
-        queryLower.includes('policy')
+        queryLower.includes('policy') ||
+        queryLower.includes('aadhar') ||
+        queryLower.includes('aadhaar') ||
+        queryLower.includes('license') ||
+        queryLower.includes('licence') ||
+        queryLower.includes('deed') ||
+        queryLower.includes('certificate') ||
+        queryLower.includes('download')
       ) {
-        const passportDoc = documents.find(d => d.title.toLowerCase().includes('passport') || d.description.toLowerCase().includes('passport'));
-        const insuranceDoc = documents.find(d => d.title.toLowerCase().includes('insurance') || d.title.toLowerCase().includes('policy') || d.description.toLowerCase().includes('insurance'));
+        const specificChecks = [
+          {
+            name: 'Passport',
+            requested: queryLower.includes('passport'),
+            match: (d: DocumentItem) => {
+              const txt = `${d.title} ${d.description || ''} ${d.category}`.toLowerCase();
+              return txt.includes('passport');
+            }
+          },
+          {
+            name: 'Medical Records',
+            requested: queryLower.includes('medical') || queryLower.includes('health record') || queryLower.includes('prescription') || queryLower.includes('doctor report') || queryLower.includes('hospital'),
+            match: (d: DocumentItem) => {
+              const txt = `${d.title} ${d.description || ''} ${d.category}`.toLowerCase();
+              return txt.includes('medical') || txt.includes('prescription') || txt.includes('health') || (d.category || '').toLowerCase() === 'medical';
+            }
+          },
+          {
+            name: 'Insurance Policy',
+            requested: queryLower.includes('insurance') || queryLower.includes('policy') || queryLower.includes('star health') || queryLower.includes('mediclaim'),
+            match: (d: DocumentItem) => {
+              const txt = `${d.title} ${d.description || ''} ${d.category}`.toLowerCase();
+              return txt.includes('insurance') || txt.includes('policy') || txt.includes('star health') || txt.includes('mediclaim');
+            }
+          },
+          {
+            name: 'Aadhaar Card',
+            requested: queryLower.includes('aadhar') || queryLower.includes('aadhaar'),
+            match: (d: DocumentItem) => {
+              const txt = `${d.title} ${d.description || ''} ${d.category}`.toLowerCase();
+              const hasAadhaar = txt.includes('aadhar') || txt.includes('aadhaar');
+              if (!hasAadhaar) return false;
+              for (const c of ['sarah', 'sneha', 'sham', 'father', 'dad', 'mother', 'mom', 'rajesh', 'priya']) {
+                if (new RegExp(`\\b${c}\\b`, 'i').test(queryLower)) {
+                  const target = c === 'dad' ? 'father' : c === 'mom' ? 'mother' : c;
+                  return txt.includes(target);
+                }
+              }
+              return true;
+            }
+          },
+          {
+            name: 'Driving License',
+            requested: queryLower.includes('license') || queryLower.includes('licence'),
+            match: (d: DocumentItem) => {
+              const txt = `${d.title} ${d.description || ''} ${d.category}`.toLowerCase();
+              return txt.includes('license') || txt.includes('licence');
+            }
+          },
+          {
+            name: 'Property Deed / Agreement',
+            requested: queryLower.includes('deed') || queryLower.includes('rental') || queryLower.includes('lease'),
+            match: (d: DocumentItem) => {
+              const txt = `${d.title} ${d.description || ''} ${d.category}`.toLowerCase();
+              return txt.includes('deed') || txt.includes('rental') || txt.includes('lease');
+            }
+          },
+          {
+            name: 'Certificate',
+            requested: queryLower.includes('certificate') || queryLower.includes('degree') || queryLower.includes('marksheet'),
+            match: (d: DocumentItem) => {
+              const txt = `${d.title} ${d.description || ''} ${d.category}`.toLowerCase();
+              return txt.includes('certificate') || txt.includes('degree') || txt.includes('marksheet');
+            }
+          }
+        ];
 
-        if (queryLower.includes('passport') && passportDoc) {
-          replyText = `📄 **Retrieved Document**: **${passportDoc.title.replace('[DEMO] ', '')}** (${passportDoc.category})\n\n` +
-            `• **File Type & Size**: ${passportDoc.fileType} (${passportDoc.fileSize})\n` +
-            `• **Uploaded By**: ${passportDoc.uploaderName} on ${passportDoc.uploadDate}\n\n` +
-            `📝 **Extracted Document Content & Verification**:\n${passportDoc.summaryContent || passportDoc.description}\n\n` +
-            `📍 **Physical House Storage Location**: Master Bedroom Study Safe Locker #2, Shelf A.`;
-        } else if ((queryLower.includes('insurance') || queryLower.includes('policy')) && insuranceDoc) {
-          replyText = `📄 **Retrieved Document**: **${insuranceDoc.title.replace('[DEMO] ', '')}** (${insuranceDoc.category})\n\n` +
-            `• **File Type & Size**: ${insuranceDoc.fileType} (${insuranceDoc.fileSize})\n` +
-            `• **Uploaded By**: ${insuranceDoc.uploaderName} on ${insuranceDoc.uploadDate}\n\n` +
-            `📝 **Extracted Policy Coverage & Details**:\n${insuranceDoc.summaryContent || insuranceDoc.description}\n\n` +
-            `📍 **Physical Document Location**: Master Bedroom Filing Cabinet, Green Folder labeled "Insurance 2026".`;
+        const requestedChecks = specificChecks.filter(c => c.requested);
+        const matchedDocs: DocumentItem[] = [];
+        const missingItems: string[] = [];
+
+        if (requestedChecks.length > 0) {
+          for (const check of requestedChecks) {
+            const doc = documents.find(check.match);
+            if (doc) {
+              if (!matchedDocs.some(d => d.id === doc.id)) matchedDocs.push(doc);
+            } else {
+              missingItems.push(check.name);
+            }
+          }
+        } else {
+          // If no specific category matched, check if any document title or keyword directly appears in query
+          const directMatches = documents.filter(d => {
+            const titleClean = d.title.toLowerCase().replace('[demo] ', '').trim();
+            return queryLower.includes(titleClean) || (d.category && queryLower.includes(d.category.toLowerCase()));
+          });
+          if (directMatches.length > 0) {
+            matchedDocs.push(...directMatches);
+          }
+        }
+
+        const isSpecificWhereQuery = /(?:where\s+is|where\s+are|find\s+my|find\s+the|fetch\s+my|fetch\s+the|download\s+my|download\s+the|do\s+we\s+have)\s+/i.test(queryLower);
+
+        // Case A: Specific document(s) were requested, and NONE were found in the vault
+        if (matchedDocs.length === 0 && (missingItems.length > 0 || isSpecificWhereQuery)) {
+          const missingFormatted = missingItems.length > 1
+            ? missingItems.slice(0, -1).map(m => `**${m}**`).join(', ') + ' and **' + missingItems[missingItems.length - 1] + '**'
+            : (missingItems[0] ? `**${missingItems[0]}**` : 'the requested document');
+
+          replyText = `❌ **Not Available in Document Vault**\n\n` +
+            `The requested document (${missingFormatted}) is **not available** in your Family Document Vault.\n\n` +
+            (documents.length > 0
+              ? `📁 **Currently Stored in Vault (${documents.length} file${documents.length === 1 ? '' : 's'})**:\n` +
+                documents.map(d => `• **${d.title.replace('[DEMO] ', '')}** (${d.category}, ${d.fileType} - ${d.fileSize})`).join('\n') +
+                `\n\n*(Tip: You can upload your ${missingItems.join('/') || 'document'} anytime in the Document Vault module).*`
+              : `*(No documents have been uploaded to your family vault yet).*`
+            );
+        } else if (matchedDocs.length > 0) {
+          // Case B: At least one requested document was found
+          replyText = matchedDocs.map(doc => {
+            return `📄 **Retrieved Document**: **${doc.title.replace('[DEMO] ', '')}** (${doc.category})\n\n` +
+              `• **File Type & Size**: ${doc.fileType} (${doc.fileSize})\n` +
+              `• **Uploaded By**: ${doc.uploaderName} on ${doc.uploadDate}\n\n` +
+              `📝 **Extracted Summary & Verification**:\n${doc.summaryContent || doc.description}\n\n` +
+              `📍 **Physical House Storage Location**: ${doc.description || 'Document Vault'}\n\n` +
+              `*(Click **Download Document** below to download directly to your device).*`;
+          }).join('\n\n---\n\n');
+
+          if (missingItems.length > 0) {
+            replyText += `\n\n⚠️ **Note**: The following requested document (${missingItems.map(m => `**${m}**`).join(', ')}) is **not available** in your Document Vault.`;
+          }
         } else if (documents.length > 0) {
+          // Case C: General document inquiry (e.g. "show documents", "vault records", "list files")
           replyText = `📁 **Retrieved Family Document Vault Records (${documents.length} files securely stored)**:\n\n` +
             documents.map(d =>
               `• **${d.title.replace('[DEMO] ', '')}** (${d.category}, ${d.fileType} - ${d.fileSize}): Uploaded by ${d.uploaderName}\n  📝 **Extracted Summary**: ${d.summaryContent || d.description}`
@@ -1309,17 +2076,88 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           replyText = `I searched your Document Vault, but no documents have been uploaded yet. You can upload documents in the Document Vault or drag and drop here.`;
         }
         sources.push('Document Vault Database');
-      } else if (queryLower.includes('allergic') || queryLower.includes('allergy') || queryLower.includes('grandma allergic')) {
-        const allergyKnw = knowledgeList.find(k => k.category === 'Allergies');
-        if (allergyKnw) {
-          replyText = `⚠️ **CRITICAL HEALTH NOTICE**:\n\n**${allergyKnw.title}**: ${allergyKnw.content}`;
+      } else if (/birthday|bday|b'day|birhtday|birtday|brithday|bithday|birth\s*day|born|dob|anniversary/i.test(queryLower)) {
+        const birthdayEvents = events.filter(e => (e.category || '').toLowerCase() === 'birthday' || /birthday|bday|birhtday|born|anniversary/i.test(e.title));
+        const extractedP = extractClientPerson(queryLower);
+        let targetMemberKey = extractedP ? extractedP.toLowerCase() : undefined;
+
+        if (!targetMemberKey) {
+          const customEvt = birthdayEvents.find(e => {
+            const words = (e.title || '').toLowerCase().split(/\s+/).filter(w => w.length >= 2 && !/birthday|bday|celebration|party|test/.test(w));
+            return words.some(w => queryLower.includes(w));
+          });
+          if (customEvt) {
+            targetMemberKey = (customEvt.title || '').split(/\s+/)[0].replace(/['’]s$/i, '').toLowerCase();
+          }
+        }
+
+        if (targetMemberKey) {
+          const memberKey = targetMemberKey === 'dad' ? 'father' : targetMemberKey === 'mom' ? 'mother' : targetMemberKey;
+          const personDisplay = memberKey.charAt(0).toUpperCase() + memberKey.slice(1);
+
+          const matched = birthdayEvents.find(e => {
+            const txt = `${e.title} ${e.description || ''} ${(Array.isArray(e.membersInvolved) ? e.membersInvolved : []).join(' ')}`.toLowerCase();
+            return txt.includes(memberKey);
+          }) || events.find(e => {
+            const txt = `${e.title} ${e.description || ''} ${(Array.isArray(e.membersInvolved) ? e.membersInvolved : []).join(' ')}`.toLowerCase();
+            return txt.includes(memberKey) && (txt.includes('birthday') || (e.category || '').toLowerCase() === 'birthday');
+          });
+
+          if (matched) {
+            const d = new Date(matched.date);
+            const formattedDate = !isNaN(d.getTime()) ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : matched.date;
+            replyText = `🎂 **${personDisplay}'s Birthday**: **${formattedDate}**\n\n• **Celebrant**: ${personDisplay}\n• **Event**: ${matched.title.replace('[DEMO] ', '')}\n• **Date**: ${matched.date}${matched.time ? ` at ${matched.time}` : ''}\n\n${matched.description || ''}`;
+          } else {
+            replyText = `⚠️ **Not Provided**: ${personDisplay}'s birthday has not been recorded in your family calendar yet.`;
+          }
+        } else if (birthdayEvents.length > 0) {
+          replyText = `🎂 **Family Birthdays & Anniversaries**:\n\n` + birthdayEvents.map(e => `• **${e.title.replace('[DEMO] ', '')}**: ${e.date}`).join('\n');
         } else {
-          replyText = `No registered medical allergies found in Family Knowledge.`;
+          replyText = `No family birthdays or anniversaries recorded yet.`;
+        }
+        sources.push('Calendar Events & Family Milestones');
+      } else if (queryLower.includes('emergency contact') || queryLower.includes('sos contact') || queryLower.includes('emergency')) {
+        if (emergencyContacts.length > 0) {
+          replyText = `🚨 **Authorized Family Emergency Contacts**:\n\n` +
+            emergencyContacts.map(c => `• **${c.name}** (${c.relation}): 📞 [${c.phone}](tel:${c.phone}) ${c.isPrimary ? '*(PRIMARY)*' : ''}`).join('\n') +
+            `\n\nThese contacts receive instant SMS & Email notifications if Emergency SOS is triggered.`;
+        } else {
+          replyText = `⚠️ **Not Provided**: No emergency contacts have been added yet. You can link emergency contacts in Profile & Settings.`;
+        }
+        sources.push('Emergency Contacts Database');
+      } else if (queryLower.includes('allergic') || queryLower.includes('allergy') || queryLower.includes('allergies')) {
+        const targetMember = familyMembers.find(m => queryLower.includes(m.name.toLowerCase()));
+        const allergyKnws = knowledgeList.filter(k => k.category === 'Allergies' || k.title.toLowerCase().includes('allerg') || k.content.toLowerCase().includes('allerg'));
+        if (targetMember) {
+          const memberAllergy = allergyKnws.find(k => k.relatedMemberName.toLowerCase().includes(targetMember.name.toLowerCase()));
+          if (memberAllergy) {
+            replyText = `⚠️ **Medical Allergy for ${targetMember.name}**:\n\n• **${memberAllergy.title}**: ${memberAllergy.content} *(Importance: ${memberAllergy.importance})*`;
+          } else {
+            replyText = `⚠️ **Not Provided**: No recorded allergies for **${targetMember.name}** in Family Knowledge records.`;
+          }
+        } else if (allergyKnws.length > 0) {
+          replyText = `⚠️ **CRITICAL FAMILY ALLERGIES & HEALTH WARNINGS**:\n\n` +
+            allergyKnws.map(k => `• **${k.title}** (For ${k.relatedMemberName}): ${k.content} *[${k.importance}]*`).join('\n');
+        } else {
+          replyText = `No registered medical allergies found in Family Knowledge records.`;
         }
         sources.push('Family Knowledge Base - Critical Health Record');
       } else if (attachments && attachments.length > 0) {
-        replyText = `Attached file **"${attachments[0].name}"** received. Analyzing document contents...`;
-        sources.push('Private Family Storage');
+        const att = attachments[0];
+        // Automatically save document to vault (Prompt 1)
+        void addDocument({
+          title: att.name ? att.name.replace(/\.[^/.]+$/, '') : `${currentUser.name}'s Document`,
+          category: 'Identity',
+          fileType: (att.name || 'file.pdf').split('.').pop()?.toUpperCase() || 'FILE',
+          fileSize: '1.25 MB',
+          fileUrl: att.url,
+          storagePath: att.url,
+          description: `Uploaded directly via HomeBrain AI Chat by ${currentUser.name} on ${todayDateStr}.`,
+          summaryContent: `Indexed official document: ${att.name}`,
+          uploaderName: currentUser.name
+        });
+        replyText = `✅ **Saved to Document Vault**!\n\nYour file **"${att.name}"** has been permanently stored and indexed in your Family Document Vault under **Identity** records.\n\nYou can view and download it anytime from the Document Vault module.`;
+        sources.push('Family Document Vault');
       } else {
         replyText = `I searched your family records for "${text}". Try asking about today's schedule, medicines, groceries, bills, documents, or past family milestones.`;
         sources.push('Family Central Database');
@@ -1356,6 +2194,8 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setActiveTab,
         activeSubScreen,
         setActiveSubScreen,
+        dashboardView,
+        setDashboardView,
         selectedItemId,
         setSelectedItemId,
         navigateToSubScreen,

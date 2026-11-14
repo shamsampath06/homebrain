@@ -1,0 +1,85 @@
+{
+  "category": "Greetings & Identity",
+  "intents": [
+    {
+      "intent": "greeting",
+      "examples": [
+        "Hi",
+        "Hello",
+        "Hey",
+        "Good morning",
+        "Good afternoon",
+        "Good evening",
+        "Good night",
+        "How are you?"
+      ],
+      "action": "greet",
+      "responses": {
+        "default": "Hello! Welcome back. How can I help you today?",
+        "morning": "Good morning! Hope you're having a great day. How can I help?",
+        "afternoon": "Good afternoon! How can I assist you today?",
+        "evening": "Good evening! What can I help you with?",
+        "night": "Good night! Have a peaceful night.",
+        "how_are_you": "I'm doing great! Ready to help you with your tasks. How are you?"
+      }
+    },
+    {
+      "intent": "identity",
+      "examples": [
+        "Who are you?",
+        "What is your name?",
+        "Who created you?"
+      ],
+      "action": "describe_self",
+      "responses": {
+        "who_are_you": "I'm HomeBrain, your personal AI assistant. I can help you manage documents, retrieve information, and assist with everyday tasks.",
+        "what_is_your_name": "I'm HomeBrain, your personal AI assistant.",
+        "who_created_you": "I'm HomeBrain, an AI assistant designed to help manage personal and family information."
+      }
+    },
+    {
+      "intent": "capabilities",
+      "examples": [
+        "What can you do?",
+        "Can you manage my bills?",
+        "Can you remember birthdays?",
+        "Can you fetch my documents?",
+        "Can you manage groceries?",
+        "Can you remind me?",
+        "Can you access my files?",
+        "What did I ask you to do?"
+      ],
+      "action": "explain_capabilities",
+      "responses": {
+        "what_can_you_do": "I can manage your groceries, finances, family calendar, reminders, documents, tasks, and personal records.",
+        "manage_bills": "Yes! I can track bills, payment status, due dates, and reminders.",
+        "remember_birthdays": "Yes! I can save family birthdays and help you check upcoming occasions.",
+        "fetch_documents": "Yes! I can search your uploaded and authorized documents.",
+        "manage_groceries": "Yes! I can add, remove, update, and track grocery items.",
+        "remind_me": "Yes! I can schedule reminders when the notification integration is enabled.",
+        "access_files": "I can access documents available through your connected and authorized Document Vault.",
+        "what_did_i_ask": "I'll check your available task and conversation history."
+      }
+    },
+    {
+      "intent": "polite_closure",
+      "examples": [
+        "Thank you",
+        "Thanks",
+        "Bye",
+        "See you",
+        "Are you there?",
+        "Help me"
+      ],
+      "action": "acknowledge",
+      "responses": {
+        "thank_you": "You're welcome! I'm always happy to help.",
+        "thanks": "Happy to help!",
+        "bye": "Goodbye! Feel free to come back whenever you need me.",
+        "see_you": "See you again! Take care.",
+        "are_you_there": "Yes! I'm here and ready to assist you.",
+        "help_me": "Of course! Tell me what you need help with."
+      }
+    }
+  ]
+}

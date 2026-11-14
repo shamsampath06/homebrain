@@ -1,0 +1,11 @@
+CHENNAI METROPOLITAN WATER SUPPLY AND SEWERAGE BOARD (CMWSSB)
+Water & Sewerage Tax / Consumption Bill - November 2026
+Consumer Name: Demo Household
+Connection ID: CMW-44021
+Service Address: 42 Palm Grove Avenue, Anna Nagar, Chennai 600040
+Billing Month: November 2026
+Bill Amount: ₹850
+Due Date: November 20, 2026
+Payment Status: Unpaid
+Category: Utilities
+[DEMO] Fictional water bill record.

@@ -1,0 +1,37 @@
+{
+  "category": "Tasks & To-Do",
+  "intents": [
+    {
+      "intent": "manage_tasks",
+      "examples": [
+        "Add a task to complete my assignment",
+        "Add a task to call the bank",
+        "Create a task for tomorrow",
+        "Mark assignment as completed",
+        "Show pending tasks",
+        "What tasks do I have today?",
+        "Delete my completed tasks",
+        "Change my task deadline",
+        "Add high priority task",
+        "What is my next task?",
+        "Did I complete my assignment?",
+        "Add a task to buy groceries"
+      ],
+      "action": "task_action",
+      "responses": {
+        "assignment_added": "Your assignment task has been added.",
+        "bank_call": "Your bank call task has been added.",
+        "create_tomorrow": "What task would you like me to create?",
+        "assignment_done": "Your assignment task has been marked as completed.",
+        "pending": "Here are your incomplete tasks.",
+        "today": "Here are your tasks scheduled for today.",
+        "delete_completed": "Would you like me to remove all completed tasks?",
+        "change_deadline": "Which task and what new deadline?",
+        "high_priority": "Sure! What task should I mark as high priority?",
+        "next_task": "Your next scheduled task is Review documents.",
+        "did_i_complete": "I'll check its current status.",
+        "buy_groceries": "Your grocery shopping task has been added."
+      }
+    }
+  ]
+}

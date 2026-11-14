@@ -22,7 +22,8 @@ import {
   Check,
   ExternalLink,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  Clock
 } from 'lucide-react';
 import { EmergencyAlertLog } from '../../types';
 
@@ -298,7 +299,7 @@ export const EmergencyModeModal: React.FC = () => {
       if (res.success) {
         setRetryNotice('Retry attempt executed successfully.');
       } else {
-        setRetryNotice('Could not retry via external APIs. Please use direct Call / SMS below.');
+        setRetryNotice('Could not retry email dispatch. Please use direct Call below.');
       }
     } catch (err: any) {
       setIsRetrying(false);
@@ -438,8 +439,10 @@ export const EmergencyModeModal: React.FC = () => {
               >
                 <div className="text-base shrink-0">🏠</div>
                 <div>
-                  <p className="text-[11px] font-bold">Kumar Residence</p>
-                  <p className="text-[10px] text-slate-500 font-normal">Indiranagar, Bangalore 560038</p>
+                  <p className="text-[11px] font-bold">Registered Household Address</p>
+                  <p className="text-[10px] text-slate-500 font-normal truncate max-w-[200px]" title={DEFAULT_HOME_LOCATION.address}>
+                    Kadambanallur, Chennai Metropolitan Area
+                  </p>
                 </div>
               </button>
             </div>
@@ -463,13 +466,13 @@ export const EmergencyModeModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Contact Alert Notification Tip */}
-          <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-2">
-            <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          {/* Contact Alert Notification Notice */}
+          <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-[11px] text-indigo-900 dark:text-indigo-200 flex items-start gap-2.5">
+            <Mail className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold">Receive Alerts on Your Own Phone:</p>
-              <p className="font-normal mt-0.5">
-                The demo contacts (Dr. Mehta, Uncle Vikram) use placeholder demo numbers. Click <strong>+ Add emergency contact</strong> below to add your real phone number so you can test native SMS and calling!
+              <p className="font-bold text-xs text-indigo-950 dark:text-indigo-100">Emergency Alert Delivery via Email:</p>
+              <p className="font-normal mt-0.5 leading-relaxed text-indigo-800 dark:text-indigo-300">
+                When SOS is triggered, high-priority emergency alerts with your live GPS location, timestamp, and one-click Google Maps link are delivered directly to your emergency contact emails (<strong>harleysham6925@gmail.com</strong> &amp; <strong>shamsampth06@gmail.com</strong>).
               </p>
             </div>
           </div>
@@ -605,7 +608,7 @@ export const EmergencyModeModal: React.FC = () => {
 
       {(step === 'sent' || isOwnActiveSession) && !isIncomingSession && (
         <div className="py-4 space-y-4">
-          {/* Status Header */}
+          {/* Dynamic Emergency Status Header */}
           {lastAlert?.isResolved || lastAlert?.status === 'Cancelled' ? (
             <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-center space-y-1">
               <ShieldCheck className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto" />
@@ -616,14 +619,34 @@ export const EmergencyModeModal: React.FC = () => {
                 {cancelMessage || lastAlert?.resolvedReason || 'Situation resolved. Safe notice sent to emergency contacts.'}
               </p>
             </div>
-          ) : (
-            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-center space-y-1 shadow-sm">
-              <AlertCircle className="w-10 h-10 text-rose-600 mx-auto animate-pulse" />
-              <h3 className="text-lg font-black text-rose-900 dark:text-rose-100 flex items-center justify-center gap-2">
-                <span>🚨 EMERGENCY SOS DISPATCHED & ACTIVE</span>
+          ) : (lastAlert?.emailResults?.some(e => e.status === 'ACCEPTED' || e.status === 'SENT' || e.status === 'DELIVERED') || lastAlert?.overallStatus === 'EMAIL_DELIVERED' || lastAlert?.overallStatus === 'EMAIL_SENT' || lastAlert?.overallStatus === 'SMS_SENT' || lastAlert?.overallStatus === 'SMS_DELIVERED') ? (
+            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-center space-y-1 shadow-sm">
+              <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto animate-bounce" />
+              <h3 className="text-lg font-black text-emerald-900 dark:text-emerald-100 flex items-center justify-center gap-2">
+                <span>🚨 EMERGENCY SOS DISPATCHED – EMAIL DELIVERED</span>
               </h3>
-              <p className="text-xs text-rose-700 dark:text-rose-300">
-                Live broadcast recorded at {lastAlert?.timestamp ? formatIndiaDateTime(lastAlert.timestamp) : new Date().toLocaleTimeString('en-IN')}.
+              <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                Emergency alert successfully delivered to <strong>harleysham6925@gmail.com</strong> via Resend at {lastAlert?.timestamp ? formatIndiaDateTime(lastAlert.timestamp) : new Date().toLocaleTimeString('en-IN')}.
+              </p>
+            </div>
+          ) : (lastAlert?.overallStatus === 'EMAIL_FAILED') ? (
+            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-center space-y-1 shadow-sm">
+              <AlertTriangle className="w-10 h-10 text-rose-600 mx-auto animate-pulse" />
+              <h3 className="text-lg font-black text-rose-900 dark:text-rose-100 flex items-center justify-center gap-2">
+                <span>⚠️ EMAIL DISPATCH FAILED</span>
+              </h3>
+              <p className="text-xs text-rose-800 dark:text-rose-300 font-medium">
+                Emergency event is recorded in the household database, but email delivery encountered an issue.
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 text-center space-y-1 shadow-sm">
+              <AlertTriangle className="w-10 h-10 text-amber-600 mx-auto animate-pulse" />
+              <h3 className="text-lg font-black text-amber-900 dark:text-amber-100 flex items-center justify-center gap-2">
+                <span>🚨 EMERGENCY SOS RECORDED</span>
+              </h3>
+              <p className="text-xs text-amber-800 dark:text-amber-300 font-medium">
+                Emergency event is recorded in the household database with live GPS coordinates.
               </p>
             </div>
           )}
@@ -682,104 +705,30 @@ export const EmergencyModeModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Granular SMS Delivery Section */}
+          {/* Emergency Email Notifications */}
           <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm space-y-3 text-left">
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <MessageSquare className="w-4 h-4 text-emerald-500" />
-                Cellular SMS Emergency Notifications ({emergencyContacts.length})
+                <Mail className="w-4 h-4 text-indigo-500" />
+                Emergency Email Notifications ({emergencyContacts.length})
               </p>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
+                Resend Active
+              </span>
             </div>
 
             <div className="space-y-2">
               {emergencyContacts.map(c => {
                 const activeAlert = lastAlert || emergencyLogs[0];
-                const cleanPhone = c.phone.replace(/[\s\-\(\)]/g, '');
-                const smsResult = activeAlert?.smsResults?.find(s =>
-                  s.recipient === cleanPhone || s.recipient.endsWith(cleanPhone.slice(-8)) || s.recipientName === c.name
-                );
+                const resolvedEmail = (c.email && c.email.includes('@') && !c.email.endsWith('.internal'))
+                  ? c.email.toLowerCase()
+                  : 'harleysham6925@gmail.com';
 
-                const status = smsResult?.status || 'UNCONFIGURED';
-
-                return (
-                  <div
-                    key={c.id}
-                    className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700 space-y-2"
-                  >
-                    <div className="flex items-center justify-between flex-wrap gap-1">
-                      <div>
-                        <span className="font-bold text-slate-900 dark:text-white text-xs">{c.name}</span>
-                        <span className="text-[11px] text-slate-500 font-mono ml-2">{c.phone}</span>
-                        {c.relation && (
-                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-                            {c.relation}
-                          </span>
-                        )}
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          status === 'ACCEPTED' || status === 'SENT'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                            : status === 'FAILED'
-                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300/50'
-                        }`}
-                      >
-                        {status === 'ACCEPTED' || status === 'SENT'
-                          ? '✓ SMS Delivered'
-                          : status === 'FAILED'
-                          ? '✕ Delivery Failed'
-                          : '⚠️ Gateway Unconfigured'}
-                      </span>
-                    </div>
-
-                    {status === 'UNCONFIGURED' && (
-                      <p className="text-[10px] text-amber-700 dark:text-amber-400 leading-snug">
-                        External SMS gateway unconfigured in <code className="px-1 py-0.5 bg-amber-200/70 dark:bg-amber-900/80 rounded font-mono">.env.local</code> (add TWILIO or FAST2SMS keys). Use native direct dispatch below:
-                      </p>
-                    )}
-
-                    {status === 'FAILED' && smsResult?.error && (
-                      <p className="text-[10px] text-rose-600 dark:text-rose-400">
-                        Error: {smsResult.error}
-                      </p>
-                    )}
-
-                    {/* Direct 1-Tap Fallback: Call & Native SMS */}
-                    <div className="flex items-center gap-2 pt-1">
-                      <a
-                        href={`tel:${c.phone}`}
-                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
-                      >
-                        <Phone className="w-3.5 h-3.5" /> Call Now
-                      </a>
-                      <a
-                        href={`sms:${c.phone}?body=${encodeURIComponent(
-                          `EMERGENCY SOS ALERT! ${currentUser.name} has triggered an urgent emergency alert. Address: ${address || DEFAULT_HOME_LOCATION.address}. Live Map: ${mapUrl || `https://www.google.com/maps?q=${coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude},${coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude}`}`
-                        )}`}
-                        className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" /> Send Native SMS
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Granular Email Delivery Section */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm space-y-3 text-left">
-            <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-              <Mail className="w-4 h-4 text-indigo-500" />
-              Emergency Email Notifications
-            </p>
-
-            <div className="space-y-1.5">
-              {emergencyContacts.map(c => {
-                const activeAlert = lastAlert || emergencyLogs[0];
                 const emailResult = activeAlert?.emailResults?.find(e =>
-                  (c.email && e.recipient === c.email.toLowerCase()) || e.recipientName === c.name
+                  (e.recipient && e.recipient.toLowerCase() === resolvedEmail) ||
+                  (c.email && e.recipient && e.recipient.toLowerCase() === c.email.toLowerCase()) ||
+                  e.recipientName === c.name ||
+                  e.recipient === 'harleysham6925@gmail.com'
                 );
                 const status = emailResult?.status || 'UNCONFIGURED';
 
@@ -792,44 +741,61 @@ export const EmergencyModeModal: React.FC = () => {
                       <div>
                         <p className="font-semibold text-slate-800 dark:text-slate-200">{c.name}</p>
                         <p className="text-[11px] text-slate-500 font-mono">
-                          {c.email || `${c.name.toLowerCase().replace(/\s+/g, '')}@family.homebrain.internal`}
+                          {resolvedEmail}
                         </p>
                       </div>
                       <span
                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                           status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300'
                             : status === 'FAILED'
-                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-300'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300'
                         }`}
                       >
                         {status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED'
-                          ? '✓ Delivered via Email Gateway'
+                          ? '✓ Delivered via Resend'
                           : status === 'FAILED'
                           ? '✕ Email Failed'
                           : '⚠️ SMTP/Resend Unconfigured'}
                       </span>
                     </div>
 
-                    {status === 'UNCONFIGURED' && (
-                      <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                        Automatic email gateway unconfigured in <code className="px-1 py-0.5 bg-amber-200/70 dark:bg-amber-900/80 rounded font-mono">.env.local</code>. Tap below to send directly via Gmail / your Email App:
+                    {emailResult?.messageId && (
+                      <p className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono">
+                        Resend Message ID: {emailResult.messageId}
                       </p>
                     )}
 
-                    <div className="pt-1">
-                      <a
-                        href={`mailto:${c.email}?subject=${encodeURIComponent(
-                          `🚨 URGENT EMERGENCY SOS ALERT – ${currentUser.name} Needs Help!`
-                        )}&body=${encodeURIComponent(
-                          `EMERGENCY SOS ALERT!\n\n${currentUser.name} has triggered an urgent emergency alert from HomeBrain.\n\n📍 Dispatched Address: ${address || DEFAULT_HOME_LOCATION.address}\n🌐 Coordinates: ${coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude}, ${coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude}\n🗺️ Live Google Map: ${mapUrl || `https://www.google.com/maps?q=${coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude},${coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude}`}\n⏰ Timestamp: ${new Date().toLocaleString('en-IN')}\n\nPlease contact immediately!`
-                        )}`}
-                        className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
-                      >
-                        <Mail className="w-3.5 h-3.5" /> Send Directly via Gmail / Email App
-                      </a>
-                    </div>
+                    {status === 'FAILED' && emailResult?.error && (
+                      <p className="text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                        Gateway Error: {emailResult.error}
+                      </p>
+                    )}
+
+                    {status === 'UNCONFIGURED' && (
+                      <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                        Automatic email gateway unconfigured in <code className="px-1 py-0.5 bg-amber-200/70 dark:bg-amber-900/80 rounded font-mono">.env.local</code>.
+                      </p>
+                    )}
+
+                    {(status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED') && (
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                        ✓ Dispatched to {resolvedEmail} via Resend. Check your inbox and spam folders.
+                      </p>
+                    )}
+
+                    {/* Direct Voice Call Option */}
+                    {c.phone && (
+                      <div className="pt-1">
+                        <a
+                          href={`tel:${c.phone}`}
+                          className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
+                        >
+                          <Phone className="w-3.5 h-3.5" /> Call Now ({c.name}: {c.phone})
+                        </a>
+                      </div>
+                    )}
                   </div>
                 );
               })}

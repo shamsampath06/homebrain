@@ -1,0 +1,13 @@
+NILGIRIS 1905 SUPERMARKET - RETAIL TAX INVOICE
+Store: Anna Nagar 2nd Avenue Branch, Chennai
+Invoice No: NIL-2026-11029 | Date: 02/11/2026 | Time: 18:45
+Items Purchased:
+1. Daawat Basmati Rice (10 kg bag) - ₹950.00
+2. Farm Toor Dal (2 kg pack) - ₹280.00
+3. Fortune Sunflower Cooking Oil (5 L can) - ₹750.00
+4. Amul Fresh Cow Milk (2 litres) - ₹110.00
+5. Household Essentials & Spices - ₹410.00
+Total Items: 5 | Subtotal: ₹2,380.95 | GST (5%): ₹119.05
+Total Amount Paid: ₹2,500.00
+Payment Method: UPI (GPay - Transaction Ref: UPI/20261102/987123)
+[DEMO] Synthetic grocery invoice.

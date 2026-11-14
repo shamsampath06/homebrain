@@ -46,39 +46,39 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
     <div className="mb-6 space-y-3">
       {/* Breadcrumb row & Back button */}
       <div className="flex items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-1.5 flex-wrap text-slate-500 dark:text-slate-400">
+        <div className="flex items-center gap-1.5 flex-wrap text-slate-500">
           {showBack && (
             <button
               onClick={handleBack}
-              className="mr-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold transition-colors shadow-sm"
+              className="mr-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-brand-50 text-slate-700 hover:text-brand-800 font-bold transition-all border border-[#eadfbe] shadow-sm hover:scale-105"
               title="Return to previous screen"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
+              <ArrowLeft className="w-3.5 h-3.5 text-brand-600" />
               <span>Back</span>
             </button>
           )}
 
           <button
             onClick={() => handleBreadcrumbClick('dashboard', 'none')}
-            className="hover:text-brand-600 dark:hover:text-brand-400 flex items-center gap-1"
+            className="hover:text-brand-700 flex items-center gap-1 text-slate-500"
           >
-            <Home className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Home</span>
+            <Home className="w-3.5 h-3.5 text-brand-600" />
+            <span className="hidden sm:inline font-mono">Home</span>
           </button>
 
           {breadcrumbs.map((crumb, idx) => {
             const isLast = idx === breadcrumbs.length - 1;
             return (
               <React.Fragment key={idx}>
-                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+                <ChevronRight className="w-3 h-3 text-slate-500 shrink-0" />
                 {isLast ? (
-                  <span className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[180px] sm:max-w-xs">
+                  <span className="font-bold text-slate-800 truncate max-w-[180px] sm:max-w-xs font-mono">
                     {crumb.label}
                   </span>
                 ) : (
                   <button
                     onClick={() => handleBreadcrumbClick(crumb.tab, crumb.sub)}
-                    className="hover:text-brand-600 dark:hover:text-brand-400 truncate max-w-[120px] sm:max-w-xs"
+                    className="hover:text-brand-700 truncate max-w-[120px] sm:max-w-xs text-slate-500"
                   >
                     {crumb.label}
                   </button>
@@ -92,13 +92,13 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       </div>
 
       {/* Main Title & Action Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-slate-200/60 dark:border-slate-800">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-[#eadfbe]">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2 font-mono">
             {title}
           </h1>
           {subtitle && (
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-xs sm:text-sm text-slate-600 mt-1">
               {subtitle}
             </p>
           )}
@@ -113,4 +113,4 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
     </div>
   );
 };
-
+export default PageHeader;

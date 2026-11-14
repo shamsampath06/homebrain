@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
-import { Bell, ShieldAlert, Sun, Moon, Sparkles, User as UserIcon } from 'lucide-react';
+import { Bell, ShieldAlert, Sun, Moon, Sparkles, User as UserIcon, Search, Command, LogIn } from 'lucide-react';
 import { InitialAvatar } from '../common/InitialAvatar';
 import { formatIndiaDateTime } from '../../lib/display';
 
@@ -27,55 +27,78 @@ export const Header: React.FC = () => {
   });
 
   return (
-    <header className="sticky top-0 z-30 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 transition-colors">
+    <header className="sticky top-0 z-30 bg-[#fffdf7]/95 dark:bg-[#080B12]/95 backdrop-blur-2xl border-b border-[#eee3c5] dark:border-white/10 text-slate-900 dark:text-white transition-colors shadow-[0_10px_30px_-10px_rgba(122,91,24,0.18)]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
         {/* Greeting & Date */}
         <div className="flex items-center gap-3">
+          <img
+            src="/homebrain-logo.jpg"
+            alt="HomeBrain Logo"
+            className="w-10 h-10 rounded-2xl object-cover ring-1 ring-cyan-400/40 shadow-md shadow-cyan-500/20 lg:hidden shrink-0"
+          />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2 font-mono">
                 {getGreeting()}, {currentUser.name.split(' ')[0]} <span className="animate-bounce inline-block">👋</span>
               </h1>
-              <span className="hidden md:inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300 border border-brand-200 dark:border-brand-800">
-                <Sparkles className="w-3 h-3 text-brand-500" />
-                {currentUser.familyName}
-              </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-              {currentDate} • <span className="text-slate-700 dark:text-slate-300 font-medium">Here's what's happening with your family today.</span>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              {currentDate} • <span className="text-brand-600 dark:text-cyan-400/90 font-medium">Autonomous Household Telemetry Active.</span>
             </p>
           </div>
         </div>
 
         {/* Header Quick Actions */}
         <div className="flex items-center gap-2.5">
+          {/* Spotlight Command Palette Trigger */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-command-palette'))}
+            className="hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 hover:border-brand-400 dark:hover:border-cyan-400/40 text-slate-600 dark:text-slate-300 text-xs transition-all duration-200 shadow-sm hover:scale-105"
+            title="Press Ctrl+K or Cmd+K to search"
+          >
+            <Search className="w-3.5 h-3.5 text-brand-600 dark:text-cyan-400" />
+            <span className="font-semibold hidden md:inline">Quick Search...</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-brand-50 dark:bg-[#0A0E17] border border-brand-200 dark:border-white/10 text-[10px] font-mono text-brand-700 dark:text-cyan-400">
+              Ctrl+K
+            </kbd>
+          </button>
+
           {/* Emergency SOS Quick Button */}
           <button
             onClick={() => navigateToSubScreen('emergency')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-500 hover:bg-rose-600 text-white font-semibold text-xs sm:text-sm shadow-md shadow-rose-500/20 hover:shadow-rose-500/30 transition-all duration-200 transform hover:scale-105 active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-black text-xs sm:text-sm shadow-[0_0_15px_rgba(244,63,94,0.4)] transition-all duration-200 transform hover:scale-105 active:scale-95 border border-rose-400/40"
             title="Emergency Mode SOS"
           >
-            <ShieldAlert className="w-4 h-4 animate-pulse" />
+            <ShieldAlert className="w-4 h-4 animate-pulse text-white" />
             <span className="hidden sm:inline">SOS Emergency</span>
           </button>
 
           {/* Dark Mode Toggle */}
           <button
             onClick={toggleDarkMode}
-            className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-2.5 rounded-xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 text-slate-600 dark:text-slate-300 transition-colors"
             title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
-            {isDarkMode ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-slate-600" />}
+            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-400" />}
+          </button>
+
+          {/* Quick Login / Account Switch Screen Trigger */}
+          <button
+            onClick={() => navigateToSubScreen('login')}
+            className="p-2.5 rounded-xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 text-brand-700 dark:text-cyan-400 hover:text-brand-600 dark:hover:text-cyan-300 transition-colors"
+            title="Open Sign In / Account Switcher"
+          >
+            <LogIn className="w-4 h-4" />
           </button>
 
           {/* Notifications Dropdown */}
           <div className="relative">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors relative"
+              className="p-2.5 rounded-xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 text-slate-600 dark:text-slate-300 transition-colors relative"
               title="Notifications"
             >
-              <Bell className="w-5 h-5" />
+              <Bell className="w-4 h-4" />
               {pendingReminders.length + activeEmergencyNotifications.length > 0 && (
                 <span className="absolute top-1 right-1 w-4 h-4 bg-amber-500 text-white font-bold text-[10px] rounded-full flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
                   {pendingReminders.length + activeEmergencyNotifications.length}

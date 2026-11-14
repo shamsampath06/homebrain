@@ -15,6 +15,7 @@ import {
   FamilyMemory,
   AIMessage
 } from '../types';
+import { EXAMPLE_PLACE_MEMORIES } from './exampleMemories';
 
 export const initialUser: User = {
   id: 'usr_sarah',
@@ -443,48 +444,7 @@ export const initialEmergencyContacts: EmergencyContact[] = [
   }
 ];
 
-export const initialMemories: FamilyMemory[] = [
-  {
-    id: 'mem_2026_1',
-    title: "Rahul's 40th Birthday Surprise Party",
-    year: 2026,
-    date: '2026-09-10',
-    description: 'Surprise weekend gathering with close friends and family at the garden patio.',
-    photoUrl: 'https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=800&auto=format&fit=crop&q=80',
-    location: 'Home Patio, California',
-    addedBy: 'Sarah Sharma'
-  },
-  {
-    id: 'mem_2026_2',
-    title: 'Family Summer Weekend Picnic',
-    year: 2026,
-    date: '2026-07-22',
-    description: 'Sunny afternoon enjoying homemade lemonade and frisbee at Lakeside Park.',
-    photoUrl: 'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=800&auto=format&fit=crop&q=80',
-    location: 'Lakeside Park',
-    addedBy: 'Rahul Sharma'
-  },
-  {
-    id: 'mem_2025_1',
-    title: 'Ooty Family Hillstation Trip ✈️',
-    year: 2025,
-    date: '2025-11-15',
-    description: 'Unforgettable 5-day vacation visiting botanical gardens, tea estates, and riding the toy train!',
-    photoUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80',
-    location: 'Ooty Tea Estates, India',
-    addedBy: 'Sarah Sharma'
-  },
-  {
-    id: 'mem_2025_2',
-    title: 'Ananya 14th Birthday Celebration',
-    year: 2025,
-    date: '2025-05-18',
-    description: 'Ananya celebrating with her favorite chocolate truffle cake and karaoke night.',
-    photoUrl: 'https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?w=800&auto=format&fit=crop&q=80',
-    location: 'Sharma Residence',
-    addedBy: 'Grandma Savitri'
-  }
-];
+export const initialMemories: FamilyMemory[] = EXAMPLE_PLACE_MEMORIES;
 
 export const initialAIMessages: AIMessage[] = [
   {

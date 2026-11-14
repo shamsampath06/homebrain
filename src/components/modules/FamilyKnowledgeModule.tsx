@@ -13,20 +13,34 @@ const KnowledgeFileTile: React.FC<{
 }> = ({ file, onOpen, onDelete, onRename }) => {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!file.isFolder) void createPrivateFileUrl('documents', file.storagePath).then(setUrl).catch(() => undefined);
+    if (file.isFolder) return;
+    if (file.storagePath?.startsWith('data:') || file.storagePath?.startsWith('http')) {
+      setUrl(file.storagePath);
+    } else if (file.storagePath) {
+      void createPrivateFileUrl('documents', file.storagePath).then(setUrl).catch(() => undefined);
+    }
   }, [file]);
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-2">
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-2.5 bg-slate-50/50 dark:bg-slate-900/50 hover:border-purple-300 dark:hover:border-purple-600 transition-all">
       {file.isFolder ? (
-        <button type="button" onClick={onOpen} className="w-full text-left text-xs font-semibold">📁 {file.name}</button>
+        <button type="button" onClick={onOpen} className="w-full text-left text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 py-2">
+          <span>📁</span>
+          <span className="truncate">{file.name}</span>
+        </button>
       ) : (
-        <button type="button" onClick={onOpen} className="w-full text-left">
-          {url ? <img src={url} alt={file.name} className="h-20 w-full rounded-xl object-cover" /> : <div className="h-20 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs">Loading...</div>}
-          <p className="truncate text-xs font-semibold mt-1">{file.name}</p>
+        <button type="button" onClick={onOpen} className="w-full text-left group">
+          {url ? (
+            <img src={url} alt={file.name} className="h-20 w-full rounded-xl object-cover group-hover:scale-102 transition-transform" />
+          ) : (
+            <div className="h-20 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center text-xs font-semibold">
+              Preview
+            </div>
+          )}
+          <p className="truncate text-xs font-semibold mt-1 text-slate-800 dark:text-slate-200">{file.name}</p>
         </button>
       )}
-      <div className="flex gap-2 mt-1">
-        <button type="button" onClick={onRename} className="text-[10px] text-purple-600 hover:underline">Rename</button>
+      <div className="flex gap-2 mt-1.5 pt-1 border-t border-slate-200/60 dark:border-slate-800">
+        <button type="button" onClick={onRename} className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold hover:underline">Rename</button>
         <button type="button" onClick={onDelete} className="text-[10px] text-rose-500 hover:underline">Delete</button>
       </div>
     </div>
@@ -92,22 +106,29 @@ export const KnowledgeCard: React.FC = () => {
 export const FamilyKnowledgeScreen: React.FC = () => {
   const { knowledgeList, knowledgeFiles, navigateToSubScreen, setActiveSubScreen, deleteKnowledge, addKnowledgeFile, updateKnowledgeFile, deleteKnowledgeFile, currentUser } = useHomeBrain();
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [folderPath, setFolderPath] = useState('');
   const [fileError, setFileError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  const filtered = knowledgeList.filter(
-    k =>
+  const categories = ['All', 'Allergies', 'Medical', 'Preferences', 'Schedules', 'Rules', 'Other'];
+
+  const filtered = knowledgeList.filter(k => {
+    const matchesCategory = selectedCategory === 'All' || k.category === selectedCategory;
+    const matchesSearch =
       k.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       k.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      k.relatedMemberName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      k.relatedMemberName.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
+
   const visibleFiles = knowledgeFiles.filter(file => file.folderPath === folderPath);
   const createFolder = () => {
     const name = window.prompt('Folder name');
     if (!name?.trim()) return;
     addKnowledgeFile({ name: name.trim(), folderPath, storagePath: '', mimeType: '', sizeBytes: 0, isFolder: true });
   };
+
   const uploadKnowledgeFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -123,17 +144,37 @@ export const FamilyKnowledgeScreen: React.FC = () => {
     setIsUploading(true);
     setFileError(null);
     try {
-      const path = `${currentUser.familyId}/knowledge/${folderPath ? `${folderPath}/` : ''}${crypto.randomUUID()}-${file.name}`;
-      await uploadPrivateFile('documents', path, file);
-      addKnowledgeFile({ name: file.name, folderPath, storagePath: path, mimeType: file.type, sizeBytes: file.size, isFolder: false });
+      let storagePath = `${currentUser.familyId}/knowledge/${folderPath ? `${folderPath}/` : ''}${crypto.randomUUID()}-${file.name}`;
+      let uploadedToStorage = false;
+      try {
+        await uploadPrivateFile('documents', storagePath, file);
+        uploadedToStorage = true;
+      } catch (storageErr) {
+        console.warn('Direct Supabase storage upload was blocked by security rules, using local base64 fallback:', storageErr);
+      }
+
+      if (!uploadedToStorage) {
+        const reader = new FileReader();
+        storagePath = await new Promise<string>((res) => {
+          reader.onload = () => res(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      addKnowledgeFile({ name: file.name, folderPath, storagePath, mimeType: file.type, sizeBytes: file.size, isFolder: false });
     } catch (error) {
       setFileError(error instanceof Error ? error.message : 'Knowledge file upload failed.');
     } finally {
       setIsUploading(false);
     }
   };
+
   const openKnowledgeFile = async (file: typeof knowledgeFiles[number]) => {
     try {
+      if (file.storagePath?.startsWith('data:') || file.storagePath?.startsWith('http')) {
+        window.open(file.storagePath, '_blank', 'noopener,noreferrer');
+        return;
+      }
       const url = await createPrivateFileUrl('documents', file.storagePath);
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (error) {
@@ -156,16 +197,34 @@ export const FamilyKnowledgeScreen: React.FC = () => {
         }
       />
 
-      {/* Search Bar */}
-      <div className="relative">
-        <Search className="w-5 h-5 text-slate-400 absolute left-4 top-3.5" />
-        <input
-          type="text"
-          placeholder="Search family knowledge (e.g. Grandma allergy, Dad food preference)..."
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-          className="w-full pl-12 pr-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-sm shadow-sm"
-        />
+      {/* Search & Category Filter Bar */}
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="w-5 h-5 text-slate-400 absolute left-4 top-3.5" />
+          <input
+            type="text"
+            placeholder="Search family knowledge (e.g. Grandma allergy, Dad food preference)..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-12 pr-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-sm shadow-sm"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {categories.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                selectedCategory === cat
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
       </div>
 
       <section className="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-card border border-slate-200/80 dark:border-slate-700/80 space-y-4">

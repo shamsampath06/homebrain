@@ -1,0 +1,110 @@
+{
+  "category": "Finance Manager",
+  "intents": [
+    {
+      "intent": "bill_payment",
+      "examples": [
+        "Mark electricity bill as paid",
+        "Mark EB bill as paid",
+        "I paid the water bill",
+        "Mark internet bill as paid",
+        "Have I paid this month's EB bill?",
+        "When is my next electricity bill due?",
+        "Show pending bills",
+        "What bills are due this week?",
+        "Add electricity bill",
+        "Add ₹1,500 electricity bill",
+        "Remind me to pay EB tomorrow",
+        "Delete my old water bill",
+        "How much is my pending bill amount?",
+        "Did I already pay the internet bill?"
+      ],
+      "action": "bill_action",
+      "responses": {
+        "eb_paid": "Your electricity bill has been marked as paid.",
+        "eb_updated": "Your electricity bill has been updated as paid.",
+        "water_paid": "I'll update your water bill payment status.",
+        "internet_paid": "Your internet bill has been marked as paid.",
+        "eb_check": "I'll check your electricity bill payment records.",
+        "eb_due": "I'll check your upcoming electricity bill due date.",
+        "pending_bills": "Here are your unpaid bills.",
+        "due_this_week": "Here are the bills due this week.",
+        "add_eb": "Sure! Please provide the bill amount and due date.",
+        "add_eb_amount": "Your ₹1,500 electricity bill has been recorded. When is it due?",
+        "remind_eb": "I'll set a reminder for tomorrow to pay the electricity bill.",
+        "delete_water": "Which water bill would you like me to delete?",
+        "pending_amount": "I'll calculate the total amount of your unpaid bills.",
+        "check_internet": "I'll check your payment history.",
+        "already_paid": "Your electricity bill is already marked as paid on {date}.",
+        "not_paid": "Your electricity bill is still pending. Would you like to mark it as paid?",
+        "not_found": "I couldn't find an electricity bill in your records. Would you like to add one?",
+        "missing_amount": "What was the amount of the electricity bill?",
+        "no_proof_confirm": "I've updated the payment status based on your confirmation."
+      }
+    },
+    {
+      "intent": "income_and_expenses",
+      "examples": [
+        "Add ₹500 expense",
+        "I spent ₹200 on food",
+        "Add ₹1,000 for petrol",
+        "Record ₹5,000 salary",
+        "I received ₹2,000",
+        "Show my expenses today",
+        "How much did I spend this month?",
+        "Show last month's expenses",
+        "What is my total income?",
+        "How much did I save?",
+        "Show my biggest expenses",
+        "Delete the ₹200 food expense",
+        "Change petrol expense to ₹1,200",
+        "Add ₹300 for groceries yesterday",
+        "Add a maintenance expense",
+        "Show house expenses"
+      ],
+      "action": "transaction_action",
+      "responses": {
+        "add_expense_prompt": "₹500 expense recorded. What was it for?",
+        "food_expense": "₹200 food expense has been recorded.",
+        "petrol_expense": "₹1,000 petrol expense has been added.",
+        "salary_income": "₹5,000 salary income has been recorded.",
+        "received_income": "I'll record ₹2,000 as income. What was the source?",
+        "expenses_today": "Here are your recorded expenses for today.",
+        "spend_this_month": "I'll calculate your total expenses for this month.",
+        "last_month_expenses": "Here is your expense summary for last month.",
+        "total_income": "I'll calculate your recorded income.",
+        "savings": "I'll calculate your savings from recorded income and expenses.",
+        "biggest_expenses": "I'll identify your highest recorded expenses.",
+        "delete_food": "I'll locate that transaction before deleting it.",
+        "change_petrol": "I'll update the petrol expense amount.",
+        "groceries_yesterday": "I'll record the ₹300 grocery expense for yesterday.",
+        "maintenance": "What was the amount and purpose?",
+        "house_expenses": "I'll retrieve your recorded household expenses."
+      }
+    },
+    {
+      "intent": "budget_management",
+      "examples": [
+        "Set monthly budget to ₹20,000",
+        "Set grocery budget to ₹5,000",
+        "How much budget is remaining?",
+        "Am I exceeding my budget?",
+        "Show my budget",
+        "Increase my budget to ₹25,000",
+        "How much did I spend on transport?",
+        "Compare this month and last month"
+      ],
+      "action": "budget_action",
+      "responses": {
+        "set_monthly": "Your monthly budget has been set to ₹20,000.",
+        "set_grocery": "Your grocery budget has been set to ₹5,000.",
+        "remaining": "I'll calculate your remaining monthly budget.",
+        "exceeding": "I'll compare your recorded expenses with your budget.",
+        "show": "Here are your current budget limits.",
+        "increase": "Your monthly budget has been updated to ₹25,000.",
+        "transport": "I'll calculate your recorded transport expenses.",
+        "compare": "I'll compare both months' recorded income and expenses."
+      }
+    }
+  ]
+}

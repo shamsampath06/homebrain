@@ -100,7 +100,7 @@ const UserProfilePanel: React.FC = () => {
         <InitialAvatar name={currentUser.name} className="w-20 h-20 text-2xl ring-4 ring-brand-500/20" />
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">{currentUser.name}</h2>
-          <p className="text-xs text-slate-500">{currentUser.role} • {currentUser.familyName}</p>
+          <p className="text-xs text-slate-500">{currentUser.role} • {currentUser.familyName?.replace(/Kumar Household/i, 'Household') || 'Household'}</p>
         </div>
       </div>
 
@@ -142,7 +142,19 @@ const UserProfilePanel: React.FC = () => {
 };
 
 const FamilyMembersPanel: React.FC = () => {
-  const { familyMembers, addFamilyMember, updateFamilyMember, removeFamilyMember, emergencyContacts, addEmergencyContact, updateEmergencyContact, deleteEmergencyContact } = useHomeBrain();
+  const {
+    currentUser,
+    familyMembers,
+    addFamilyMember,
+    updateFamilyMember,
+    removeFamilyMember,
+    emergencyContacts,
+    addEmergencyContact,
+    updateEmergencyContact,
+    deleteEmergencyContact,
+    knowledgeList,
+    navigateToSubScreen
+  } = useHomeBrain();
   const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState('');
   const [relation, setRelation] = useState('');
@@ -155,6 +167,15 @@ const FamilyMembersPanel: React.FC = () => {
   const [contactPhone, setContactPhone] = useState('');
   const [contactPrimary, setContactPrimary] = useState(false);
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
+
+  // Profile completion status (Prompt 3)
+  const currentMember = familyMembers.find(m => m.name.toLowerCase() === currentUser?.name?.toLowerCase());
+  const hasPhone = Boolean(currentMember?.phone && currentMember.phone.trim().length > 6);
+  const hasEmail = Boolean(currentUser?.email && currentUser.email.includes('@'));
+  const hasEmergency = emergencyContacts.length > 0;
+  const hasHealth = knowledgeList.some(k => k.category === 'Allergies' || k.category === 'Dietary');
+  const completedCount = [hasPhone, hasEmail, hasEmergency, hasHealth, Boolean(currentUser?.role)].filter(Boolean).length;
+  const completionPercent = Math.round((completedCount / 5) * 100);
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,11 +200,66 @@ const FamilyMembersPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Profile & Family Info Completion Card (Prompt 3) */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-brand-500/10 via-indigo-500/10 to-purple-500/10 border border-brand-200 dark:border-brand-800/60 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-brand-500 text-white shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                  Family Profile & Household Records
+                </h4>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-brand-100 text-brand-700 dark:bg-brand-950 dark:text-brand-300">
+                  {completionPercent}% Complete
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Complete your family records so HomeBrain AI can accurately answer questions about birthdays, allergies, and emergency contacts.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress Bar */}
+        <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+          <div
+            className="bg-gradient-to-r from-brand-500 to-indigo-500 h-full rounded-full transition-all duration-500"
+            style={{ width: `${completionPercent}%` }}
+          />
+        </div>
+
+        {/* Checklist */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+          <div className={`p-2 rounded-xl text-xs flex items-center gap-1.5 ${hasPhone ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'}`}>
+            {hasPhone ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            <span className="truncate">{hasPhone ? 'Phone Saved' : 'Add Phone Number'}</span>
+          </div>
+          <div className={`p-2 rounded-xl text-xs flex items-center gap-1.5 ${hasEmail ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'}`}>
+            {hasEmail ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            <span className="truncate">{hasEmail ? 'Email Saved' : 'Add Email Address'}</span>
+          </div>
+          <div className={`p-2 rounded-xl text-xs flex items-center gap-1.5 ${hasEmergency ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'}`}>
+            {hasEmergency ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            <span className="truncate">{hasEmergency ? 'Emergency SOS' : 'Link Emergency SOS'}</span>
+          </div>
+          <div
+            onClick={() => navigateToSubScreen('add-knowledge')}
+            className={`p-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer ${hasHealth ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:opacity-90'}`}
+          >
+            {hasHealth ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            <span className="truncate">{hasHealth ? 'Allergies Recorded' : '+ Record Allergies'}</span>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-base text-slate-900 dark:text-white">Connected Family Members</h3>
         <button
           onClick={() => setShowAdd(!showAdd)}
-          className="px-4 py-2 rounded-xl bg-brand-600 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md"
+          className="px-4 py-2 rounded-xl bg-brand-600 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md hover:bg-brand-700 transition-colors"
         >
           <Plus className="w-4 h-4" /> Add Family Member
         </button>
@@ -237,69 +313,111 @@ const FamilyMembersPanel: React.FC = () => {
               <div>
                 <p className="font-bold text-sm text-slate-900 dark:text-white">{m.name}</p>
                 <p className="text-xs text-slate-500">{m.relation} • Role: <span className="font-semibold text-brand-600">{m.role}</span></p>
-                <p className="text-[10px] text-slate-400">{m.phone}</p>
+                {m.phone && <p className="text-[10px] text-slate-400">{m.phone}</p>}
               </div>
-
-              <section className="rounded-3xl bg-white dark:bg-slate-800 p-5 shadow-card border border-slate-200 dark:border-slate-700 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-bold text-base text-slate-900 dark:text-white">Emergency Contacts</h3>
-                    <p className="text-xs text-slate-500">Contacts available for confirmed emergency alerts.</p>
-                  </div>
-                  {!editingContactId && <button type="button" onClick={() => { setContactName(''); setContactRelation(''); setContactPhone(''); setContactPrimary(false); setEditingContactId('new'); }} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white">Add Contact</button>}
-                </div>
-                {editingContactId && (
-                  <form onSubmit={event => {
-                    event.preventDefault();
-                    if (!contactName.trim() || !contactRelation.trim() || !/^[+0-9][0-9 ()-]{6,}$/.test(contactPhone)) return;
-                    const value = { name: contactName.trim(), relation: contactRelation.trim(), phone: contactPhone.trim(), isPrimary: contactPrimary };
-                    if (editingContactId === 'new') addEmergencyContact(value);
-                    else updateEmergencyContact(editingContactId, value);
-                    setEditingContactId(null);
-                  }} className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                    <input required placeholder="Name" value={contactName} onChange={event => setContactName(event.target.value)} className="rounded-xl border px-3 py-2 text-xs" />
-                    <input required placeholder="Relation" value={contactRelation} onChange={event => setContactRelation(event.target.value)} className="rounded-xl border px-3 py-2 text-xs" />
-                    <input required type="tel" placeholder="Phone" value={contactPhone} onChange={event => setContactPhone(event.target.value)} className="rounded-xl border px-3 py-2 text-xs" />
-                    <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={contactPrimary} onChange={event => setContactPrimary(event.target.checked)} /> Primary</label>
-                    <div className="sm:col-span-4 flex gap-2"><button className="rounded-xl bg-rose-600 px-3 py-2 text-xs text-white">Save Contact</button><button type="button" onClick={() => setEditingContactId(null)} className="px-3 py-2 text-xs">Cancel</button></div>
-                  </form>
-                )}
-                {emergencyContacts.length === 0 ? <p className="text-xs text-slate-400">No emergency contacts added.</p> : emergencyContacts.map(contact => (
-                  <div key={contact.id} className="flex items-center justify-between rounded-2xl border p-3">
-                    <div><p className="text-sm font-semibold">{contact.name} {contact.isPrimary && <span className="text-[10px] text-rose-600">PRIMARY</span>}</p><p className="text-xs text-slate-500">{contact.relation} · <a className="text-brand-600" href={`tel:${contact.phone}`}>{contact.phone}</a></p></div>
-                    <div className="flex gap-2 text-xs"><button onClick={() => { setContactName(contact.name); setContactRelation(contact.relation); setContactPhone(contact.phone); setContactPrimary(contact.isPrimary); setEditingContactId(contact.id); }} className="text-brand-600 hover:underline">Edit</button><button onClick={() => { if (window.confirm(`Delete ${contact.name}?`)) deleteEmergencyContact(contact.id); }} className="text-rose-600 hover:underline">Delete</button></div>
-                  </div>
-                ))}
-              </section>
             </div>
 
-            {familyMembers.length > 1 && (
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => {
-                  if (window.confirm(`Remove ${m.name} from the family?`)) removeFamilyMember(m.id);
+                  setEditingId(m.id);
+                  setName(m.name);
+                  setRelation(m.relation);
+                  setRole(m.role);
+                  setPhone(m.phone || '');
+                  setEmail(m.email || '');
+                  setShowAdd(true);
                 }}
-                className="text-xs text-rose-500 hover:underline"
+                className="text-xs text-brand-600 hover:underline px-2.5 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-950/40"
               >
-                Remove
+                Edit
               </button>
-            )}
-            <button
-              onClick={() => {
-                setEditingId(m.id);
-                setName(m.name);
-                setRelation(m.relation);
-                setRole(m.role);
-                setPhone(m.phone);
-                setEmail(m.email);
-                setShowAdd(true);
-              }}
-              className="text-xs text-brand-600 hover:underline"
-            >
-              Edit
-            </button>
+              {familyMembers.length > 1 && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Remove ${m.name} from the family?`)) removeFamilyMember(m.id);
+                  }}
+                  className="text-xs text-rose-500 hover:underline px-2.5 py-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
+
+      {/* Dedicated Emergency Contacts Section */}
+      <section className="rounded-3xl bg-white dark:bg-slate-800 p-5 shadow-card border border-slate-200 dark:border-slate-700 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-base text-slate-900 dark:text-white">Emergency Contacts</h3>
+            <p className="text-xs text-slate-500">Contacts available for confirmed emergency alerts.</p>
+          </div>
+          {!editingContactId && (
+            <button
+              type="button"
+              onClick={() => {
+                setContactName('');
+                setContactRelation('');
+                setContactPhone('');
+                setContactPrimary(false);
+                setEditingContactId('new');
+              }}
+              className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 transition-colors"
+            >
+              Add Contact
+            </button>
+          )}
+        </div>
+
+        {editingContactId && (
+          <form
+            onSubmit={event => {
+              event.preventDefault();
+              if (!contactName.trim() || !contactRelation.trim() || !/^[+0-9][0-9 ()-]{6,}$/.test(contactPhone)) return;
+              const value = { name: contactName.trim(), relation: contactRelation.trim(), phone: contactPhone.trim(), isPrimary: contactPrimary };
+              if (editingContactId === 'new') addEmergencyContact(value);
+              else updateEmergencyContact(editingContactId, value);
+              setEditingContactId(null);
+            }}
+            className="grid grid-cols-1 sm:grid-cols-4 gap-2"
+          >
+            <input required placeholder="Name" value={contactName} onChange={event => setContactName(event.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 px-3 py-2 text-xs" />
+            <input required placeholder="Relation" value={contactRelation} onChange={event => setContactRelation(event.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 px-3 py-2 text-xs" />
+            <input required type="tel" placeholder="Phone" value={contactPhone} onChange={event => setContactPhone(event.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 px-3 py-2 text-xs" />
+            <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+              <input type="checkbox" checked={contactPrimary} onChange={event => setContactPrimary(event.target.checked)} /> Primary
+            </label>
+            <div className="sm:col-span-4 flex gap-2">
+              <button type="submit" className="rounded-xl bg-rose-600 px-3 py-2 text-xs text-white font-semibold">Save Contact</button>
+              <button type="button" onClick={() => setEditingContactId(null)} className="px-3 py-2 text-xs text-slate-600">Cancel</button>
+            </div>
+          </form>
+        )}
+
+        {emergencyContacts.length === 0 ? (
+          <p className="text-xs text-slate-400">No emergency contacts added yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {emergencyContacts.map(contact => (
+              <div key={contact.id} className="flex items-center justify-between rounded-2xl border border-slate-200/80 dark:border-slate-700 p-3 bg-slate-50/50 dark:bg-slate-900/50">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                    {contact.name}
+                    {contact.isPrimary && <span className="text-[10px] bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-bold px-1.5 py-0.5 rounded">PRIMARY</span>}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">{contact.relation} · <a className="text-brand-600 hover:underline" href={`tel:${contact.phone}`}>{contact.phone}</a></p>
+                </div>
+                <div className="flex gap-2 text-xs">
+                  <button onClick={() => { setContactName(contact.name); setContactRelation(contact.relation); setContactPhone(contact.phone); setContactPrimary(contact.isPrimary); setEditingContactId(contact.id); }} className="text-brand-600 hover:underline">Edit</button>
+                  <button onClick={() => { if (window.confirm(`Delete ${contact.name}?`)) deleteEmergencyContact(contact.id); }} className="text-rose-600 hover:underline">Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 };
@@ -698,7 +816,7 @@ const DemoFamilyDataPanel: React.FC = () => {
       {/* 5-Member Household Profile Card */}
       <div className="p-4 rounded-2xl bg-purple-50/60 dark:bg-purple-950/40 border border-purple-200/60 dark:border-purple-900/60 space-y-3">
         <p className="text-xs font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide">
-          Included 5-Member Demo Household (Kumar Family)
+          Included 5-Member Household (Family Profile)
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
           <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-950">
