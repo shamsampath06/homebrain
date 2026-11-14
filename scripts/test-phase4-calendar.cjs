@@ -34,10 +34,42 @@ function postChat(payload) {
   });
 }
 
+function resetDemoState() {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      'http://localhost:5000/api/ai/reset-demo-state',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer demo-token'
+        }
+      },
+      (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body));
+          } catch (e) {
+            resolve({ raw: body });
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function runTests() {
   console.log('================================================================');
   console.log('🚀 HOMEBRAIN CALENDAR MODULE VERIFICATION (PHASE 4 & PHASE 5)');
   console.log('================================================================\n');
+
+  console.log('🔄 Initializing: Resetting demo state to pristine before tests...');
+  await resetDemoState();
+  console.log('✅ Demo state initialized.\n');
 
   let passed = 0;
   let failed = 0;
@@ -269,6 +301,10 @@ async function runTests() {
   } catch (e) {
     console.log('❌ [ERROR] Multi-Turn Conflict test:', e.message);
     failed += 2;
+  } finally {
+    console.log('\n🧹 Teardown: Restoring demo state to pristine initial 12 records...');
+    await resetDemoState();
+    console.log('✨ Demo state successfully restored!');
   }
 
   console.log('\n================================================================');
