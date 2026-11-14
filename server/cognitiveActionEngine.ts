@@ -308,12 +308,18 @@ export function extractCalendarEventDetails(rawQuery: string, entities: Extracte
 // -------------------------------------------------------------
 // Relative Date & Time Normalizer (Asia/Kolkata, Current Year 2026)
 // -------------------------------------------------------------
+export function getKolkataDateString(offsetDays: number = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
 export function parseDateAndRelativeTime(raw: string): { date?: string; time?: string; formattedDisplay?: string } {
   if (!raw) return {};
   const cleaned = raw.trim().toLowerCase();
 
   const currentYear = 2026;
-  const now = new Date('2026-11-12T22:15:00+05:30');
+  const now = new Date();
 
   const months: Record<string, number> = {
     jan: 0, january: 0,
@@ -1580,6 +1586,51 @@ export async function processIntelligentAction(
               matchedEvents.map((e: any) => `• **${e.date} at ${e.time || '10:00'}**: ${(e.title || '').replace(/\[DEMO\]\s*/g, '')} (${e.category || 'General'}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : [user.name]).join(', ')}`).join('\n');
             return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
           }
+        }
+      }
+
+      // Next upcoming event
+      if (/\b(?:next\s+(?:upcoming\s+)?event|upcoming\s+event|next\s+event)\b/i.test(clean)) {
+        const todayIST = getKolkataDateString();
+        const upcoming = events.filter((e: any) => e.date >= todayIST).sort((a: any, b: any) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
+        const nextEv = upcoming[0] || events.slice().sort((a: any, b: any) => a.date.localeCompare(b.date))[0];
+        if (nextEv) {
+          const d = new Date(nextEv.date.includes('T') ? nextEv.date : `${nextEv.date}T00:00:00`);
+          const formatted = !isNaN(d.getTime()) ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : nextEv.date;
+          const cleanTitle = (nextEv.title || '').replace(/\[DEMO\]\s*/g, '');
+          const reply = `📅 **Next Upcoming Family Event**:\n\n• **${cleanTitle}** (${nextEv.category || 'General'})\n• **Date & Time**: ${formatted} (${nextEv.date}) at ${nextEv.time || '10:00'}\n• **Members Involved**: ${(Array.isArray(nextEv.members_involved) ? nextEv.members_involved : [user.name]).join(', ')}${nextEv.description ? `\n• **Details**: ${nextEv.description}` : ''}`;
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // Today's schedule / events
+      if (/\b(?:today|happening\s+today|today['’]?s\s+schedule)\b/i.test(clean)) {
+        const todayIST = getKolkataDateString();
+        const todayEvents = events.filter((e: any) => e.date === todayIST);
+        const formatted = formatDateHuman(todayIST);
+        if (todayEvents.length > 0) {
+          const reply = `📅 **Today's Family Schedule (${formatted})**:\n\n` +
+            todayEvents.map((e: any) => `• **${e.date} at ${e.time || '10:00'}**: ${(e.title || '').replace(/\[DEMO\]\s*/g, '')} (${e.category || 'General'}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : [user.name]).join(', ')}`).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        } else {
+          const futureEvents = events.filter((e: any) => e.date > todayIST).sort((a: any, b: any) => a.date.localeCompare(b.date));
+          const nextEv = futureEvents[0];
+          const reply = `📅 **Today's Family Schedule (${formatted})**:\n\n` +
+            `There are **no calendar events scheduled for today**.\n\n` +
+            (nextEv ? `*(Your next upcoming event is **${(nextEv.title || '').replace(/\[DEMO\]\s*/g, '')}** on **${formatDateHuman(nextEv.date)}** at ${nextEv.time || '10:00'}).*` : '');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
+        }
+      }
+
+      // Show all calendar events / upcoming events
+      if (/\b(?:all\s+(?:my\s+)?calendar\s+events|all\s+events|calendar\s+events|my\s+calendar|upcoming\s+events)\b/i.test(clean) || classification.intentName === 'get_calendar_events') {
+        const todayIST = getKolkataDateString();
+        const upcoming = events.filter((e: any) => e.date >= todayIST).sort((a: any, b: any) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
+        const list = upcoming.length > 0 ? upcoming : events.slice().sort((a: any, b: any) => a.date.localeCompare(b.date));
+        if (list.length > 0) {
+          const reply = `📅 **Family Calendar Events (${list.length} scheduled)**:\n\n` +
+            list.map((e: any) => `• **${e.date} at ${e.time || '10:00'}**: ${(e.title || '').replace(/\[DEMO\]\s*/g, '')} (${e.category || 'General'}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : [user.name]).join(', ')}`).join('\n');
+          return { reply, text: reply, actionsExecuted, sources: ['Family Calendar'], handled: true };
         }
       }
     }

@@ -148,7 +148,9 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 // Helper: Query Supabase REST with the user's family-scoped token
 const fetchFamilyData = async (table: string, familyId: string, token: string, queryParams: string = ''): Promise<any[]> => {
   if (!SUPABASE_URL) return [];
-  const url = `${SUPABASE_URL}/rest/v1/${table}?family_id=eq.${encodeURIComponent(familyId)}${queryParams ? `&${queryParams}` : ''}`;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const safeFamilyId = uuidRegex.test(familyId) ? familyId : '00000000-0000-4000-8000-000000000001';
+  const url = `${SUPABASE_URL}/rest/v1/${table}?family_id=eq.${encodeURIComponent(safeFamilyId)}${queryParams ? `&${queryParams}` : ''}`;
   try {
     const res = await fetch(url, {
       headers: {
@@ -2258,10 +2260,13 @@ ${familyContext}`;
       } else {
         // Smart Deterministic Database Q&A Resolver when no external LLM key is configured
         const qL = (query || '').toLowerCase().trim();
-        const todayDateStr = new Date().toISOString().split('T')[0];
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowDateStr = tomorrow.toISOString().split('T')[0];
+        const getKolkataDateString = (offsetDays: number = 0): string => {
+          const d = new Date();
+          d.setDate(d.getDate() + offsetDays);
+          return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+        };
+        const todayDateStr = getKolkataDateString(0);
+        const tomorrowDateStr = getKolkataDateString(1);
 
         // 1. TODAY'S SCHEDULE / ONLY TODAY
         const isTodayQuery = (
@@ -2273,12 +2278,14 @@ ${familyContext}`;
           qL.includes('happening today') ||
           qL === 'today schedule' ||
           qL === 'what is today schedule?' ||
-          qL === 'what is today schedule'
+          qL === 'what is today schedule' ||
+          qL === 'what events do i have today?' ||
+          qL === 'what events do i have today'
         );
 
         if (isTodayQuery) {
-          const todayEvents = events.filter((e: any) => e.date === todayDateStr);
-          const todayReminders = reminders.filter((r: any) => !r.completed && (r.date_time?.startsWith(todayDateStr) || !r.date_time));
+          const todayEvents = effectiveEvents.filter((e: any) => e.date === todayDateStr);
+          const todayReminders = effectiveReminders.filter((r: any) => !r.completed && (r.date_time?.startsWith(todayDateStr) || !r.date_time));
 
           if (todayEvents.length > 0) {
             reply = `📅 **Today's Family Schedule (${cleanEventDate(todayDateStr)})**:\n\n` +
@@ -2288,7 +2295,7 @@ ${familyContext}`;
                 todayReminders.map((r: any) => `• **${r.title.replace('[DEMO] ', '')}** (${r.priority} Priority, Assigned: ${r.assigned_member_name || 'Family'})`).join('\n');
             }
           } else {
-            const futureEvents = events.filter((e: any) => e.date > todayDateStr).sort((a: any, b: any) => a.date.localeCompare(b.date));
+            const futureEvents = effectiveEvents.filter((e: any) => e.date > todayDateStr).sort((a: any, b: any) => a.date.localeCompare(b.date));
             const nextEv = futureEvents[0];
             reply = `📅 **Today's Family Schedule (${cleanEventDate(todayDateStr)})**:\n\n` +
               `There are **no calendar events scheduled for today**.\n\n` +
@@ -2296,7 +2303,7 @@ ${familyContext}`;
               (nextEv ? `*(Your next upcoming event is **${nextEv.title.replace('[DEMO] ', '')}** on ${cleanEventDate(nextEv.date)} at ${cleanEventTime(nextEv.time)}).*` : '');
           }
         } else if (qL.includes('tomorrow')) {
-          const tomorrowEvents = events.filter((e: any) => e.date === tomorrowDateStr);
+          const tomorrowEvents = effectiveEvents.filter((e: any) => e.date === tomorrowDateStr);
           if (tomorrowEvents.length > 0) {
             reply = `📅 **Tomorrow's Schedule (${cleanEventDate(tomorrowDateStr)})**:\n\n` +
               tomorrowEvents.map((e: any) => `• **${e.date} at ${cleanEventTime(e.time)}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
@@ -2304,17 +2311,17 @@ ${familyContext}`;
             reply = `📅 **Tomorrow's Schedule (${cleanEventDate(tomorrowDateStr)})**:\n\nNo calendar events scheduled for tomorrow.`;
           }
         } else if (qL.includes('bill') || qL.includes('pending bill') || qL.includes('due') || qL.includes('pay')) {
-          const pendingBills = bills.filter((b: any) => !b.is_paid);
+          const pendingBills = effectiveBills.filter((b: any) => !b.is_paid);
           const totalPending = pendingBills.reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0);
           if (pendingBills.length > 0) {
             reply = `💳 **Pending Household Bills (${pendingBills.length} found, Total: ₹${totalPending.toLocaleString('en-IN')})**:\n\n` +
               pendingBills.map((b: any) => `• **${b.title}**: ₹${Number(b.amount).toLocaleString('en-IN')} (Due: ${b.due_date}, Recurring: ${b.recurring})`).join('\n') +
               `\n\n*(You can view or pay them in Household Finances.)*`;
           } else {
-            reply = `✅ All registered household bills are currently paid! (Total registered bills: ${bills.length}).`;
+            reply = `✅ All registered household bills are currently paid! (Total registered bills: ${effectiveBills.length}).`;
           }
         } else if (qL.includes('birthday') || qL.includes('born')) {
-          const bdayEvents = events.filter((e: any) => e.category === 'Birthday' || (e.title && e.title.toLowerCase().includes('birthday')));
+          const bdayEvents = effectiveEvents.filter((e: any) => e.category === 'Birthday' || (e.title && e.title.toLowerCase().includes('birthday')));
           if (bdayEvents.length > 0) {
             reply = `🎂 **Family Birthday Records (${bdayEvents.length} found)**:\n\n` +
               bdayEvents.map((e: any) => `• **${e.title.replace('[DEMO] ', '')}**: ${e.date}`).join('\n');
@@ -2322,7 +2329,7 @@ ${familyContext}`;
             reply = `No birthday events found in your calendar. You can add birthdays in the Calendar module.`;
           }
         } else if (qL.includes('appointment') || qL.includes('doctor') || qL.includes('checkup')) {
-          const appts = events.filter((e: any) => e.category === 'Appointment' || (e.title && (e.title.toLowerCase().includes('appointment') || e.title.toLowerCase().includes('doctor') || e.title.toLowerCase().includes('clinic') || e.title.toLowerCase().includes('checkup'))));
+          const appts = effectiveEvents.filter((e: any) => e.category === 'Appointment' || (e.title && (e.title.toLowerCase().includes('appointment') || e.title.toLowerCase().includes('doctor') || e.title.toLowerCase().includes('clinic') || e.title.toLowerCase().includes('checkup'))));
           if (appts.length > 0) {
             reply = `🩺 **Upcoming Family Appointments (${appts.length} scheduled)**:\n\n` +
               appts.map((a: any) => `• **${a.title.replace('[DEMO] ', '')}** on ${a.date} at ${a.time} - ${a.description || ''}`).join('\n');
@@ -2330,20 +2337,20 @@ ${familyContext}`;
             reply = `No upcoming doctor or medical appointments found in the family schedule.`;
           }
         } else if (qL.includes('spend') || qL.includes('spent') || qL.includes('expense') || qL.includes('burn rate')) {
-          const totalExpenses = expenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
-          const topExpenses = expenses.slice(0, 5);
+          const totalExpenses = effectiveExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+          const topExpenses = effectiveExpenses.slice(0, 5);
           reply = `📊 **Family Expenditure Summary (Total: ₹${totalExpenses.toLocaleString('en-IN')})**:\n\n` +
-            `• **Total logged transactions**: ${expenses.length}\n` +
+            `• **Total logged transactions**: ${effectiveExpenses.length}\n` +
             topExpenses.map((x: any) => `• ₹${Number(x.amount).toLocaleString('en-IN')} for "${x.title.replace('[DEMO] ', '')}" (${x.category}) on ${x.date} by ${x.payer}`).join('\n');
         } else if (qL.includes('medicine') || qL.includes('medication') || qL.includes('dose') || qL.includes('prescription')) {
-          if (medicines.length > 0) {
-            reply = `💊 **Registered Family Medication Regimens (${medicines.length} prescriptions)**:\n\n` +
-              medicines.map((m: any) => `• **For ${m.person_name}**: ${m.name.replace('[DEMO] ', '')} (${m.dosage}) at ${m.timing} [Frequency: ${m.frequency}] - ${m.notes || 'No special notes'}`).join('\n');
+          if (effectiveMedicines.length > 0) {
+            reply = `💊 **Registered Family Medication Regimens (${effectiveMedicines.length} prescriptions)**:\n\n` +
+              effectiveMedicines.map((m: any) => `• **For ${m.person_name}**: ${m.name.replace('[DEMO] ', '')} (${m.dosage}) at ${m.timing} [Frequency: ${m.frequency}] - ${m.notes || 'No special notes'}`).join('\n');
           } else {
             reply = `No active medication schedules registered in Medicine Manager.`;
           }
         } else if (qL.includes('grocery') || qL.includes('groceries') || qL.includes('shopping') || qL.includes('pantry') || qL.includes('milk')) {
-          const pending = groceries.filter((g: any) => !g.is_purchased);
+          const pending = effectiveGroceries.filter((g: any) => !g.is_purchased);
           if (pending.length > 0) {
             reply = `🛒 **Smart Grocery List (${pending.length} items to buy)**:\n\n` +
               pending.map((g: any) => `• **${g.name.replace('[DEMO] ', '')}** (${g.quantity}) - Category: ${g.category}`).join('\n');
@@ -2351,7 +2358,7 @@ ${familyContext}`;
             reply = `✅ The grocery list is currently clear! All items have been purchased.`;
           }
         } else if (qL.includes('allerg') || qL.includes('warning') || qL.includes('dietary') || qL.includes('blood')) {
-          const healthRecords = knowledgeList.filter((k: any) => k.category === 'Allergies' || k.category === 'Emergency' || k.category === 'Dietary' || k.importance === 'Critical');
+          const healthRecords = effectiveKnowledge.filter((k: any) => k.category === 'Allergies' || k.category === 'Emergency' || k.category === 'Dietary' || k.importance === 'Critical');
           if (healthRecords.length > 0) {
             reply = `⚠️ **Critical Family Health & Allergy Records (${healthRecords.length} records)**:\n\n` +
               healthRecords.map((k: any) => `• **[${k.importance}] ${k.title.replace('[DEMO] ', '')}** (For: ${k.related_member_name}): ${k.content}`).join('\n');
@@ -2385,12 +2392,24 @@ ${familyContext}`;
           } else {
             reply = `No documents stored in the Document Vault yet.`;
           }
+        } else if (qL.includes('next') && (qL.includes('event') || qL.includes('upcoming') || qL.includes('schedule') || qL.includes('calendar'))) {
+          const upcomingEvents = effectiveEvents.filter((e: any) => e.date >= todayDateStr).sort((a: any, b: any) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
+          const nextEv = upcomingEvents[0] || effectiveEvents.slice().sort((a: any, b: any) => a.date.localeCompare(b.date))[0];
+          if (nextEv) {
+            reply = `📅 **Next Upcoming Family Event**:\n\n` +
+              `• **${nextEv.title.replace('[DEMO] ', '')}** (${nextEv.category || 'General'})\n` +
+              `• **Date & Time**: ${cleanEventDate(nextEv.date)} (${nextEv.date}) at ${cleanEventTime(nextEv.time)}\n` +
+              `• **Members Involved**: ${(Array.isArray(nextEv.members_involved) ? nextEv.members_involved : []).join(', ')}` +
+              (nextEv.description ? `\n• **Details**: ${nextEv.description}` : '');
+          } else {
+            reply = `No upcoming events scheduled in the calendar.`;
+          }
         } else if (qL.includes('event') || qL.includes('schedule') || qL.includes('calendar') || qL.includes('happening') || qL.includes('upcoming') || qL.includes('plans')) {
-          const upcomingEvents = events.filter((e: any) => e.date >= todayDateStr).sort((a: any, b: any) => a.date.localeCompare(b.date));
-          const listToShow = upcomingEvents.length > 0 ? upcomingEvents : events;
+          const upcomingEvents = effectiveEvents.filter((e: any) => e.date >= todayDateStr).sort((a: any, b: any) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
+          const listToShow = upcomingEvents.length > 0 ? upcomingEvents : effectiveEvents.slice().sort((a: any, b: any) => a.date.localeCompare(b.date));
           if (listToShow.length > 0) {
             reply = `📅 **Upcoming Family Events (${listToShow.length} scheduled)**:\n\n` +
-              listToShow.slice(0, 8).map((e: any) => `• **${e.date} at ${cleanEventTime(e.time)}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
+              listToShow.map((e: any) => `• **${e.date} at ${cleanEventTime(e.time)}**: ${e.title.replace('[DEMO] ', '')} (${e.category}) - Members: ${(Array.isArray(e.members_involved) ? e.members_involved : []).join(', ')}`).join('\n');
           } else {
             reply = `No upcoming events scheduled in the calendar.`;
           }
@@ -2398,12 +2417,12 @@ ${familyContext}`;
           // Comprehensive Live Household State Digest
           reply = `🧠 **HomeBrain Autonomous Cognitive Assistant Summary**:\n\n` +
             `I have cross-examined live records across your family database (${groundingSources.length} tables consulted):\n\n` +
-            `• **Today's Events**: ${events.length} scheduled\n` +
-            `• **Prescriptions**: ${medicines.length} active\n` +
-            `• **Pending Groceries**: ${groceries.filter((g: any) => !g.is_purchased).length} items\n` +
-            `• **Unpaid Bills**: ${bills.filter((b: any) => !b.is_paid).length} pending\n` +
-            `• **Critical Knowledge**: ${knowledgeList.length} items logged\n` +
-            `• **Vault Documents**: ${documents.length} files securely indexed\n` +
+            `• **Today's Events**: ${effectiveEvents.length} scheduled\n` +
+            `• **Prescriptions**: ${effectiveMedicines.length} active\n` +
+            `• **Pending Groceries**: ${effectiveGroceries.filter((g: any) => !g.is_purchased).length} items\n` +
+            `• **Unpaid Bills**: ${effectiveBills.filter((b: any) => !b.is_paid).length} pending\n` +
+            `• **Critical Knowledge**: ${effectiveKnowledge.length} items logged\n` +
+            `• **Vault Documents**: ${effectiveDocuments.length} files securely indexed\n` +
             `• **Family Memories**: ${memories.length} milestone moments\n\n` +
             `*Ask specific questions like "What bills are pending?", "When is Father's birthday?", "Show mother's appointments", or "Add milk to groceries".*`;
         }
