@@ -398,11 +398,11 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
                 key={idx}
                 className="p-3 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700 shadow-sm flex items-start justify-between gap-2.5"
               >
-                <div className="flex items-start gap-2.5">
+                <div className="flex items-start gap-2.5 min-w-0 flex-1">
                   <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
                     <Pill className="w-4 h-4" />
                   </div>
-                  <div className="text-xs space-y-0.5 leading-relaxed">
+                  <div className="text-xs space-y-0.5 leading-relaxed min-w-0 flex-1">
                     {renderInlineFormatting(clean)}
                   </div>
                 </div>
@@ -415,7 +415,7 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
                       logMedicineStatus(matchedMed.id, 'Taken');
                       setLoggedMedIds(prev => new Set(prev).add(matchedMed.id));
                     }}
-                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shrink-0 transition-all ${
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shrink-0 transition-all active:scale-95 touch-manipulation ${
                       isLogged
                         ? 'bg-emerald-600 text-white shadow-sm'
                         : 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300'

@@ -179,7 +179,7 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="relative flex h-screen overflow-hidden bg-family-warm text-slate-900 dark:bg-[#080B12] dark:text-slate-100">
+    <div className="relative flex h-screen h-[100dvh] overflow-hidden bg-family-warm text-slate-900 dark:bg-[#080B12] dark:text-slate-100">
       {/* Ambient Animated Depth Orbs */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-brand-300/15 dark:bg-brand-500/10 rounded-full blur-3xl animate-float-slow" />
@@ -195,7 +195,11 @@ const AppContent: React.FC = () => {
         <Header />
 
         {/* Dynamic Screen Viewport with Staggered Entrance */}
-        <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
+        <main className={`flex-1 overflow-y-auto ${
+          activeTab === 'ai' && activeSubScreen === 'none'
+            ? 'p-2 sm:p-4 lg:p-6 pb-20 lg:pb-6 flex flex-col min-h-0'
+            : 'px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 lg:pb-8'
+        }`}>
           {isDataLoading && (
             <div className="max-w-7xl mx-auto mb-4 rounded-2xl bg-brand-50/90 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 px-4 py-3 text-sm text-brand-700 dark:text-brand-300 flex items-center gap-2 shadow-sm animate-pulse">
               <span className="w-2 h-2 rounded-full bg-brand-500 animate-ping" />
@@ -208,7 +212,7 @@ const AppContent: React.FC = () => {
               <button onClick={clearDataError} className="font-semibold hover:underline">Dismiss</button>
             </div>
           )}
-          <div key={`${activeTab}-${activeSubScreen}`} className="animate-fadeIn transition-opacity duration-300">
+          <div key={`${activeTab}-${activeSubScreen}`} className={`animate-fadeIn transition-opacity duration-300 ${activeTab === 'ai' && activeSubScreen === 'none' ? 'flex-1 flex flex-col min-h-0' : ''}`}>
             {renderMainContent()}
           </div>
         </main>

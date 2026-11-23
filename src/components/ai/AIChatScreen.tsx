@@ -297,24 +297,24 @@ export const AIChatScreen: React.FC = () => {
   }, [speakingMsgId]);
 
   return (
-    <div className="max-w-4xl mx-auto h-[calc(100vh-140px)] flex flex-col bg-white dark:bg-slate-800 rounded-3xl shadow-card border border-slate-200/80 dark:border-slate-700/80 overflow-hidden">
+    <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-card border border-slate-200/80 dark:border-slate-700/80 overflow-hidden min-h-0">
       {/* AI Header */}
-      <div className="p-4 sm:px-6 bg-gradient-to-r from-brand-600 via-brand-500 to-amber-500 text-white flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl overflow-hidden shadow-sm ring-1 ring-white/30 flex-shrink-0 bg-slate-900">
+      <div className="p-3.5 sm:p-4 sm:px-6 bg-gradient-to-r from-brand-600 via-brand-500 to-amber-500 text-white flex items-center justify-between shadow-md shrink-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl overflow-hidden shadow-sm ring-1 ring-white/30 flex-shrink-0 bg-slate-900">
             <img src="/homebrain-logo.jpg" alt="HomeBrain Logo" className="w-full h-full object-cover" />
           </div>
-          <div>
-            <h2 className="font-bold text-base flex items-center gap-1.5">
-              HomeBrain Multimodal AI <Sparkles className="w-4 h-4 text-amber-300" />
+          <div className="min-w-0">
+            <h2 className="font-bold text-sm sm:text-base flex items-center gap-1.5 truncate">
+              HomeBrain Multimodal AI <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
             </h2>
-            <p className="text-xs text-brand-100">Live RAG grounded in your family database & documents</p>
+            <p className="text-[11px] sm:text-xs text-brand-100 truncate">Live RAG grounded in your family records</p>
           </div>
         </div>
 
         <button
           onClick={clearAIConversation}
-          className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+          className="p-1.5 sm:p-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0"
           title="Clear Conversation"
         >
           <Trash2 className="w-4 h-4" /> <span className="hidden sm:inline">Clear Chat</span>
@@ -322,15 +322,15 @@ export const AIChatScreen: React.FC = () => {
       </div>
 
       {/* Suggested Chips Carousel */}
-      <div className="p-3 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200/60 dark:border-slate-700 overflow-x-auto flex gap-2 scrollbar-none">
-        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 shrink-0 px-2">
+      <div className="p-2 sm:p-3 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200/60 dark:border-slate-700 overflow-x-auto flex gap-1.5 sm:gap-2 scrollbar-none shrink-0">
+        <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 shrink-0 px-1 sm:px-2">
           💡 Try Asking:
         </span>
         {suggestedQuestions.map((q, idx) => (
           <button
             key={idx}
             onClick={() => handleSuggestedClick(q)}
-            className="px-3 py-1 rounded-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-700 hover:border-brand-500 hover:text-brand-600 transition-all shrink-0 shadow-sm"
+            className="px-2.5 sm:px-3 py-1 rounded-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-700 hover:border-brand-500 hover:text-brand-600 transition-all shrink-0 shadow-sm"
           >
             {q}
           </button>
@@ -339,7 +339,7 @@ export const AIChatScreen: React.FC = () => {
 
       {/* Vault Notification Toast */}
       {savedVaultNotice && (
-        <div className="bg-emerald-600 text-white px-4 py-2 text-xs flex items-center justify-between animate-fadeIn">
+        <div className="bg-emerald-600 text-white px-4 py-2 text-xs flex items-center justify-between animate-fadeIn shrink-0">
           <span className="flex items-center gap-1.5 font-semibold">
             <CheckCircle className="w-4 h-4" /> {savedVaultNotice}
           </span>
@@ -353,7 +353,7 @@ export const AIChatScreen: React.FC = () => {
       )}
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4">
+      <div className="flex-1 p-3 sm:p-6 overflow-y-auto space-y-3 sm:space-y-4 min-h-0">
         {aiMessages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4 my-auto">
             <div className="w-20 h-20 rounded-3xl overflow-hidden shadow-xl shadow-cyan-500/25 ring-2 ring-cyan-400/40">
@@ -701,15 +701,15 @@ export const AIChatScreen: React.FC = () => {
       {/* Input Bar */}
       <form
         onSubmit={handleSend}
-        className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-700 flex items-center gap-2"
+        className="p-2 sm:p-3.5 bg-slate-50 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-700 flex items-center gap-1.5 sm:gap-2 shrink-0 z-10"
       >
         <button
           type="button"
           onClick={() => setShowUploadModal(true)}
-          className="p-2.5 rounded-2xl text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors relative"
+          className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors relative shrink-0 active:scale-95 touch-manipulation"
           title="Upload Documents or Photos (Multimodal)"
         >
-          <Paperclip className="w-5 h-5" />
+          <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
           {attachments.length > 0 && (
             <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-brand-500 ring-2 ring-white" />
           )}
@@ -718,38 +718,40 @@ export const AIChatScreen: React.FC = () => {
         <button
           type="button"
           onClick={() => setShowVisionModal(true)}
-          className="p-2.5 rounded-2xl text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors"
-          title="Multimodal Camera & Vision Scanner (Receipts, Prescriptions, Pantry)"
+          className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors shrink-0 active:scale-95 touch-manipulation"
+          title="Multimodal Camera & Vision Scanner"
         >
-          <Camera className="w-5 h-5" />
+          <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
         </button>
 
         <button
           type="button"
           onClick={handleToggleVoice}
-          className={`p-2.5 rounded-2xl transition-colors ${isVoiceActive
+          className={`p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-colors shrink-0 active:scale-95 touch-manipulation ${
+            isVoiceActive
               ? 'bg-rose-500 text-white animate-pulse'
               : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'
-            }`}
+          }`}
           title="Voice Assistant Mode"
         >
-          <Mic className="w-5 h-5" />
+          <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
         </button>
 
         <input
           type="text"
-          placeholder="Ask HomeBrain AI about schedule, medicines, groceries, bills, or uploaded files..."
+          placeholder="Ask HomeBrain AI..."
           value={inputText}
           onChange={e => setInputText(e.target.value)}
-          className="flex-1 px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-sm focus:ring-2 focus:ring-brand-500"
+          className="flex-1 min-w-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-xs sm:text-sm focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white"
         />
 
         <button
           type="submit"
           disabled={!inputText.trim() && attachments.length === 0}
-          className="p-2.5 rounded-2xl bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white shadow-md transition-all flex items-center justify-center"
+          className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white shadow-md transition-all flex items-center justify-center shrink-0 active:scale-95 touch-manipulation cursor-pointer"
+          title="Send message"
         >
-          <Send className="w-5 h-5" />
+          <Send className="w-4 h-4 sm:w-5 sm:h-5" />
         </button>
       </form>
 

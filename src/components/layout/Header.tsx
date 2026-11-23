@@ -28,28 +28,28 @@ export const Header: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-30 bg-[#fffdf7]/95 dark:bg-[#080B12]/95 backdrop-blur-2xl border-b border-[#eee3c5] dark:border-white/10 text-slate-900 dark:text-white transition-colors shadow-[0_10px_30px_-10px_rgba(122,91,24,0.18)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
         {/* Greeting & Date */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <img
             src="/homebrain-logo.jpg"
             alt="HomeBrain Logo"
-            className="w-10 h-10 rounded-2xl object-cover ring-1 ring-cyan-400/40 shadow-md shadow-cyan-500/20 lg:hidden shrink-0"
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl object-cover ring-1 ring-cyan-400/40 shadow-md shadow-cyan-500/20 lg:hidden shrink-0"
           />
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2 font-mono">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <h1 className="text-sm sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-1 sm:gap-2 font-mono truncate">
                 {getGreeting()}, {currentUser.name.split(' ')[0]} <span className="animate-bounce inline-block">👋</span>
               </h1>
             </div>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-              {currentDate} • <span className="text-brand-600 dark:text-cyan-400/90 font-medium">Autonomous Household Telemetry Active.</span>
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate max-w-[140px] xs:max-w-[200px] sm:max-w-none">
+              {currentDate} • <span className="text-brand-600 dark:text-cyan-400/90 font-medium">Telemetry Active</span>
             </p>
           </div>
         </div>
 
         {/* Header Quick Actions */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           {/* Spotlight Command Palette Trigger */}
           <button
             onClick={() => window.dispatchEvent(new CustomEvent('open-command-palette'))}
@@ -66,26 +66,26 @@ export const Header: React.FC = () => {
           {/* Emergency SOS Quick Button */}
           <button
             onClick={() => navigateToSubScreen('emergency')}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-black text-xs sm:text-sm shadow-[0_0_15px_rgba(244,63,94,0.4)] transition-all duration-200 transform hover:scale-105 active:scale-95 border border-rose-400/40"
+            className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-black text-xs sm:text-sm shadow-[0_0_15px_rgba(244,63,94,0.4)] transition-all duration-200 transform hover:scale-105 active:scale-95 border border-rose-400/40 shrink-0"
             title="Emergency Mode SOS"
           >
-            <ShieldAlert className="w-4 h-4 animate-pulse text-white" />
+            <ShieldAlert className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse text-white" />
             <span className="hidden sm:inline">SOS Emergency</span>
           </button>
 
           {/* Dark Mode Toggle */}
           <button
             onClick={toggleDarkMode}
-            className="p-2.5 rounded-xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 text-slate-600 dark:text-slate-300 transition-colors"
+            className="p-1.5 sm:p-2.5 rounded-xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 text-slate-600 dark:text-slate-300 transition-colors shrink-0"
             title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
-            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-400" />}
+            {isDarkMode ? <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" /> : <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400" />}
           </button>
 
           {/* Quick Login / Account Switch Screen Trigger */}
           <button
             onClick={() => navigateToSubScreen('login')}
-            className="p-2.5 rounded-xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 text-brand-700 dark:text-cyan-400 hover:text-brand-600 dark:hover:text-cyan-300 transition-colors"
+            className="p-1.5 sm:p-2.5 rounded-xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border border-[#eee3c5] dark:border-white/10 text-brand-700 dark:text-cyan-400 hover:text-brand-600 dark:hover:text-cyan-300 transition-colors shrink-0"
             title="Open Sign In / Account Switcher"
           >
             <LogIn className="w-4 h-4" />
