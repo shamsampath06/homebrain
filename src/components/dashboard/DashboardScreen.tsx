@@ -37,20 +37,20 @@ export const DashboardScreen: React.FC = () => {
   });
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 pb-12">
+    <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 pb-12">
       {/* 1. Household Core Summary Metrics Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3.5">
         {/* Metric 1: Family Members */}
         <div
           onClick={() => navigateToSubScreen('family-members')}
-          className="spatial-card p-4 flex items-center gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
+          className="spatial-card p-2.5 sm:p-4 flex items-center gap-2 sm:gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
         >
-          <div className="p-2.5 rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 group-hover:scale-105 transition-transform">
-            <Users className="w-5 h-5" />
+          <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 group-hover:scale-105 transition-transform shrink-0">
+            <Users className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Household</p>
-            <p className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+            <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Household</p>
+            <p className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
               {familyMembers.length} Members
             </p>
           </div>
@@ -59,14 +59,14 @@ export const DashboardScreen: React.FC = () => {
         {/* Metric 2: Clinical Adherence */}
         <div
           onClick={() => navigateToSubScreen('medicine')}
-          className="spatial-card p-4 flex items-center gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
+          className="spatial-card p-2.5 sm:p-4 flex items-center gap-2 sm:gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
         >
-          <div className="p-2.5 rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 group-hover:scale-105 transition-transform">
-            <Pill className="w-5 h-5" />
+          <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
+            <Pill className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Clinical Prescriptions</p>
-            <p className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+            <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Prescriptions</p>
+            <p className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
               {medicines.length} Active
             </p>
           </div>
@@ -75,14 +75,14 @@ export const DashboardScreen: React.FC = () => {
         {/* Metric 3: Monthly Expenses */}
         <div
           onClick={() => navigateToSubScreen('expense')}
-          className="spatial-card p-4 flex items-center gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
+          className="spatial-card p-2.5 sm:p-4 flex items-center gap-2 sm:gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
         >
-          <div className="p-2.5 rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 group-hover:scale-105 transition-transform">
-            <CreditCard className="w-5 h-5" />
+          <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 group-hover:scale-105 transition-transform shrink-0">
+            <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Expenses & Bills</p>
-            <p className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+            <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Expenses & Bills</p>
+            <p className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
               {formatINR(totalSpend)}
             </p>
           </div>
@@ -91,14 +91,14 @@ export const DashboardScreen: React.FC = () => {
         {/* Metric 4: Pantry Depletion */}
         <div
           onClick={() => navigateToSubScreen('grocery')}
-          className="spatial-card p-4 flex items-center gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
+          className="spatial-card p-2.5 sm:p-4 flex items-center gap-2 sm:gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
         >
-          <div className="p-2.5 rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 group-hover:scale-105 transition-transform">
-            <ShoppingCart className="w-5 h-5" />
+          <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 group-hover:scale-105 transition-transform shrink-0">
+            <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pantry Restock</p>
-            <p className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+            <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Pantry Restock</p>
+            <p className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
               {pendingGroceries.length} To Buy
             </p>
           </div>
@@ -107,14 +107,14 @@ export const DashboardScreen: React.FC = () => {
         {/* Metric 5: Document Vault */}
         <div
           onClick={() => navigateToSubScreen('documents')}
-          className="spatial-card p-4 flex items-center gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group col-span-2 sm:col-span-1"
+          className="spatial-card p-2.5 sm:p-4 flex items-center gap-2 sm:gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group col-span-2 sm:col-span-1"
         >
-          <div className="p-2.5 rounded-2xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 group-hover:scale-105 transition-transform">
-            <FileText className="w-5 h-5" />
+          <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 group-hover:scale-105 transition-transform shrink-0">
+            <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Document Vault</p>
-            <p className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+            <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">Document Vault</p>
+            <p className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
               {documents.length} Records {expiringDocs.length > 0 && <span className="text-xs text-rose-500 font-semibold">• {expiringDocs.length} Alert</span>}
             </p>
           </div>
