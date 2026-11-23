@@ -111,7 +111,7 @@ export const FamilyKnowledgeScreen: React.FC = () => {
   const [fileError, setFileError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  const categories = ['All', 'Allergies', 'Medical', 'Preferences', 'Schedules', 'Rules', 'Other'];
+  const categories = ['All', 'Allergies', 'Medical', 'Preferences', 'Schedules', 'Emergency', 'Rules', 'General'];
 
   const filtered = knowledgeList.filter(k => {
     const matchesCategory = selectedCategory === 'All' || k.category === selectedCategory;
@@ -384,9 +384,11 @@ export const AddKnowledgeModal: React.FC = () => {
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-xs"
             >
               <option value="Allergies">Allergies ⚠️</option>
+              <option value="Medical">Medical 🩺</option>
               <option value="Preferences">Dietary / Food</option>
               <option value="Schedules">Exam / Work</option>
               <option value="Emergency">Emergency Fact</option>
+              <option value="Rules">Household Rules</option>
               <option value="General">General Note</option>
             </select>
           </div>

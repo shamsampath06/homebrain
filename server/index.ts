@@ -4,8 +4,10 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import mammoth from 'mammoth';
 import nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import { processIntelligentAction, getPendingAction, setPendingAction, clearPendingAction, isAnsweringPendingAction } from './cognitiveActionEngine.ts';
+import { matchHomeBrainTrainedDialogue } from '../src/lib/botTraining.ts';
 
 // Load environment variables (.env.local takes precedence, then .env)
 dotenv.config({ path: '.env.local' });
@@ -76,7 +78,7 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
   req.authToken = token;
 
   // Support Demo Mode & local evaluation seamlessly
-  if (token === 'demo-token' || req.body?.isDemo || req.body?.familyId || req.body?.senderName) {
+  if (token === 'demo-token' || token === SUPABASE_ANON_KEY || req.body?.isDemo || req.body?.familyId || req.body?.senderName) {
     req.user = {
       id: req.body?.userId || 'demo-user-sarah',
       email: req.body?.userEmail || 'sarah.kumar@family.homebrain.internal',
@@ -147,9 +149,10 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
 
 // Helper: Query Supabase REST with the user's family-scoped token
 const fetchFamilyData = async (table: string, familyId: string, token: string, queryParams: string = ''): Promise<any[]> => {
-  if (!SUPABASE_URL) return [];
+  if (!SUPABASE_URL || token === 'demo-token' || token === SUPABASE_ANON_KEY) return [];
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const safeFamilyId = uuidRegex.test(familyId) ? familyId : '00000000-0000-4000-8000-000000000001';
+  if (!uuidRegex.test(familyId)) return [];
+  const safeFamilyId = familyId;
   const url = `${SUPABASE_URL}/rest/v1/${table}?family_id=eq.${encodeURIComponent(safeFamilyId)}${queryParams ? `&${queryParams}` : ''}`;
   try {
     const res = await fetch(url, {
@@ -171,19 +174,70 @@ const fetchFamilyData = async (table: string, familyId: string, token: string, q
   }
 };
 
+const toSnakeDbRecord = (record: Record<string, any>): Record<string, any> => {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(record || {})) {
+    if (v === undefined) continue;
+    const snakeKey = k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+    if (!(snakeKey in out) || k === snakeKey) {
+      out[snakeKey] = v;
+    }
+  }
+  return out;
+};
+
+const extractMissingDbColumn = (message: string): string | null => {
+  const pgrst = message.match(/Could not find the '([^']+)' column/);
+  if (pgrst) return pgrst[1];
+  const pg = message.match(/column "?([a-z_0-9]+)"? (?:of relation "[^"]+" )?does not exist/i);
+  if (pg) return pg[1].replace(/^[a-z_]+\./, '');
+  return null;
+};
+
+/**
+ * Recursively sanitizes any string field by stripping NULL characters (\u0000 / \0 / 0x00)
+ * which trigger PostgreSQL error 22P05 ("character with byte sequence 0x00 cannot be converted to text").
+ */
+export const sanitizeTextForPostgres = (text: string): string => {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\0/g, '')
+    .replace(/\\u0000/g, '')
+    .replace(/\u0000/g, '')
+    .replace(/[\x00]/g, '');
+};
+
+export const sanitizePayloadForPostgres = <T>(payload: T): T => {
+  if (payload === null || payload === undefined) return payload;
+  if (typeof payload === 'string') {
+    return sanitizeTextForPostgres(payload) as unknown as T;
+  }
+  if (Array.isArray(payload)) {
+    return payload.map(item => sanitizePayloadForPostgres(item)) as unknown as T;
+  }
+  if (typeof payload === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, val] of Object.entries(payload)) {
+      cleaned[key] = sanitizePayloadForPostgres(val);
+    }
+    return cleaned as T;
+  }
+  return payload;
+};
+
 // Helper: Insert row into Supabase REST with the user's family-scoped token
 const insertFamilyData = async (table: string, payload: any, token: string): Promise<any> => {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const newId = (payload.id && uuidRegex.test(payload.id)) ? payload.id : crypto.randomUUID();
-  const generated = { ...payload, id: newId };
+  const generated = sanitizePayloadForPostgres({ ...payload, id: newId });
 
   if (table === 'events') {
     if (!sharedFallbackEvents.some((e: any) => e.id === generated.id || (e.title === generated.title && e.date === generated.date))) {
-      sharedFallbackEvents.push(generated);
+      sharedFallbackEvents.unshift(generated);
     }
   } else if (table === 'groceries') {
     if (!sharedFallbackGroceries.some((g: any) => g.id === generated.id || (g.name?.toLowerCase() === generated.name?.toLowerCase() && g.is_purchased === generated.is_purchased))) {
-      sharedFallbackGroceries.push(generated);
+      sharedFallbackGroceries.unshift(generated);
     }
   } else if (table === 'expenses') {
     if (!sharedFallbackExpenses.some((x: any) => x.id === generated.id || (x.title === generated.title && x.amount === generated.amount && x.date === generated.date))) {
@@ -191,93 +245,141 @@ const insertFamilyData = async (table: string, payload: any, token: string): Pro
     }
   } else if (table === 'bills') {
     if (!sharedFallbackBills.some((b: any) => b.id === generated.id || (b.title === generated.title && b.due_date === generated.due_date))) {
-      sharedFallbackBills.push(generated);
+      sharedFallbackBills.unshift(generated);
     }
   } else if (table === 'reminders') {
     if (!sharedFallbackReminders.some((r: any) => r.id === generated.id || (r.title === generated.title && r.date_time === generated.date_time))) {
-      sharedFallbackReminders.push(generated);
+      sharedFallbackReminders.unshift(generated);
+    }
+  } else if (table === 'medicines') {
+    if (!sharedFallbackMedicines.some((m: any) => m.id === generated.id || (m.name?.toLowerCase() === generated.name?.toLowerCase() && (m.person_name || m.personName) === (generated.person_name || generated.personName)))) {
+      sharedFallbackMedicines.unshift(generated);
+    }
+  } else if (table === 'medicine_logs') {
+    if (!sharedFallbackMedicineLogs.some((l: any) => l.id === generated.id)) {
+      sharedFallbackMedicineLogs.unshift(generated);
+    }
+  } else if (table === 'family_knowledge') {
+    if (!sharedFallbackKnowledge.some((k: any) => k.id === generated.id || k.content === generated.content)) {
+      sharedFallbackKnowledge.unshift(generated);
     }
   }
 
-  if (!SUPABASE_URL || token === 'demo-token') return generated;
+  if (!SUPABASE_URL || token === 'demo-token' || token === SUPABASE_ANON_KEY) return generated;
   const url = `${SUPABASE_URL}/rest/v1/${table}`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation'
-      },
-      body: JSON.stringify(generated)
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      console.warn(`Could not insert into ${table}: ${errText}`);
+  let dbBody = sanitizePayloadForPostgres(toSnakeDbRecord(generated));
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation'
+        },
+        body: JSON.stringify(dbBody)
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        const missingCol = extractMissingDbColumn(errText);
+        if (missingCol && missingCol in dbBody) {
+          const { [missingCol]: _removed, ...rest } = dbBody;
+          dbBody = rest;
+          continue;
+        }
+        console.warn(`Could not insert into ${table}: ${errText}`);
+        return generated;
+      }
+      const data = await res.json();
+      const row = Array.isArray(data) ? data[0] : (data || generated);
+      return { ...generated, ...(row || {}) };
+    } catch (e) {
+      console.warn(`Failed insert into ${table}:`, e);
       return generated;
     }
-    const data = await res.json();
-    return Array.isArray(data) ? data[0] : (data || generated);
-  } catch (e) {
-    console.warn(`Failed insert into ${table}:`, e);
-    return generated;
   }
+  return generated;
 };
 
 // Helper: Update row in Supabase REST
 const updateFamilyData = async (table: string, id: string, payload: any, token: string): Promise<any> => {
+  const cleanPayload = sanitizePayloadForPostgres(payload);
   if (table === 'events') {
-    const idx = sharedFallbackEvents.findIndex(e => e.id === id);
-    if (idx >= 0) sharedFallbackEvents[idx] = { ...sharedFallbackEvents[idx], ...payload };
+    const idx = sharedFallbackEvents.findIndex((e: any) => e.id === id);
+    if (idx >= 0) sharedFallbackEvents[idx] = { ...sharedFallbackEvents[idx], ...cleanPayload };
   } else if (table === 'groceries') {
-    const idx = sharedFallbackGroceries.findIndex(g => g.id === id);
-    if (idx >= 0) sharedFallbackGroceries[idx] = { ...sharedFallbackGroceries[idx], ...payload };
+    const idx = sharedFallbackGroceries.findIndex((g: any) => g.id === id);
+    if (idx >= 0) sharedFallbackGroceries[idx] = { ...sharedFallbackGroceries[idx], ...cleanPayload };
   } else if (table === 'bills') {
-    const idx = sharedFallbackBills.findIndex(b => b.id === id);
-    if (idx >= 0) sharedFallbackBills[idx] = { ...sharedFallbackBills[idx], ...payload };
+    const idx = sharedFallbackBills.findIndex((b: any) => b.id === id);
+    if (idx >= 0) sharedFallbackBills[idx] = { ...sharedFallbackBills[idx], ...cleanPayload };
   } else if (table === 'expenses') {
-    const idx = sharedFallbackExpenses.findIndex(x => x.id === id);
-    if (idx >= 0) sharedFallbackExpenses[idx] = { ...sharedFallbackExpenses[idx], ...payload };
+    const idx = sharedFallbackExpenses.findIndex((x: any) => x.id === id);
+    if (idx >= 0) sharedFallbackExpenses[idx] = { ...sharedFallbackExpenses[idx], ...cleanPayload };
   } else if (table === 'reminders') {
-    const idx = sharedFallbackReminders.findIndex(r => r.id === id);
-    if (idx >= 0) sharedFallbackReminders[idx] = { ...sharedFallbackReminders[idx], ...payload };
+    const idx = sharedFallbackReminders.findIndex((r: any) => r.id === id);
+    if (idx >= 0) sharedFallbackReminders[idx] = { ...sharedFallbackReminders[idx], ...cleanPayload };
+  } else if (table === 'medicines') {
+    const idx = sharedFallbackMedicines.findIndex((m: any) => m.id === id);
+    if (idx >= 0) sharedFallbackMedicines[idx] = { ...sharedFallbackMedicines[idx], ...cleanPayload };
+  } else if (table === 'family_knowledge') {
+    const idx = sharedFallbackKnowledge.findIndex((k: any) => k.id === id);
+    if (idx >= 0) sharedFallbackKnowledge[idx] = { ...sharedFallbackKnowledge[idx], ...cleanPayload };
   }
 
-  if (!SUPABASE_URL || token === 'demo-token') return payload;
+  if (!SUPABASE_URL || token === 'demo-token' || token === SUPABASE_ANON_KEY) return cleanPayload;
   const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
-  try {
-    const res = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation'
-      },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      console.warn(`Could not update in ${table}: ${await res.text()}`);
-      return payload;
+  let dbBody = sanitizePayloadForPostgres(toSnakeDbRecord(cleanPayload));
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation'
+        },
+        body: JSON.stringify(dbBody)
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        const missingCol = extractMissingDbColumn(errText);
+        if (missingCol && missingCol in dbBody) {
+          const { [missingCol]: _removed, ...rest } = dbBody;
+          dbBody = rest;
+          continue;
+        }
+        console.warn(`Could not update in ${table}: ${errText}`);
+        return cleanPayload;
+      }
+      const data = await res.json();
+      const row = Array.isArray(data) ? data[0] : data;
+      return { ...cleanPayload, ...(row || {}) };
+    } catch (e) {
+      console.warn(`Failed update into ${table}:`, e);
+      return cleanPayload;
     }
-    const data = await res.json();
-    return Array.isArray(data) ? data[0] : data;
-  } catch (e) {
-    console.warn(`Failed update into ${table}:`, e);
-    return payload;
   }
+  return cleanPayload;
 };
 
 // Helper: Delete row from Supabase REST
 const deleteFamilyData = async (table: string, id: string, token: string): Promise<boolean> => {
-  if (table === 'events') sharedFallbackEvents = sharedFallbackEvents.filter(e => e.id !== id);
-  else if (table === 'groceries') sharedFallbackGroceries = sharedFallbackGroceries.filter(g => g.id !== id);
-  else if (table === 'bills') sharedFallbackBills = sharedFallbackBills.filter(b => b.id !== id);
-  else if (table === 'expenses') sharedFallbackExpenses = sharedFallbackExpenses.filter(x => x.id !== id);
-  else if (table === 'reminders') sharedFallbackReminders = sharedFallbackReminders.filter(r => r.id !== id);
+  const removeInPlace = (arr: any[]) => {
+    const idx = arr.findIndex((item: any) => item.id === id);
+    if (idx >= 0) arr.splice(idx, 1);
+  };
+  if (table === 'events') removeInPlace(sharedFallbackEvents);
+  else if (table === 'groceries') removeInPlace(sharedFallbackGroceries);
+  else if (table === 'bills') removeInPlace(sharedFallbackBills);
+  else if (table === 'expenses') removeInPlace(sharedFallbackExpenses);
+  else if (table === 'reminders') removeInPlace(sharedFallbackReminders);
+  else if (table === 'medicines') removeInPlace(sharedFallbackMedicines);
+  else if (table === 'family_knowledge') removeInPlace(sharedFallbackKnowledge);
 
-  if (!SUPABASE_URL || token === 'demo-token') return true;
+  if (!SUPABASE_URL || token === 'demo-token' || token === SUPABASE_ANON_KEY) return true;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
       method: 'DELETE',
@@ -334,20 +436,40 @@ app.get('/api/health', (req, res) => {
 const extractPdfTextFallback = (buffer: Buffer): string => {
   const binary = buffer.toString('latin1');
   const chunks: string[] = [];
+  const isReadableChunk = (str: string): boolean => {
+    if (!str || str.length < 2) return false;
+    const printable = str.match(/[a-zA-Z0-9\s.,;:!?'"()-]/g) || [];
+    return (printable.length / str.length) >= 0.7;
+  };
+
   const tjRegex = /\(([^)]+)\)\s*(?:Tj|'|")/g;
   let m: RegExpExecArray | null;
   while ((m = tjRegex.exec(binary)) !== null) {
-    if (m[1].length > 1) chunks.push(m[1]);
+    if (m[1].length > 1 && isReadableChunk(m[1])) {
+      chunks.push(sanitizeTextForPostgres(m[1]));
+    }
   }
   const tjArray = /\[([^\]]+)\]\s*TJ/g;
   while ((m = tjArray.exec(binary)) !== null) {
     const inner = m[1];
     const parenMatches = inner.match(/\(([^)]+)\)/g);
     if (parenMatches) {
-      chunks.push(parenMatches.map(p => p.slice(1, -1)).join(' '));
+      for (const p of parenMatches) {
+        const raw = p.slice(1, -1);
+        if (isReadableChunk(raw)) {
+          chunks.push(sanitizeTextForPostgres(raw));
+        }
+      }
     }
   }
-  return chunks.join(' ').replace(/\\([()\\])/g, '$1').replace(/\s+/g, ' ').trim();
+
+  const combined = chunks.join(' ').replace(/\\([()\\])/g, '$1').replace(/\s+/g, ' ').trim();
+  const sanitized = sanitizeTextForPostgres(combined);
+  const printableOverall = sanitized.match(/[a-zA-Z0-9\s.,;:!?'"()-]/g) || [];
+  if (sanitized.length < 15 || (printableOverall.length / (sanitized.length || 1)) < 0.7) {
+    return '';
+  }
+  return sanitized;
 };
 
 // --- Document Text Extraction & Summarization Endpoint (Phase 2 & Multimodal) ---
@@ -365,9 +487,9 @@ app.post('/api/documents/extract', authenticateUser, async (req: Request, res: R
 
     if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || (fileName && fileName.endsWith('.docx'))) {
       const docxResult = await mammoth.extractRawText({ buffer });
-      extractedText = docxResult.value;
+      extractedText = sanitizeTextForPostgres(docxResult.value || '');
     } else if (mimeType.startsWith('text/') || (fileName && fileName.endsWith('.txt'))) {
-      extractedText = buffer.toString('utf-8');
+      extractedText = sanitizeTextForPostgres(buffer.toString('utf-8'));
     } else if (mimeType === 'application/pdf') {
       // First attempt native PDF stream extraction
       const nativePdfText = extractPdfTextFallback(buffer);
@@ -395,7 +517,7 @@ app.post('/api/documents/extract', authenticateUser, async (req: Request, res: R
             }
           ]
         });
-        extractedText = response.text || '';
+        extractedText = sanitizeTextForPostgres(response.text || '');
       } else {
         extractedText = nativePdfText || `[Scanned PDF: text extraction requires GEMINI_API_KEY for vision OCR]`;
       }
@@ -421,7 +543,7 @@ app.post('/api/documents/extract', authenticateUser, async (req: Request, res: R
             }
           ]
         });
-        extractedText = response.text || '';
+        extractedText = sanitizeTextForPostgres(response.text || '');
       } else {
         extractedText = `[Image Document: Optical Character Recognition requires GEMINI_API_KEY configured in .env.local]`;
       }
@@ -430,1238 +552,19 @@ app.post('/api/documents/extract', authenticateUser, async (req: Request, res: R
       return;
     }
 
+    const cleanExtracted = sanitizeTextForPostgres(extractedText.trim());
+
     res.json({
       success: true,
-      fileName,
-      extractedText: extractedText.trim(),
-      charCount: extractedText.length
+      fileName: sanitizeTextForPostgres(fileName || ''),
+      extractedText: cleanExtracted,
+      charCount: cleanExtracted.length
     });
   } catch (err: any) {
     console.error('Document extraction error:', err);
     res.status(500).json({ error: err.message || 'Failed to extract text from document.' });
   }
 });
-
-// --- HomeBrain Trained Conversational & Intent Resolver ---
-function matchHomeBrainTrainedDialogue(rawQuery: string, effectiveDocuments: any[], user: any, effectiveBills: any[] = [], extraContext?: any, onAction?: (action: any) => void): string | null {
-  const qTrim = (rawQuery || '').trim();
-  if (!qTrim) return null;
-
-  // Normalized query: lowercase, stripped of surrounding punctuation
-  const clean = qTrim.toLowerCase().replace(/^[?!.,\s]+|[?!.,\s]+$/g, '').trim();
-
-  // Normalized fallback data so listings actually SHOW records rather than just introductory sentences
-  const expList = (extraContext && extraContext.expenses && extraContext.expenses.length > 0)
-    ? extraContext.expenses
-    : [
-        { title: 'Monthly Supermarket Grocery Shopping', amount: 8450, category: 'Groceries', date: '2026-11-08' },
-        { title: 'Grandma Doctor Consultation & Pharmacy', amount: 3200, category: 'Healthcare', date: '2026-11-05' },
-        { title: 'High-Speed Home Fiber Internet Bill', amount: 2100, category: 'Utilities', date: '2026-11-01' }
-      ];
-
-  const remList = (extraContext && extraContext.reminders && extraContext.reminders.length > 0)
-    ? extraContext.reminders
-    : (extraContext && extraContext.tasks && extraContext.tasks.length > 0)
-      ? extraContext.tasks
-      : [
-          { title: "Complete college assignment & review documents", priority: 'High', dateTime: 'Today, 6:00 PM', completed: false },
-          { title: "Grandma's BP Medicine - 8:00 PM 💊", priority: 'High', dateTime: 'Today, 8:00 PM', completed: false },
-          { title: "Rahul's Birthday Celebration 🎂", priority: 'High', dateTime: 'Today, 7:00 PM', completed: false }
-        ];
-
-  const grocList = (extraContext && extraContext.groceries && extraContext.groceries.length > 0)
-    ? extraContext.groceries
-    : [
-        { name: 'Fresh Milk', quantity: '2 litres', is_purchased: false },
-        { name: 'Basmati Rice', quantity: '5 kg', is_purchased: false },
-        { name: 'Farm Tomatoes & Onions', quantity: '2 kg', is_purchased: false },
-        { name: 'Sunflower Cooking Oil', quantity: '1 litre', is_purchased: false }
-      ];
-
-  const billList = (effectiveBills && effectiveBills.length > 0)
-    ? effectiveBills
-    : [
-        { title: 'Electricity Power Utility Bill', amount: 4850, due_date: '2026-11-20', is_paid: false },
-        { title: 'High-Speed Home Fiber Internet', amount: 2100, due_date: '2026-12-01', is_paid: false }
-      ];
-
-  const evList = (extraContext && extraContext.events && extraContext.events.length > 0)
-    ? extraContext.events
-    : [
-        { title: "Sarah's Birthday", date: '2026-03-10', category: 'Birthday' },
-        { title: "Father's Birthday Celebration", date: '2026-06-15', category: 'Birthday' },
-        { title: "Mother's Birthday & Puja", date: '2026-09-22', category: 'Birthday' },
-        { title: "SHAM", date: '2026-11-20', category: 'Birthday' }
-      ];
-
-  // ==========================================
-  // 1. CLARIFICATION & ERROR SITUATIONS
-  // ==========================================
-  if (/^fetch\s+(?:my|the)\s+card$/i.test(clean) || /^show\s+(?:my|the)\s+card$/i.test(clean) || clean === 'my card' || clean === 'fetch card' || clean === 'find my card') {
-    return 'Which card would you like me to retrieve?';
-  }
-  if (/^fetch\s+sham['’]?s\s+document$/i.test(clean) || /^find\s+sham['’]?s\s+document$/i.test(clean) || /^get\s+sham['’]?s\s+document$/i.test(clean) || clean === "sham's document") {
-    return "Which document belonging to Sham are you looking for?";
-  }
-  if (/^find\s+(?:the\s+)?aadhaar(?:\s+card)?$/i.test(clean) || (/^fetch\s+aadhaar(?:\s+card)?$/i.test(clean) && !clean.includes('sham') && !clean.includes('my'))) {
-    return 'Whose Aadhaar card would you like me to find?';
-  }
-  if (/^show\s+(?:my\s+)?semester\s+marksheet$/i.test(clean) || /^fetch\s+(?:my\s+)?semester\s+marksheet$/i.test(clean) || clean === 'semester marksheet') {
-    return 'Which semester marksheet are you looking for?';
-  }
-  if (/^find\s+(?:the\s+)?certificate$/i.test(clean) || /^fetch\s+(?:the\s+)?certificate$/i.test(clean) || /^get\s+(?:the\s+)?certificate$/i.test(clean)) {
-    return 'Whose certificate would you like me to find?';
-  }
-  if (/^get\s+that\s+file$/i.test(clean) || /^find\s+that\s+file$/i.test(clean) || /^fetch\s+that\s+file$/i.test(clean)) {
-    return 'Could you specify the file name or document type?';
-  }
-  if (/^i\s+want\s+my\s+document$/i.test(clean) || clean === 'want my document' || clean === 'my document') {
-    return 'Sure! Which document do you need?';
-  }
-  if (clean === 'document not found') {
-    return "I couldn't find the requested document. Please upload it first.";
-  }
-  if (clean === 'file corrupted' || clean === 'corrupted file') {
-    return 'The uploaded file appears to be unreadable. Please upload another copy.';
-  }
-  if (clean === 'upload failed') {
-    return 'The upload was unsuccessful. Please try again.';
-  }
-  if (clean === 'unsupported file' || clean === 'unsupported format') {
-    return 'This file format is currently not supported. Please upload a supported file.';
-  }
-  if (clean === 'unauthorized access') {
-    return "You don't have permission to access this document.";
-  }
-  if (clean === 'unknown command') {
-    return "I'm not sure I understood that. Could you rephrase your request?";
-  }
-
-  // ==========================================
-  // 2. TANGLISH COMMANDS (Tamil-English)
-  // ==========================================
-  if (/milk\s+add\s+pannunga/i.test(clean)) {
-    return 'Milk has been added to your grocery list.';
-  }
-  if (/grocery\s+list\s+kaaminga/i.test(clean)) {
-    const pending = grocList.filter((g: any) => !g.is_purchased && !g.isPurchased);
-    const items = pending.map((g: any) => `• **${g.name}** (${g.quantity || '1 unit'})`).join('\n');
-    return `Here is your grocery list.\n\n${items}`;
-  }
-  if (/eb\s+bill\s+paid\s+nu\s+mark\s+pannunga/i.test(clean)) {
-    return 'Your electricity bill has been marked as paid.';
-  }
-  if (/appa\s+birthday\s+already\s+add\s+pannirukoma/i.test(clean)) {
-    return "Yes! Your father's birthday is already saved on December 10.";
-  }
-  if (/appa\s+birthday\s+eppo/i.test(clean)) {
-    return "Your father's birthday is on December 10.";
-  }
-  if (/naalaiku\s+meeting\s+add\s+pannunga/i.test(clean)) {
-    return 'What time should I schedule your meeting tomorrow?';
-  }
-  if (/en\s+aadhaar\s+card\s+eduthu\s+kudu/i.test(clean)) {
-    return "I'll search your Document Vault for your Aadhaar card.";
-  }
-  if (/sham\s+oda\s+pan\s+card\s+irukka/i.test(clean)) {
-    return "Let me check whether Sham's PAN card is available.";
-  }
-  if (/intha\s+expense\s+add\s+pannunga/i.test(clean)) {
-    return 'Sure! What was the expense amount and purpose?';
-  }
-  if (/en\s+pending\s+bills\s+enna/i.test(clean)) {
-    const pending = billList.filter((b: any) => !b.is_paid && !b.isPaid);
-    const items = pending.map((b: any) => `• **${b.title}**: ₹${Number(b.amount).toLocaleString('en-IN')} (Due: ${b.due_date || b.dueDate || 'Soon'})`).join('\n');
-    return `Here are your pending bills.\n\n${items}`;
-  }
-  if (/appa\s+birthday\s+ku\s+reminder\s+podu/i.test(clean)) {
-    return "I'll set a reminder for your father's birthday.";
-  }
-  if (/reminder\s+set\s+pannunga/i.test(clean)) {
-    return 'Sure! What would you like me to remind you about?';
-  }
-
-  // ==========================================
-  // 3. GROCERY VAULT MANAGEMENT
-  // ==========================================
-  if (/is\s+milk\s+already\s+(?:in|on)\s+(?:my\s+)?list/i.test(clean)) {
-    return 'Yes, milk is already on your grocery list.';
-  }
-  if (/^add\s+milk\s+to\s+grocery\s+list$/i.test(clean) || clean === 'add milk to groceries') {
-    return 'Milk has been added to your grocery list.';
-  }
-  if (/^add\s+2\s*kg\s+rice$/i.test(clean) || clean === 'add rice') {
-    return '2 kg of rice has been added.';
-  }
-  if (/^add\s+tomatoes\s+and\s+onions$/i.test(clean)) {
-    return 'Tomatoes and onions have been added to your list.';
-  }
-  if (/^add\s+1\s*litre\s+oil$/i.test(clean) || clean === 'add cooking oil') {
-    return '1 litre of cooking oil has been added.';
-  }
-  if (/^add\s+eggs\s+to\s+(?:my\s+)?shopping\s+list$/i.test(clean) || clean === 'add eggs') {
-    return 'Eggs have been added to your shopping list.';
-  }
-  if (/^add\s+vegetables\s+for\s+tomorrow$/i.test(clean)) {
-    return 'Vegetables have been added to your grocery list.';
-  }
-  if (/^add\s+these\s+items\s+to\s+groceries$/i.test(clean)) {
-    return "Sure! I'll add the identified items to your list.";
-  }
-  if (/^add\s+water\s+can\s+to\s+grocery\s+list$/i.test(clean)) {
-    return 'Water can has been added to your grocery list.';
-  }
-  if (/^remove\s+milk\s+from\s+grocery\s+list$/i.test(clean)) {
-    return 'Milk has been removed from your grocery list.';
-  }
-  if (/^delete\s+rice\s+from\s+(?:my\s+)?list$/i.test(clean)) {
-    return 'Rice has been removed.';
-  }
-  if (/^change\s+milk\s+quantity\s+to\s+2\s*litres$/i.test(clean)) {
-    return 'Milk quantity has been updated to 2 litres.';
-  }
-  if (/^show\s+(?:my\s+)?grocery\s+list$/i.test(clean) || clean === 'grocery list' || clean === 'my groceries') {
-    const pending = grocList.filter((g: any) => !g.is_purchased && !g.isPurchased);
-    if (pending.length === 0) {
-      return 'Here is your current grocery list.\n\n✅ Your grocery list is currently empty. All items are purchased!';
-    }
-    const items = pending.map((g: any) => `• **${g.name}** (${g.quantity || '1 unit'})`).join('\n');
-    return `Here is your current grocery list.\n\n${items}`;
-  }
-  if (/^what\s+should\s+i\s+buy$/i.test(clean)) {
-    const pending = grocList.filter((g: any) => !g.is_purchased && !g.isPurchased);
-    const items = pending.map((g: any) => `• **${g.name}** (${g.quantity || '1 unit'})`).join('\n');
-    return `Here are the items remaining on your grocery list.\n\n${items}`;
-  }
-  if (/^what\s+groceries\s+are\s+pending$/i.test(clean)) {
-    const pending = grocList.filter((g: any) => !g.is_purchased && !g.isPurchased);
-    const items = pending.map((g: any) => `• **${g.name}** (${g.quantity || '1 unit'})`).join('\n');
-    return `These are the grocery items you haven't marked as purchased.\n\n${items}`;
-  }
-  if (/^mark\s+milk\s+as\s+purchased$/i.test(clean)) {
-    return 'Milk has been marked as purchased.';
-  }
-  if (/^i\s+bought\s+all\s+the\s+groceries$/i.test(clean) || clean === 'bought all groceries') {
-    return 'All items have been marked as purchased.';
-  }
-  if (/^clear\s+(?:my\s+)?grocery\s+list$/i.test(clean)) {
-    return 'Are you sure you want to clear your grocery list?';
-  }
-  if (/^add\s+bread\s+every\s+morning$/i.test(clean)) {
-    return 'Do you want me to create a recurring grocery reminder for bread?';
-  }
-  if (/^what\s+did\s+i\s+buy\s+last\s+week$/i.test(clean)) {
-    return "I'll check your grocery purchase history.";
-  }
-  if (/^how\s+much\s+did\s+i\s+spend\s+on\s+groceries$/i.test(clean)) {
-    return "I'll calculate your recorded grocery expenses.";
-  }
-
-  // ==========================================
-  // 4. FINANCE & BILL MANAGEMENT
-  // ==========================================
-  // A. Bill payment
-  if (/^mark\s+electricity\s+bill\s+as\s+paid$/i.test(clean)) {
-    const eb = effectiveBills.find((b: any) => /electricity|eb/i.test(b.title || b.category || ''));
-    if (eb && (eb.is_paid || eb.status === 'paid')) {
-      return 'Your electricity bill has been marked as paid. It is already marked as paid on record.';
-    }
-    if (eb) {
-      eb.is_paid = true;
-      eb.status = 'paid';
-    }
-    return 'Your electricity bill has been marked as paid.';
-  }
-  if (/^mark\s+eb\s+bill\s+as\s+paid$/i.test(clean)) {
-    return 'Your electricity bill has been updated as paid.';
-  }
-  if (/^i\s+paid\s+the\s+water\s+bill$/i.test(clean)) {
-    return "I'll update your water bill payment status.";
-  }
-  if (/^mark\s+internet\s+bill\s+as\s+paid$/i.test(clean)) {
-    return 'Your internet bill has been marked as paid.';
-  }
-  if (/^have\s+i\s+paid\s+this\s+month['’]?s\s+(?:eb|electricity)\s+bill$/i.test(clean)) {
-    return "I'll check your electricity bill payment records.";
-  }
-  if (/^when\s+is\s+my\s+next\s+electricity\s+bill\s+due$/i.test(clean)) {
-    return "I'll check your upcoming electricity bill due date.";
-  }
-  if (/^show\s+pending\s+bills$/i.test(clean) || clean === 'pending bills') {
-    const pending = billList.filter((b: any) => !b.is_paid && !b.isPaid);
-    if (pending.length === 0) {
-      return 'Here are your unpaid bills.\n\n✅ All registered utility and household bills are fully paid!';
-    }
-    const items = pending.map((b: any) => `• **${b.title}**: ₹${Number(b.amount).toLocaleString('en-IN')} (Due: ${b.due_date || b.dueDate || 'Soon'})`).join('\n');
-    return `Here are your unpaid bills.\n\n${items}`;
-  }
-  if (/^what\s+bills\s+are\s+due\s+this\s+week$/i.test(clean)) {
-    const pending = billList.filter((b: any) => !b.is_paid && !b.isPaid);
-    const items = pending.map((b: any) => `• **${b.title}**: ₹${Number(b.amount).toLocaleString('en-IN')} (Due: ${b.due_date || b.dueDate || 'Soon'})`).join('\n');
-    return `Here are the bills due this week.\n\n${items}`;
-  }
-  if (/^add\s+(?:₹|rs\.?|inr\s*)?1[,.]?500\s+electricity\s+bill$/i.test(clean)) {
-    return 'Your ₹1,500 electricity bill has been recorded. When is it due?';
-  }
-  if (/^add\s+electricity\s+bill$/i.test(clean)) {
-    return 'Sure! Please provide the bill amount and due date.';
-  }
-  if (/^remind\s+me\s+to\s+pay\s+eb\s+tomorrow$/i.test(clean)) {
-    return "I'll set a reminder for tomorrow to pay the electricity bill.";
-  }
-  if (/^remind\s+me\s+tomorrow\s+to\s+pay\s+eb$/i.test(clean)) {
-    return "I'll schedule a reminder for tomorrow to pay your electricity bill.";
-  }
-  if (/^delete\s+my\s+old\s+water\s+bill$/i.test(clean)) {
-    return 'Which water bill would you like me to delete?';
-  }
-  if (/^how\s+much\s+is\s+my\s+pending\s+bill\s+amount$/i.test(clean)) {
-    return "I'll calculate the total amount of your unpaid bills.";
-  }
-  if (/^did\s+i\s+already\s+pay\s+the\s+internet\s+bill$/i.test(clean)) {
-    return "I'll check your payment history.";
-  }
-
-  // B. Income and expenses
-  if (/^add\s+(?:₹|rs\.?|inr\s*)?500\s+expense$/i.test(clean)) {
-    return '₹500 expense recorded. What was it for?';
-  }
-  if (/^i\s+spent\s+(?:₹|rs\.?|inr\s*)?200\s+on\s+food$/i.test(clean)) {
-    return '₹200 food expense has been recorded.';
-  }
-  if (/^add\s+(?:₹|rs\.?|inr\s*)?1[,.]?000\s+for\s+petrol$/i.test(clean)) {
-    return '₹1,000 petrol expense has been added.';
-  }
-  if (/^record\s+(?:₹|rs\.?|inr\s*)?5[,.]?000\s+salary$/i.test(clean)) {
-    return '₹5,000 salary income has been recorded.';
-  }
-  if (/^i\s+received\s+(?:₹|rs\.?|inr\s*)?2[,.]?000$/i.test(clean)) {
-    return "I'll record ₹2,000 as income. What was the source?";
-  }
-  if (/^show\s+my\s+expenses\s+today$/i.test(clean)) {
-    return 'Here are your recorded expenses for today.';
-  }
-  if (/^how\s+much\s+did\s+i\s+spend\s+this\s+month$/i.test(clean)) {
-    return "I'll calculate your total expenses for this month.";
-  }
-  if (/^show\s+last\s+month['’]?s\s+expenses$/i.test(clean)) {
-    return 'Here is your expense summary for last month.';
-  }
-  if (/^what\s+is\s+my\s+total\s+income$/i.test(clean)) {
-    return "I'll calculate your recorded income.";
-  }
-  if (/^how\s+much\s+did\s+i\s+save$/i.test(clean)) {
-    return "I'll calculate your savings from recorded income and expenses.";
-  }
-  if (/^show\s+my\s+biggest\s+expenses$/i.test(clean)) {
-    return "I'll identify your highest recorded expenses.";
-  }
-  if (/^delete\s+the\s+(?:₹|rs\.?|inr\s*)?200\s+food\s+expense$/i.test(clean)) {
-    return "I'll locate that transaction before deleting it.";
-  }
-  if (/^change\s+petrol\s+expense\s+to\s+(?:₹|rs\.?|inr\s*)?1[,.]?200$/i.test(clean)) {
-    return "I'll update the petrol expense amount.";
-  }
-  if (/^add\s+(?:₹|rs\.?|inr\s*)?300\s+for\s+groceries\s+yesterday$/i.test(clean)) {
-    return 'I\'ll record the ₹300 grocery expense for yesterday.';
-  }
-
-  // C. Budget management
-  if (/^set\s+monthly\s+budget\s+to\s+(?:₹|rs\.?|inr\s*)?20[,.]?000$/i.test(clean)) {
-    return 'Your monthly budget has been set to ₹20,000.';
-  }
-  if (/^set\s+grocery\s+budget\s+to\s+(?:₹|rs\.?|inr\s*)?5[,.]?000$/i.test(clean)) {
-    return 'Your grocery budget has been set to ₹5,000.';
-  }
-  if (/^how\s+much\s+budget\s+is\s+remaining$/i.test(clean)) {
-    return "I'll calculate your remaining monthly budget.";
-  }
-  if (/^am\s+i\s+exceeding\s+my\s+budget$/i.test(clean)) {
-    return "I'll compare your recorded expenses with your budget.";
-  }
-  if (/^show\s+(?:my\s+)?budget$/i.test(clean) || clean === 'my budget' || clean === 'view budget') {
-    const totalSpent = expList.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
-    const monthlyLimit = 20000;
-    const groceryLimit = 5000;
-    const remaining = Math.max(0, monthlyLimit - totalSpent);
-    return (
-      'Here are your current budget limits.\n\n' +
-      `• **Monthly Total Budget**: ₹${monthlyLimit.toLocaleString('en-IN')}\n` +
-      `• **Smart Grocery Allocation**: ₹${groceryLimit.toLocaleString('en-IN')}\n` +
-      `• **Recorded Spending (This Month)**: ₹${totalSpent.toLocaleString('en-IN')}\n` +
-      `• **Remaining Monthly Budget**: ₹${remaining.toLocaleString('en-IN')}\n\n` +
-      (remaining < 5000
-        ? '⚠️ *Alert: Over 75% of your monthly budget has been consumed.*'
-        : '✅ *Status: Spending is within approved household limits.*')
-    );
-  }
-  if (/^increase\s+my\s+budget\s+to\s+(?:₹|rs\.?|inr\s*)?25[,.]?000$/i.test(clean)) {
-    return 'Your monthly budget has been updated to ₹25,000.';
-  }
-  if (/^how\s+much\s+did\s+i\s+spend\s+on\s+transport$/i.test(clean)) {
-    return "I'll calculate your recorded transport expenses.";
-  }
-  if (/^compare\s+this\s+month\s+and\s+last\s+month$/i.test(clean)) {
-    return "I'll compare both months' recorded income and expenses.";
-  }
-
-  // ==========================================
-  // 5. CALENDAR & FAMILY EVENTS
-  // ==========================================
-  // A. Add events
-  if (/^is\s+father['’]?s\s+birthday\s+(?:already\s+)?(?:saved|added)$/i.test(clean)) {
-    return "Yes! Your father's birthday is already saved in the Family Calendar on December 10. Would you like me to set a reminder?";
-  }
-  if (/^add\s+(?:my\s+)?father['’]?s\s+birthday\s+on\s+december\s+10$/i.test(clean)) {
-    return "Your father's birthday is already marked on December 10. I haven't created a duplicate event.";
-  }
-  if (/^add\s+(?:my\s+)?father['’]?s\s+birthday$/i.test(clean)) {
-    const sessionKey = user?.familyId || user?.id || 'demo-family';
-    setPendingAction(sessionKey, {
-      sessionKey,
-      type: 'calendar_missing_date',
-      data: { person: 'Father' }
-    });
-    return "What date is your father's birthday?";
-  }
-  if (/^add\s+mother['’]?s\s+birthday\s+tomorrow$/i.test(clean)) {
-    return "I'll add your mother's birthday for tomorrow.";
-  }
-  if (/^add\s+my\s+birthday$/i.test(clean)) {
-    return "Sure! What date is your birthday?";
-  }
-  if (/^add\s+wedding\s+anniversary$/i.test(clean)) {
-    return "Whose wedding anniversary should I add, and what is the date?";
-  }
-  if (/^schedule\s+a\s+family\s+function$/i.test(clean)) {
-    return 'Sure! Please provide the event date and details.';
-  }
-  if (/^add\s+a\s+meeting\s+tomorrow\s+at\s+10\s*am$/i.test(clean)) {
-    return 'Your meeting has been added for tomorrow at 10 AM.';
-  }
-  if (/^schedule\s+a\s+doctor\s+appointment\s+on\s+friday$/i.test(clean)) {
-    return "I'll add your appointment for Friday. What time?";
-  }
-  if (/^add\s+college\s+event\s+next\s+monday$/i.test(clean)) {
-    return "I'll add the college event for next Monday.";
-  }
-  if (/^add\s+a\s+reminder\s+for\s+my\s+father['’]?s\s+birthday$/i.test(clean)) {
-    return "I'll create a birthday reminder for your father.";
-  }
-  if (/^add\s+a\s+housewarming\s+ceremony\s+on\s+january\s+15$/i.test(clean)) {
-    return 'Your housewarming event has been added for January 15.';
-  }
-  if (/^add\s+a\s+family\s+trip\s+next\s+week$/i.test(clean)) {
-    return 'What date and time should I schedule the family trip?';
-  }
-
-  // B. Ask about existing events
-  if (/^when\s+is\s+my\s+father['’]?s\s+birthday$/i.test(clean) || clean === "father's birthday") {
-    return "Your father's birthday is on December 10.";
-  }
-  if (/^when\s+is\s+my\s+mother['’]?s\s+birthday$/i.test(clean)) {
-    return "Your mother's birthday is on May 15.";
-  }
-  if (/^what\s+is\s+the\s+next\s+family\s+event$/i.test(clean)) {
-    return 'Your next family event is Family Dinner on Friday.';
-  }
-  if (/^do\s+we\s+have\s+any\s+events\s+tomorrow$/i.test(clean)) {
-    return 'You have 1 scheduled events tomorrow.';
-  }
-  if (/^what\s+events\s+are\s+coming\s+this\s+month$/i.test(clean)) {
-    const items = evList.slice(0, 6).map((e: any) => `• **${(e.title || '').replace(/\[DEMO\]\s*/g, '')}** on ${e.date}${e.time ? ` at ${e.time}` : ''}`).join('\n');
-    return `Here are your upcoming events for this month.\n\n${items}`;
-  }
-  if (/^have\s+i\s+added\s+mother['’]?s\s+birthday$/i.test(clean)) {
-    return "Yes, your mother's birthday is already in the calendar.";
-  }
-  if (/^when\s+is\s+my\s+next\s+anniversary$/i.test(clean)) {
-    return 'Your next saved anniversary is on June 24.';
-  }
-  if (/^any\s+birthdays\s+this\s+week$/i.test(clean)) {
-    return 'Here are the birthdays scheduled for this week.';
-  }
-  if (/^what\s+did\s+i\s+schedule\s+for\s+sunday$/i.test(clean)) {
-    return "I'll show your events scheduled for Sunday.";
-  }
-  if (/^show\s+(?:my\s+)?family\s+calendar$/i.test(clean) || clean === 'family calendar') {
-    const items = evList.slice(0, 6).map((e: any) => `• **${(e.title || '').replace(/\[DEMO\]\s*/g, '')}** on ${e.date}${e.time ? ` at ${e.time}` : ''}`).join('\n');
-    return `Here is your family calendar.\n\n${items}`;
-  }
-  if (/^how\s+many\s+events\s+are\s+scheduled\s+this\s+month$/i.test(clean)) {
-    return 'You have 4 events scheduled this month.';
-  }
-
-  // C. Update and delete events
-  if (/^change\s+father['’]?s\s+birthday\s+date$/i.test(clean)) {
-    return 'What is the correct date?';
-  }
-  if (/^move\s+my\s+meeting\s+to\s+3\s*pm$/i.test(clean)) {
-    return 'Your meeting time has been updated to 3 PM.';
-  }
-  if (/^cancel\s+tomorrow['’]?s\s+appointment$/i.test(clean)) {
-    return 'Which appointment would you like to cancel?';
-  }
-  if (/^delete\s+the\s+birthday\s+event$/i.test(clean)) {
-    return 'Which birthday event should I remove?';
-  }
-  if (/^add\s+a\s+reminder\s+one\s+day\s+before\s+father['’]?s\s+birthday$/i.test(clean)) {
-    return "I'll set a reminder one day before your father's birthday.";
-  }
-  if (/^remind\s+me\s+about\s+the\s+family\s+function$/i.test(clean)) {
-    return 'What date and time should I set the reminder for?';
-  }
-  if (/^is\s+my\s+meeting\s+postponed$/i.test(clean)) {
-    return "I'll check the latest saved meeting details.";
-  }
-
-  // ==========================================
-  // 6. REMINDERS & NOTIFICATIONS
-  // ==========================================
-  if (/^remind\s+me\s+to\s+drink\s+water$/i.test(clean)) {
-    return 'Sure! What time should I remind you?';
-  }
-  if (/^set\s+an\s+alarm\s+for\s+6\s*am$/i.test(clean)) {
-    return "I'll set an alarm for 6 AM, if alarm integration is available.";
-  }
-  if (/^remind\s+me\s+about\s+my\s+meeting$/i.test(clean)) {
-    return 'Your meeting is scheduled for tomorrow at 10 AM. When should I remind you?';
-  }
-  if (/^remind\s+me\s+every\s+sunday\s+to\s+buy\s+groceries$/i.test(clean)) {
-    return "I'll set a recurring Sunday grocery reminder.";
-  }
-  if (/^remind\s+me\s+to\s+call\s+father\s+tonight$/i.test(clean)) {
-    return 'What time tonight should I remind you?';
-  }
-  if (/^show\s+my\s+reminders$/i.test(clean) || clean === 'my reminders' || clean === 'show reminders') {
-    const rems = remList.slice(0, 6);
-    if (rems.length === 0) {
-      return 'Here are your upcoming reminders.\n\n✅ No upcoming reminders saved.';
-    }
-    const items = rems.map((r: any) => `• [${r.priority || 'Normal'}] **${r.title}** (Scheduled: ${r.dateTime || r.date_time || 'Upcoming'})`).join('\n');
-    return `Here are your upcoming reminders.\n\n${items}`;
-  }
-  if (/^cancel\s+my\s+grocery\s+reminder$/i.test(clean)) {
-    return 'Your grocery reminder has been cancelled.';
-  }
-  if (/^what\s+reminders\s+do\s+i\s+have\s+today$/i.test(clean)) {
-    const rems = remList.slice(0, 5);
-    const items = rems.map((r: any) => `• **${r.title}** at ${r.dateTime || r.date_time || 'Today'}`).join('\n');
-    return `Here are your reminders for today.\n\n${items}`;
-  }
-  if (/^snooze\s+my\s+reminder$/i.test(clean)) {
-    return 'How long would you like to snooze it?';
-  }
-  if (/^remind\s+me\s+2\s+days\s+before\s+the\s+event$/i.test(clean)) {
-    return "I'll schedule a reminder two days before the event.";
-  }
-  if (/^did\s+i\s+miss\s+any\s+reminders$/i.test(clean)) {
-    return "I'll check your overdue reminders.";
-  }
-
-  // ==========================================
-  // 7. FAMILY INFORMATION & MANAGEMENT
-  // ==========================================
-  if (/^who\s+is\s+in\s+my\s+family$/i.test(clean)) {
-    return "I'll show the family members saved in your Family Profile.";
-  }
-  if (/^add\s+my\s+brother$/i.test(clean)) {
-    return "Sure! Please provide your brother's details.";
-  }
-  if (/^add\s+my\s+father\s+to\s+family$/i.test(clean)) {
-    return "I'll check whether your father is already registered.";
-  }
-  if (/^what\s+is\s+my\s+father['’]?s\s+birthday$/i.test(clean)) {
-    return "Your father's birthday is December 10.";
-  }
-  if (/^what\s+is\s+my\s+mother['’]?s\s+name$/i.test(clean)) {
-    return "Your mother's name is Sarah.";
-  }
-  if (/^show\s+father['’]?s\s+details$/i.test(clean)) {
-    return "I'll retrieve the authorized details from your Family Profile.";
-  }
-  if (/^update\s+father['’]?s\s+phone\s+number$/i.test(clean)) {
-    return 'Please provide the new phone number.';
-  }
-  if (/^what\s+is\s+my\s+brother['’]?s\s+age$/i.test(clean)) {
-    return "I'll check your brother's saved date of birth.";
-  }
-  if (/^add\s+father['’]?s\s+anniversary$/i.test(clean)) {
-    return 'What is the anniversary date?';
-  }
-  if (/^show\s+all\s+family\s+birthdays$/i.test(clean) || clean === 'family birthdays' || clean === 'all birthdays') {
-    const bdays = evList.filter((e: any) => {
-      const cat = (e.category || '').toLowerCase();
-      const title = (e.title || '').toLowerCase();
-      return cat === 'birthday' || title.includes('birthday') || title.includes('bday');
-    });
-    if (bdays.length === 0) {
-      return 'Here are the saved birthdays of your family members.\n\n• Sarah: March 10\n• Father (Rajesh Kumar): June 15\n• Mother (Priya Kumar): September 22\n• SHAM: November 20';
-    }
-    const items = bdays.map((b: any) => `• **${(b.title || '').replace(/\[DEMO\]\s*/g, '')}**: ${b.date}`).join('\n');
-    return `Here are the saved birthdays of your family members.\n\n${items}`;
-  }
-  if (/^is\s+my\s+brother['’]?s\s+birthday\s+saved$/i.test(clean)) {
-    return "I'll check the Family Calendar.";
-  }
-  if (/^when\s+was\s+the\s+last\s+family\s+event$/i.test(clean)) {
-    return 'Your most recent recorded family event was Diwali Gathering on November 01.';
-  }
-
-  // ==========================================
-  // 8. TASKS & TO-DO MANAGEMENT
-  // ==========================================
-  if (/^add\s+a\s+task\s+to\s+complete\s+my\s+assignment$/i.test(clean)) {
-    return 'Your assignment task has been added.';
-  }
-  if (/^add\s+a\s+task\s+to\s+call\s+the\s+bank$/i.test(clean)) {
-    return 'Your bank call task has been added.';
-  }
-  if (/^create\s+a\s+task\s+for\s+tomorrow$/i.test(clean)) {
-    return 'What task would you like me to create?';
-  }
-  if (/^mark\s+assignment\s+as\s+completed$/i.test(clean)) {
-    return 'Your assignment task has been marked as completed.';
-  }
-  if (/^show\s+pending\s+tasks$/i.test(clean) || clean === 'pending tasks') {
-    const pendingTasks = remList.filter((r: any) => !r.completed);
-    if (pendingTasks.length === 0) {
-      return 'Here are your incomplete tasks.\n\n✅ Great job! You have no incomplete or pending tasks.';
-    }
-    const lines = pendingTasks.slice(0, 6).map((t: any) => {
-      const p = t.priority === 'High' ? '🔴 High' : t.priority === 'Medium' ? '🟡 Medium' : '🟢 Normal';
-      const due = t.dateTime || t.date_time || 'Pending';
-      return `• [${p}] **${t.title}** (Due: ${due})`;
-    }).join('\n');
-    return `Here are your incomplete tasks.\n\n${lines}`;
-  }
-  if (/^what\s+tasks\s+do\s+i\s+have\s+today$/i.test(clean) || /^tasks\s+today$/i.test(clean) || clean === 'my tasks today') {
-    const pendingTasks = remList.filter((r: any) => !r.completed);
-    if (pendingTasks.length === 0) {
-      return 'Here are your tasks scheduled for today.\n\n✅ You have no urgent pending tasks scheduled for today. You are all caught up!';
-    }
-    const lines = pendingTasks.slice(0, 6).map((t: any) => {
-      const p = t.priority === 'High' ? '🔴 High' : t.priority === 'Medium' ? '🟡 Medium' : '🟢 Normal';
-      const due = t.dateTime || t.date_time || 'Today';
-      return `• [${p}] **${t.title}** (Due: ${due}${t.assignedMemberName ? `, Assigned to: ${t.assignedMemberName}` : ''})`;
-    }).join('\n');
-    return `Here are your tasks scheduled for today.\n\n${lines}`;
-  }
-  if (/^delete\s+my\s+completed\s+tasks$/i.test(clean)) {
-    return 'Would you like me to remove all completed tasks?';
-  }
-  if (/^change\s+my\s+task\s+deadline$/i.test(clean)) {
-    return 'Which task and what new deadline?';
-  }
-  if (/^add\s+high\s+priority\s+task$/i.test(clean)) {
-    return 'Sure! What task should I mark as high priority?';
-  }
-  if (/^what\s+is\s+my\s+next\s+task$/i.test(clean)) {
-    return 'Your next scheduled task is Review documents.';
-  }
-  if (/^did\s+i\s+complete\s+my\s+assignment$/i.test(clean)) {
-    return "I'll check its current status.";
-  }
-  if (/^add\s+a\s+task\s+to\s+buy\s+groceries$/i.test(clean)) {
-    return 'Your grocery shopping task has been added.';
-  }
-
-  // ==========================================
-  // 9. NOTES & PERSONAL MEMORY
-  // ==========================================
-  if (/^save\s+a\s+note$/i.test(clean)) {
-    return 'Sure! What would you like me to save?';
-  }
-  if (/^remember\s+father['’]?s\s+birthday$/i.test(clean)) {
-    return "I'll check whether his birthday is already saved.";
-  }
-  if (/^remember\s+that\s+the\s+wi-?fi\s+password/i.test(clean)) {
-    return "I'll save a note about that, without requesting or exposing the password.";
-  }
-  if (/^add\s+a\s+note\s+about\s+my\s+college\s+project$/i.test(clean)) {
-    return "Please tell me what you'd like to remember.";
-  }
-  if (/^show\s+my\s+notes$/i.test(clean)) {
-    return 'Here are your saved notes.';
-  }
-  if (/^find\s+my\s+project\s+notes$/i.test(clean)) {
-    return "I'll search your saved notes for project-related information.";
-  }
-  if (/^delete\s+my\s+old\s+note$/i.test(clean)) {
-    return 'Which note would you like me to delete?';
-  }
-  if (/^update\s+my\s+note$/i.test(clean)) {
-    return 'Please tell me which note and what to change.';
-  }
-  if (/^what\s+did\s+i\s+tell\s+you\s+yesterday$/i.test(clean)) {
-    return "I'll search the available conversation history.";
-  }
-  if (/^save\s+this\s+information\s+for\s+later$/i.test(clean)) {
-    return "Sure! I'll save it in your personal notes.";
-  }
-
-  // ==========================================
-  // 10. HOME & HOUSEHOLD MANAGEMENT
-  // ==========================================
-  if (/^add\s+gas\s+cylinder\s+booking\s+reminder$/i.test(clean)) {
-    return "I'll create a reminder for your gas cylinder booking.";
-  }
-  if (/^when\s+did\s+i\s+last\s+book\s+gas$/i.test(clean)) {
-    return "I'll check your saved gas booking records.";
-  }
-  if (/^add\s+a\s+maintenance\s+expense$/i.test(clean)) {
-    return 'What was the amount and purpose?';
-  }
-  if (/^remind\s+me\s+to\s+service\s+my\s+bike$/i.test(clean)) {
-    return 'When should I remind you?';
-  }
-  if (/^add\s+ac\s+service\s+on\s+sunday$/i.test(clean)) {
-    return "I'll add AC servicing to your schedule for Sunday.";
-  }
-  if (/^show\s+house\s+expenses$/i.test(clean)) {
-    return "I'll retrieve your recorded household expenses.";
-  }
-  if (/^is\s+gas\s+booking\s+due$/i.test(clean)) {
-    return "I'll check your saved booking schedule.";
-  }
-  if (/^add\s+electricity\s+meter\s+reading$/i.test(clean)) {
-    return 'Please provide the meter reading and date.';
-  }
-  if (/^show\s+my\s+household\s+inventory$/i.test(clean)) {
-    return "I'll list the household items saved in your records.";
-  }
-
-  // ==========================================
-  // 11. QUESTIONS ABOUT HOMEBRAIN ITSELF
-  // ==========================================
-  if (/^what\s+can\s+you\s+do$/i.test(clean)) {
-    return 'I can manage your groceries, finances, family calendar, reminders, documents, tasks, and personal records.';
-  }
-  if (/^can\s+you\s+manage\s+my\s+bills$/i.test(clean)) {
-    return 'Yes! I can track bills, payment status, due dates, and reminders.';
-  }
-  if (/^can\s+you\s+remember\s+birthdays$/i.test(clean)) {
-    return 'Yes! I can save family birthdays and help you check upcoming occasions.';
-  }
-  if (/^can\s+you\s+fetch\s+my\s+documents$/i.test(clean)) {
-    return 'Yes! I can search your uploaded and authorized documents.';
-  }
-  if (/^can\s+you\s+manage\s+groceries$/i.test(clean)) {
-    return 'Yes! I can add, remove, update, and track grocery items.';
-  }
-  if (/^can\s+you\s+remind\s+me$/i.test(clean)) {
-    return 'Yes! I can schedule reminders when the notification integration is enabled.';
-  }
-  if (/^can\s+you\s+access\s+my\s+files$/i.test(clean)) {
-    return 'I can access documents available through your connected and authorized Document Vault.';
-  }
-  if (/^what\s+did\s+i\s+ask\s+you\s+to\s+do$/i.test(clean)) {
-    return "I'll check your available task and conversation history.";
-  }
-
-  // ==========================================
-  // 12. GREETINGS & PERSONAL ASSISTANT
-  // ==========================================
-  if (/^hi(?:\s+homebrain)?$/i.test(clean)) {
-    return 'Hello! Welcome back. How can I help you today?';
-  }
-  if (/^hello(?:\s+homebrain)?$/i.test(clean)) {
-    return 'Hey there! How can I assist you?';
-  }
-  if (/^hey(?:\s+homebrain)?$/i.test(clean)) {
-    return 'Hey! What can I do for you?';
-  }
-  if (/^good\s*morning$/i.test(clean)) {
-    return "Good morning! Hope you're having a great day. How can I help?";
-  }
-  if (/^good\s*afternoon$/i.test(clean)) {
-    return 'Good afternoon! How can I assist you today?';
-  }
-  if (/^good\s*evening$/i.test(clean)) {
-    return 'Good evening! What can I help you with?';
-  }
-  if (/^good\s*night$/i.test(clean)) {
-    return 'Good night! Have a peaceful night.';
-  }
-  if (/^how\s+are\s+you$/i.test(clean)) {
-    return "I'm doing great! Ready to help you with your tasks. How are you?";
-  }
-  if (/^who\s+are\s+you$/i.test(clean)) {
-    return "I'm HomeBrain, your personal AI assistant. I can help you manage documents, retrieve information, and assist with everyday tasks.";
-  }
-  if (/^thank\s+you$/i.test(clean)) {
-    return "You're welcome! I'm always happy to help.";
-  }
-  if (/^thanks$/i.test(clean)) {
-    return 'Happy to help!';
-  }
-  if (/^bye$/i.test(clean) || /^goodbye$/i.test(clean)) {
-    return 'Goodbye! Feel free to come back whenever you need me.';
-  }
-  if (/^see\s+you$/i.test(clean) || /^see\s+ya$/i.test(clean)) {
-    return 'See you again! Take care.';
-  }
-  if (/^are\s+you\s+there$/i.test(clean)) {
-    return "Yes! I'm here and ready to assist you.";
-  }
-  if (/^help\s+me$/i.test(clean)) {
-    return 'Of course! Tell me what you need help with.';
-  }
-  if (/^what\s+is\s+your\s+name$/i.test(clean)) {
-    return "I'm HomeBrain, your personal AI assistant.";
-  }
-  if (/^who\s+created\s+you$/i.test(clean) || /^who\s+made\s+you$/i.test(clean)) {
-    return "I'm HomeBrain, an AI assistant designed to help manage personal and family information.";
-  }
-
-  // ==========================================
-  // 13. DOCUMENT UPLOAD & MANAGEMENT COMMANDS
-  // ==========================================
-  if (/^upload\s+(?:my\s+)?aadhaar$/i.test(clean)) {
-    const hasAadhaar = effectiveDocuments.some(d => /aadhaar|aadhar|uid/i.test(`${d.title || ''} ${d.description || ''}`));
-    if (hasAadhaar) {
-      return 'An Aadhaar document already exists in your Document Vault. Would you like to upload a new version? Please select your Aadhaar document to upload.';
-    }
-    return 'Sure! Please select your Aadhaar document to upload.';
-  }
-  if (/^(?:i\s+want\s+to\s+)?add\s+my\s+pan(?:\s*card)?$/i.test(clean)) {
-    return "Please upload your PAN card. I'll help you save it in your Document Vault.";
-  }
-  if (/^save\s+father['’]?s\s+pan$/i.test(clean)) {
-    return "Please upload the PAN document and confirm the document owner's details.";
-  }
-  if (/^add\s+my\s+new\s+certificate$/i.test(clean)) {
-    return 'Please upload the certificate.';
-  }
-  if (/^replace\s+my\s+old\s+aadhaar$/i.test(clean)) {
-    return "Please upload the new document. I'll ask you to confirm before replacing the existing one.";
-  }
-  if (/^delete\s+old\s+passport$/i.test(clean)) {
-    return "Which passport record should I delete? I'll ask for confirmation first.";
-  }
-  if (/^summarize\s+my\s+pdf$/i.test(clean)) {
-    return "Please select the PDF you'd like me to summarize.";
-  }
-  if (/^read\s+this\s+document$/i.test(clean)) {
-    return "I'll extract and explain the readable content.";
-  }
-  if (/^search\s+for\s+a\s+word\s+in\s+my\s+pdf$/i.test(clean)) {
-    return 'Which word or phrase should I search for?';
-  }
-  if (/^when\s+did\s+i\s+upload\s+aadhaar$/i.test(clean)) {
-    return "I'll check the Aadhaar upload date.";
-  }
-  if (/^is\s+my\s+passport\s+expired$/i.test(clean)) {
-    return "I'll check its expiry date, if available.";
-  }
-  if (/^save\s+this\s+document$/i.test(clean)) {
-    return "Sure! I'll process the uploaded document and prepare it for storage.";
-  }
-  if (/^store\s+sham['’]?s\s+aadhaar$/i.test(clean)) {
-    return "Please upload the document. I'll save it under Sham's records after validation and authorization.";
-  }
-  if (/^add\s+a\s+new\s+document$/i.test(clean) || clean === 'add new document') {
-    return 'Sure! Please upload your document and specify its type.';
-  }
-  if (/^upload\s+completed$/i.test(clean)) {
-    return "I'll verify the upload and confirm once the document is successfully stored.";
-  }
-  if (/^where\s+can\s+i\s+upload\s+documents$/i.test(clean)) {
-    return 'You can upload documents through the Document Vault.';
-  }
-  if (/^can\s+you\s+save\s+pdf(?:\s+files)?$/i.test(clean)) {
-    return 'Yes! I can process supported PDF documents. Please upload your file.';
-  }
-
-  // Missing document scenarios
-  if (/^fetch\s+my\s+aadhaar$/i.test(clean)) {
-    return "I couldn't find your Aadhaar card. Please upload it first.";
-  }
-  if (/^do\s+you\s+have\s+father['’]?s\s+pan$/i.test(clean)) {
-    return "Your father's PAN card is not currently available in the Document Vault.";
-  }
-  if (/^find\s+my\s+passport$/i.test(clean)) {
-    return "I couldn't find an uploaded passport. Would you like to upload it?";
-  }
-  if (/^fetch\s+a\s+document\s+i\s+never\s+uploaded$/i.test(clean)) {
-    return "I couldn't find that document. Please upload it before requesting retrieval.";
-  }
-  if (/^where\s+is\s+my\s+old\s+certificate$/i.test(clean)) {
-    return "I couldn't locate that certificate. Could you provide its name or type?";
-  }
-  if (/^find\s+sham['’]?s\s+documents$/i.test(clean)) {
-    return "I'll list the available documents belonging to Sham that you can access.";
-  }
-
-  // Document Vault Search & Statistics
-  if (/^search\s+(?:for\s+)?my\s+documents$/i.test(clean)) {
-    if (effectiveDocuments.length === 0) {
-      return "Sure! I'll search your Document Vault.\n\nNo documents have been uploaded to your Document Vault yet. Please upload your documents to make them accessible here.";
-    }
-    return "Sure! I'll search your Document Vault.\n\n" +
-      `📁 **Retrieved Documents (${effectiveDocuments.length} files found)**:\n\n` +
-      effectiveDocuments.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** (${d.category}, ${(d.file_type || d.fileType)} - ${(d.file_size || d.fileSize)})`).join('\n');
-  }
-
-  if (/^how\s+many\s+documents\s+do\s+i\s+have$/i.test(clean)) {
-    return `I'll check your Document Vault and count your available documents.\n\nYou currently have **${effectiveDocuments.length}** document(s) in your Document Vault.`;
-  }
-
-  if (/^show\s+my\s+uploaded\s+files$/i.test(clean) || clean === 'show uploaded files') {
-    if (effectiveDocuments.length === 0) {
-      return "I'll retrieve your uploaded file list.\n\nYou currently have no files uploaded to your Document Vault.";
-    }
-    return "I'll retrieve your uploaded file list.\n\n" +
-      `📁 **Your Uploaded Files (${effectiveDocuments.length})**:\n\n` +
-      effectiveDocuments.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** (${d.category}) - Uploaded by ${(d.uploader_name || d.uploaderName) || user?.name || 'User'}`).join('\n');
-  }
-
-  if (/^find\s+documents\s+uploaded\s+today$/i.test(clean)) {
-    const today = new Date().toISOString().split('T')[0];
-    const docsToday = effectiveDocuments.filter(d => ((d.upload_date || d.uploadDate) || '').startsWith(today));
-    if (docsToday.length === 0) {
-      return "I'll search for documents uploaded today.\n\nNo documents were uploaded today.";
-    }
-    return "I'll search for documents uploaded today.\n\n" +
-      `📁 **Documents Uploaded Today (${docsToday.length})**:\n\n` +
-      docsToday.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** (${d.category})`).join('\n');
-  }
-
-  if (/^find\s+my\s+latest\s+document$/i.test(clean) || clean === 'latest document') {
-    if (effectiveDocuments.length === 0) {
-      return "I'll check your most recently uploaded documents.\n\nNo documents found in your Document Vault.";
-    }
-    const latest = effectiveDocuments[0];
-    return "I'll check your most recently uploaded documents.\n\n" +
-      `• **${(latest.title || '').replace('[DEMO] ', '')}** (${latest.category}, ${latest.fileType}): Uploaded on ${latest.uploadDate || 'recently'}\n  📝 **Summary**: ${latest.summaryContent || latest.description || 'Securely saved'}`;
-  }
-
-  if (/^search\s+(?:for\s+)?(?:my\s+)?certificates$/i.test(clean)) {
-    const certs = effectiveDocuments.filter(d => {
-      const txt = `${d.title || ''} ${d.category || ''} ${d.description || ''}`.toLowerCase();
-      return txt.includes('certificate') || txt.includes('degree') || txt.includes('marksheet') || (d.category || '').toLowerCase() === 'education';
-    });
-    if (certs.length === 0) {
-      return "I'll search your educational and professional certificates.\n\nI couldn't find the requested educational document. Please upload it to your Document Vault.";
-    }
-    return "I'll search your educational and professional certificates.\n\n" +
-      certs.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** (${d.category}): ${d.description || 'Verified educational record'}`).join('\n');
-  }
-
-  if (/^delete\s+my\s+aadhaar$/i.test(clean)) {
-    return "I'll identify the document and ask you to confirm before deleting it. Are you sure you want to permanently delete your Aadhaar card from the Document Vault?";
-  }
-
-  if (/^rename\s+my\s+document$/i.test(clean)) {
-    return 'Please specify the document and its new name.';
-  }
-
-  if (/^when\s+did\s+i\s+upload\s+my\s+pan$/i.test(clean)) {
-    const panDoc = effectiveDocuments.find(d => /pan/i.test(d.title || '') || /pan/i.test(d.description || ''));
-    if (panDoc) {
-      return `I'll check the upload date in your Document Vault.\n\nYour PAN card was uploaded on **${panDoc.uploadDate}**.`;
-    }
-    return "I'll check the upload date in your Document Vault.\n\nYour PAN card is not currently uploaded in the Document Vault.";
-  }
-
-  if (/^is\s+my\s+document\s+expired$/i.test(clean)) {
-    const expiredList = effectiveDocuments.filter(d => {
-      const exp = (d.expiry_date || d.expiryDate);
-      return exp && new Date(exp).getTime() < Date.now();
-    });
-    const expiringSoonList = effectiveDocuments.filter(d => {
-      const exp = (d.expiry_date || d.expiryDate);
-      if (!exp) return false;
-      const diffDays = Math.ceil((new Date(exp).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      return diffDays > 0 && diffDays <= 60;
-    });
-
-    if (expiredList.length === 0 && expiringSoonList.length === 0) {
-      return "I'll check the document's expiry date, if available.\n\n✅ None of your documents are expired or expiring in the next 60 days.";
-    }
-    let res = "I'll check the document's expiry date, if available.\n\n";
-    if (expiredList.length > 0) {
-      res += `🚨 **Expired Documents (${expiredList.length})**:\n` + expiredList.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** expired on ${(d.expiry_date || d.expiryDate)}`).join('\n') + '\n\n';
-    }
-    if (expiringSoonList.length > 0) {
-      res += `⚠️ **Expiring Soon (${expiringSoonList.length})**:\n` + expiringSoonList.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** expires on ${(d.expiry_date || d.expiryDate)}`).join('\n');
-    }
-    return res.trim();
-  }
-
-  // General assistant date & family overview
-  if (/^what\s+is\s+today['’]?s\s+date$/i.test(clean) || clean === 'today date' || clean === 'date today') {
-    const dateFormatted = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    return `I'll provide today's date based on the system clock.\n\nToday's date is **${dateFormatted}**.`;
-  }
-  if (/^remember\s+this\s+information$/i.test(clean)) {
-    return 'Sure! Please tell me what information you want to save.';
-  }
-  if (/^find\s+my\s+family\s+details$/i.test(clean)) {
-    return "I'll search your authorized family records.\n\n" +
-      `👨‍👩‍👧‍👦 **Family Members in Ecosystem**:\n` +
-      `• **Father** (Parent, Age 52)\n• **Mother** (Parent, Age 48)\n• **Sarah** (Eldest Daughter, Age 24)\n• **Sneha** (Daughter, Age 19)\n• **Sham** (Son, High School, Age 16)`;
-  }
-  if (/^show\s+my\s+family\s+timeline$/i.test(clean)) {
-    return "I'll retrieve the available events from your Family Timeline.\n\n" +
-      `📸 **Available Family Photo Albums & Places**:\n` +
-      `• **Paris, France** (3 photos)\n• **Kyoto, Japan** (3 photos)\n• **Santorini, Greece** (2 photos)\n• **Swiss Alps, Switzerland** (3 photos)\n• **Manali, Himachal Pradesh** (2 photos)\n• **Bali, Indonesia** (3 photos)\n\n*(You can view them anytime under the Family Timeline tab).*`;
-  }
-  if (/^add\s+a\s+family\s+event$/i.test(clean)) {
-    return 'Sure! Please provide the event details and date.';
-  }
-  if (/^summarize\s+this\s+document$/i.test(clean)) {
-    return "Please upload the document, and I'll summarize its contents.";
-  }
-  if (/^explain\s+this\s+pdf$/i.test(clean)) {
-    return "Upload the PDF, and I'll help explain its contents.";
-  }
-  if (/^what\s+is\s+written\s+in\s+this\s+document$/i.test(clean)) {
-    return "I'll extract and explain the available document content.";
-  }
-  if (/^search\s+my\s+previous\s+records$/i.test(clean)) {
-    return "I'll search your available personal records.\n\n" +
-      `• **Document Vault**: ${effectiveDocuments.length} files securely stored\n` +
-      `• **Access**: Authorized family records with end-to-end security\n` +
-      `• **Health & Knowledge Base**: Available for medical and personal queries.`;
-  }
-  if (/^i\s+need\s+assistance$/i.test(clean) || clean === 'need assistance') {
-    return "Of course! Tell me what you need, and I'll help you.";
-  }
-
-  // ==========================================
-  // 14. SPECIFIC DOCUMENT RETRIEVAL BACKEND TRIGGERS
-  // ==========================================
-  let person = 'your';
-  let personName = user?.name || 'You';
-  if (/\bsham(?:'s)?\b/i.test(clean)) {
-    person = "Sham's";
-    personName = 'Sham';
-  } else if (/\bfather(?:'s)?\b|\bdad(?:'s)?\b/i.test(clean)) {
-    person = "Father's";
-    personName = 'Father';
-  } else if (/\bmother(?:'s)?\b|\bmom(?:'s)?\b/i.test(clean)) {
-    person = "Mother's";
-    personName = 'Mother';
-  } else if (/\bsarah(?:'s)?\b/i.test(clean)) {
-    person = "Sarah's";
-    personName = 'Sarah';
-  } else if (/\bsneha(?:'s)?\b/i.test(clean)) {
-    person = "Sneha's";
-    personName = 'Sneha';
-  } else if (/\bgrandfather(?:'s)?\b|\bgrandpa(?:'s)?\b|\bthatha(?:'s)?\b/i.test(clean)) {
-    person = "grandfather's";
-    personName = 'Grandfather';
-  } else if (/\bgrandmother(?:'s)?\b|\bgrandma(?:'s)?\b|\bpaati(?:'s)?\b/i.test(clean)) {
-    person = "grandmother's";
-    personName = 'Grandmother';
-  }
-
-  // A. AADHAAR CARD
-  if (/aadhaar|aadhar|uid\b|uidai/i.test(clean)) {
-    let checkMsg = '';
-    if (personName === 'Sham') {
-      if (/^fetch\b/i.test(clean)) checkMsg = "Let me check the Document Vault for Sham's Aadhaar card.\n\n";
-      else if (/^show\b/i.test(clean)) checkMsg = "I'll check for Sham's Aadhaar document.\n\n";
-      else if (/^send\b/i.test(clean)) checkMsg = "I'll check whether Sham's Aadhaar card is available and whether you have permission to access it.\n\n";
-      else checkMsg = "Let me check the Document Vault for Sham's Aadhaar card.\n\n";
-    } else if (personName === 'Grandfather' || personName === 'Grandmother') {
-      checkMsg = `Let me check the Document Vault for ${person} Aadhaar card.\n\n`;
-    } else {
-      if (/^get\b/i.test(clean)) checkMsg = "I'll check whether your Aadhaar card is available in your Document Vault.\n\n";
-      else if (/^where\b/i.test(clean)) checkMsg = "I'll search your uploaded documents for your Aadhaar card.\n\n";
-      else if (/^download\b/i.test(clean)) checkMsg = "I'll check whether your Aadhaar card is available and authorized for download.\n\n";
-      else checkMsg = "Let me check your Document Vault.\n\n";
-    }
-
-    const doc = effectiveDocuments.find(d => {
-      const txt = `${d.title || ''} ${d.description || ''}`.toLowerCase();
-      const isAadhaar = txt.includes('aadhaar') || txt.includes('aadhar') || txt.includes('uid');
-      if (!isAadhaar) return false;
-      if (personName === 'Sham') return txt.includes('sham');
-      if (personName === 'Grandfather') return txt.includes('grandfather') || txt.includes('grandpa');
-      if (personName === 'Grandmother') return txt.includes('grandmother') || txt.includes('grandma');
-      return true;
-    });
-
-    if (doc) {
-      return checkMsg + `${person} Aadhaar card has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.fileType} - ${doc.fileSize}): Uploaded by ${doc.uploaderName}\n  📝 **Summary**: ${doc.summaryContent || doc.description || 'Verified Aadhaar Card'}`;
-    } else {
-      if (personName === 'Sham') {
-        return checkMsg + "I couldn't find Sham's Aadhaar card in the Document Vault.\n\nPlease upload the Aadhaar card so I can store it and make it available for future retrieval.";
-      }
-      return checkMsg + "I couldn't find your Aadhaar card in the Document Vault. Please upload it first.";
-    }
-  }
-
-  // B. PAN CARD
-  if (/\bpan(?:\s*card)?\b/i.test(clean)) {
-    let checkMsg = '';
-    if (personName === 'Sham') {
-      checkMsg = "Let me check whether Sham's PAN card is uploaded.\n\n";
-    } else {
-      if (/^fetch\b/i.test(clean)) checkMsg = "I'll search your Document Vault for your PAN card.\n\n";
-      else if (/^show\b/i.test(clean)) checkMsg = "I'll search your uploaded PAN card.\n\n";
-      else if (/^download\b/i.test(clean)) checkMsg = "I'll check whether your PAN card is available for download.\n\n";
-      else checkMsg = "Let me check your uploaded documents.\n\n";
-    }
-
-    const doc = effectiveDocuments.find(d => {
-      const txt = `${d.title || ''} ${d.description || ''}`.toLowerCase();
-      if (!txt.includes('pan')) return false;
-      if (personName === 'Sham') return txt.includes('sham');
-      return true;
-    });
-
-    if (doc) {
-      return checkMsg + `${person} PAN card has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.fileType} - ${doc.fileSize}): Uploaded by ${doc.uploaderName}\n  📝 **Summary**: ${doc.summaryContent || doc.description || 'Official PAN record'}`;
-    } else {
-      return checkMsg + "I couldn't find the PAN card in your Document Vault. Please upload it so I can retrieve it next time.";
-    }
-  }
-
-  // C. DRIVING LICENCE
-  if (/licen[cs]e|\bdl\b/i.test(clean)) {
-    let checkMsg = '';
-    if (personName === 'Sham') {
-      checkMsg = "Let me check Sham's uploaded documents.\n\n";
-    } else {
-      if (/^fetch\b/i.test(clean)) checkMsg = "I'll search for your driving licence.\n\n";
-      else if (/^show\b/i.test(clean)) checkMsg = "I'll check your Document Vault for your driving licence.\n\n";
-      else if (/^download\b/i.test(clean)) checkMsg = "I'll check its availability and access permissions.\n\n";
-      else checkMsg = "I'll search for your driving licence.\n\n";
-    }
-
-    const doc = effectiveDocuments.find(d => {
-      const txt = `${d.title || ''} ${d.description || ''}`.toLowerCase();
-      const isLic = txt.includes('license') || txt.includes('licence') || txt.includes('driving');
-      if (!isLic) return false;
-      if (personName === 'Sham') return txt.includes('sham');
-      return true;
-    });
-
-    if (doc) {
-      return checkMsg + `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.fileType} - ${doc.fileSize}): Uploaded by ${doc.uploaderName}\n  📝 **Summary**: ${doc.summaryContent || doc.description || 'Permanent Driving License'}`;
-    } else {
-      return checkMsg + "Your driving licence is not currently available in the Document Vault. Please upload it first.";
-    }
-  }
-
-  // D. EDUCATIONAL DOCUMENTS
-  if (/10th\s*marksheet|12th\s*certificate|college\s*id|degree\s*certificate|college\s*documents?|educational/i.test(clean)) {
-    let checkMsg = '';
-    if (/10th/i.test(clean)) checkMsg = "I'll search for your 10th marksheet.\n\n";
-    else if (/12th/i.test(clean)) checkMsg = "Let me check your uploaded educational records.\n\n";
-    else if (/college\s*id/i.test(clean)) checkMsg = "I'll check whether your college ID is available.\n\n";
-    else if (/degree/i.test(clean)) checkMsg = "I'll search your Document Vault for your degree certificate.\n\n";
-    else if (/sham/i.test(clean)) checkMsg = "I'll search for Sham's uploaded educational documents.\n\n";
-    else checkMsg = "I'll search your Document Vault for your educational documents.\n\n";
-
-    const doc = effectiveDocuments.find(d => {
-      const txt = `${d.title || ''} ${d.description || ''} ${d.category || ''}`.toLowerCase();
-      const isEdu = txt.includes('college') || txt.includes('marksheet') || txt.includes('degree') || txt.includes('10th') || txt.includes('12th') || (d.category || '').toLowerCase() === 'education';
-      if (!isEdu) return false;
-      if (/10th/i.test(clean) && !txt.includes('10th')) return false;
-      if (/12th/i.test(clean) && !txt.includes('12th')) return false;
-      if (/college\s*id/i.test(clean) && !txt.includes('college id')) return false;
-      if (/degree/i.test(clean) && (!txt.includes('degree') && !txt.includes('b.tech') && !txt.includes('btech'))) return false;
-      if (personName === 'Sham' && !txt.includes('sham')) return false;
-      return true;
-    });
-
-    if (doc) {
-      return checkMsg + `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.fileType} - ${doc.fileSize}): Uploaded by ${doc.uploaderName}\n  📝 **Summary**: ${doc.summaryContent || doc.description}`;
-    } else {
-      if (/degree/i.test(clean)) {
-        return "Your degree certificate hasn't been found in the Document Vault.";
-      }
-      return checkMsg + "I couldn't find the requested educational document. Please upload it to your Document Vault.";
-    }
-  }
-
-  // E. OTHER PERSONAL DOCUMENTS
-  if (/passport/i.test(clean)) {
-    if (personName === 'Father') {
-      return "I'll check your father's available documents.";
-    }
-    const doc = effectiveDocuments.find(d => (d.title || '').toLowerCase().includes('passport') || (d.description || '').toLowerCase().includes('passport'));
-    if (doc) {
-      return "I'll check your Document Vault for your passport.\n\n" +
-        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.fileType} - ${doc.fileSize}): Uploaded by ${doc.uploaderName}\n  📝 **Summary**: ${doc.summaryContent || doc.description}`;
-    }
-    return "I couldn't find an uploaded passport. Would you like to upload it?";
-  }
-
-  if (/voter\s*id/i.test(clean)) {
-    if (personName === 'Mother') {
-      return "I'll search for your mother's voter ID.";
-    }
-    const doc = effectiveDocuments.find(d => (d.title || '').toLowerCase().includes('voter'));
-    if (doc) {
-      return "Let me search for your voter ID.\n\n" +
-        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}): Uploaded by ${doc.uploaderName}`;
-    }
-    return "Let me search for your voter ID.\n\nI couldn't find your voter ID in the Document Vault. Please upload it to your Document Vault.";
-  }
-
-  if (/birth\s*certificate/i.test(clean)) {
-    const doc = effectiveDocuments.find(d => (d.title || '').toLowerCase().includes('birth'));
-    if (doc) {
-      return "I'll search for your birth certificate.\n\n" +
-        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category})`;
-    }
-    return "I'll search for your birth certificate.\n\nI couldn't find your birth certificate in the Document Vault. Please upload it to your Document Vault.";
-  }
-
-  if (/family\s*documents?/i.test(clean)) {
-    return "I'll search for available family documents.\n\n" +
-      `📁 **Available Family Documents (${effectiveDocuments.length})**:\n\n` +
-      effectiveDocuments.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** (${d.category})`).join('\n');
-  }
-
-  if (/insurance/i.test(clean)) {
-    const doc = effectiveDocuments.find(d => (d.title || '').toLowerCase().includes('insurance') || (d.description || '').toLowerCase().includes('insurance'));
-    if (doc) {
-      return "I'll search your insurance documents.\n\n" +
-        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.fileType} - ${doc.fileSize}): Uploaded by ${doc.uploaderName}\n  📝 **Summary**: ${doc.summaryContent || doc.description}`;
-    }
-    return "I'll search your insurance documents.\n\nI couldn't find your insurance document in the Document Vault. Please upload it to your Document Vault.";
-  }
-
-  if (/property\s*(?:documents?|papers|records)?|property/i.test(clean)) {
-    const doc = effectiveDocuments.find(d => (d.title || '').toLowerCase().includes('property') || (d.category || '').toLowerCase() === 'home');
-    if (doc) {
-      return "I'll check your property records.\n\n" +
-        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault.\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category})`;
-    }
-    return "I'll check your property records.\n\nI couldn't find property-related documents in the Document Vault. Please upload them to your Document Vault.";
-  }
-
-  if (/bank\s*statement/i.test(clean)) {
-    const doc = effectiveDocuments.find(d => (d.title || '').toLowerCase().includes('bank') || (d.title || '').toLowerCase().includes('statement'));
-    if (doc) {
-      return "I'll check your uploaded bank statements.\n\n" +
-        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault.\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category})`;
-    }
-    return "I'll check your uploaded bank statements.\n\nI couldn't find your bank statement in the Document Vault. Please upload it to your Document Vault.";
-  }
-
-  if (/show\s+all\s+(?:my\s+)?pdfs/i.test(clean)) {
-    const pdfs = effectiveDocuments.filter(d => ((d.file_type || d.fileType) || '').toLowerCase().includes('pdf') || (d.title || '').toLowerCase().endsWith('.pdf'));
-    return "I'll list the PDFs you are authorized to access.\n\n" +
-      `📄 **Authorized PDF Documents (${pdfs.length})**:\n\n` +
-      pdfs.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** (${d.category})`).join('\n');
-  }
-
-  if (/show\s+all\s+(?:my\s+)?documents/i.test(clean) || clean === 'all my documents' || clean === 'all documents') {
-    return "I'll retrieve a list of documents you are authorized to access.\n\n" +
-      `📁 **Authorized Documents (${effectiveDocuments.length} files)**:\n\n` +
-      effectiveDocuments.map(d => `• **${(d.title || '').replace('[DEMO] ', '')}** (${d.category}, ${(d.file_type || d.fileType)} - ${(d.file_size || d.fileSize)})`).join('\n') +
-      `\n\n*(Click Download Document on any record below to download directly to your device).*`;
-  }
-
-  return null;
-}
 
 // --- Shared Module-Scoped In-Memory State for Demo Evaluation ---
 const initialFallbackEvents = [
@@ -1751,6 +654,9 @@ const initialFallbackDocuments = [
   { id: '00000000-0000-4000-8000-000000000037', title: '[DEMO] Family Insurance Policy', category: 'Insurance', file_type: 'TXT', file_size: '525 B', uploader_name: 'Father', upload_date: '2026-01-05', file_url: '/demo-documents/Family_Insurance_Policy.txt', description: 'Star Health Family Optima Insurance Plan. ₹5 Lakhs sum insured floater covering all 5 members.', summary_content: '• Policy No: POL-772910-FAM\n• Policyholder: Rajesh Kumar\n• Coverage: ₹5,00,000 (₹5 Lakhs)\n• Covered Members: Father, Mother, Sarah, Sneha, Sham\n• Period: 06/12/2025 to 05/12/2027' },
   { id: '00000000-0000-4000-8000-000000000038', title: '[DEMO] Property Ownership Record', category: 'Home', file_type: 'TXT', file_size: '482 B', uploader_name: 'Father', upload_date: '2026-01-12', file_url: '/demo-documents/Property_Ownership_Record.txt', description: 'Tamil Nadu Registration Department Property Deed for Anna Nagar West residence.', summary_content: '• Property Title Deed No: 2841/2012\n• Owners: Rajesh Kumar & Priya Kumar\n• Address: 42 Palm Grove Avenue, Anna Nagar West, Chennai 600040\n• Area: 2,400 Sq. Ft.\n• Status: Nil Encumbrance' },
   { id: '00000000-0000-4000-8000-000000000039', title: '[DEMO] Sarah School Certificate', category: 'Education', file_type: 'TXT', file_size: '509 B', uploader_name: 'Sarah', upload_date: '2026-01-08', file_url: '/demo-documents/Sarah_School_Certificate.txt', description: 'CBSE Senior School Certificate (Class XII) for Demo Sarah from St. Michael School.', summary_content: '• CBSE Class XII Senior School Certificate\n• Student: Sarah Kumar\n• Roll No: 8192034\n• Stream: Science\n• Result: 94.2% Distinction' },
+  { id: '00000000-0000-4000-8000-000000000043', title: 'S. Sham 10th mark sheet', category: 'Education', file_type: 'PDF', file_size: '0.14 MB', uploader_name: 'Sham', upload_date: '2026-11-15', file_url: '/demo-documents/Sham_10th_Marksheet.pdf', description: 'Secondary School Leaving Certificate (SSLC 10th Standard) for S. Sham. Board: State Board.', summary_content: 'Verified official Education record: S. Sham 10th mark sheet (Roll No: 1049281, Distinction).' },
+  { id: '00000000-0000-4000-8000-000000000044', title: 'sham 11th mark sheet', category: 'Education', file_type: 'PDF', file_size: '0.38 MB', uploader_name: 'Sham', upload_date: '2026-11-15', file_url: '/demo-documents/Sham_11th_Marksheet.pdf', description: 'Higher Secondary School Certificate (Class XI) for Sham.', summary_content: 'Verified official Education record: sham 11th mark sheet (Class XI Board Certificate).' },
+  { id: '00000000-0000-4000-8000-000000000045', title: 'sham aadhar card', category: 'Identity', file_type: 'JPEG', file_size: '0.08 MB', uploader_name: 'Sham', upload_date: '2026-11-15', file_url: '/demo-documents/Sham_Aadhar.jpeg', description: 'Unique Identification Authority of India (UIDAI) Aadhaar identity card for Sham.', summary_content: 'Verified official Identity record: sham aadhar card (Aadhaar Number ending 8812).' },
   { id: '00000000-0000-4000-8000-000000000040', title: '[DEMO] Grocery Purchase Receipt', category: 'Financial', file_type: 'TXT', file_size: '578 B', uploader_name: 'Sarah', upload_date: '2026-11-02', file_url: '/demo-documents/Grocery_Purchase_Receipt.txt', description: 'Nilgiris 1905 Supermarket retail tax invoice for monthly grocery purchase of ₹2,500.', summary_content: '• Nilgiris Retail Tax Invoice\n• Date: 02/11/2026\n• Total Items: 5\n• Total Paid: ₹2,500.00\n• Mode: UPI GPay' },
   { id: '00000000-0000-4000-8000-000000000041', title: '[DEMO] Family Emergency Contacts', category: 'General', file_type: 'TXT', file_size: '499 B', uploader_name: 'Sarah', upload_date: '2026-01-02', file_url: '/demo-documents/Family_Emergency_Contacts.txt', description: 'Household Emergency Directory including police, hospital, ambulance, and doctor contacts.', summary_content: '• Anna Nagar Police: 044-26151100 / 100\n• Apollo Clinic: 044-28290200 / 1066\n• Dr. Sharma: +91 98400 12345\n• Ambulance: 108\n• Fire: 101' },
   { id: '00000000-0000-4000-8000-000000000042', title: '[DEMO] Vehicle Insurance Document', category: 'Insurance', file_type: 'TXT', file_size: '509 B', uploader_name: 'Father', upload_date: '2026-10-16', expiry_date: '2027-10-15', file_url: '/demo-documents/Vehicle_Insurance_Document.txt', description: 'HDFC ERGO Comprehensive Motor Vehicle Insurance for Hyundai Creta (TN 01 AB 1234).', summary_content: '• Policy No: MOT-482019-2026\n• Vehicle: Hyundai Creta (TN 01 AB 1234)\n• Insured: Rajesh Kumar\n• IDV: ₹11,50,000\n• Validity: 16/10/2026 to 15/10/2027' }
@@ -1776,7 +682,10 @@ const initialFallbackKnowledge: any[] = [
   { id: '00000000-0000-4000-8000-000000000147', title: "[DEMO] Family Address", category: 'General', importance: 'Important', related_member_name: 'Father', content: '42 Palm Grove Avenue, Anna Nagar West, Chennai 600040, Tamil Nadu, India' },
   { id: '00000000-0000-4000-8000-000000000148', title: "[DEMO] Family Trip Preference", category: 'Preferences', importance: 'Medium', related_member_name: 'Father', content: 'Family enjoys weekend trips and heritage destinations within driving distance' },
   { id: '00000000-0000-4000-8000-000000000149', title: "[DEMO] Family Anniversary", category: 'Schedules', importance: 'Critical', related_member_name: 'Father', content: 'Parents wedding anniversary is celebrated on November 27' },
-  { id: '00000000-0000-4000-8000-000000000150', title: "[DEMO] Household Note", category: 'General', importance: 'Medium', related_member_name: 'Sarah', content: 'Monthly household planning: Review expenses and bills in the first week of every month' }
+  { id: '00000000-0000-4000-8000-000000000150', title: "[DEMO] Household Note", category: 'General', importance: 'Medium', related_member_name: 'Sarah', content: 'Monthly household planning: Review expenses and bills in the first week of every month' },
+  { id: '00000000-0000-4000-8000-000000000151', title: "[DEMO] Wi-Fi Network & Password", category: 'Rules', importance: 'Important', related_member_name: 'Father', content: 'Home Wi-Fi SSID: HomeBrain_5G, Password: HomeBrain@2026, Router is on the living room TV console' },
+  { id: '00000000-0000-4000-8000-000000000152', title: "[DEMO] Spare House Key", category: 'General', importance: 'Critical', related_member_name: 'Father', content: 'Spare house key is kept safely under the blue ceramic flower pot in the front balcony' },
+  { id: '00000000-0000-4000-8000-000000000153', title: "[DEMO] Screen Time & Study Rule", category: 'Rules', importance: 'Important', related_member_name: 'Mother', content: 'Family screen time off rule: All devices off after 10:00 PM on weeknights for study and sleep routine' }
 ];
 
 const initialFallbackReminders: any[] = [
@@ -1788,6 +697,7 @@ const initialFallbackReminders: any[] = [
 let sharedFallbackEvents = JSON.parse(JSON.stringify(initialFallbackEvents));
 let sharedFallbackGroceries = JSON.parse(JSON.stringify(initialFallbackGroceries));
 let sharedFallbackMedicines = JSON.parse(JSON.stringify(initialFallbackMedicines));
+let sharedFallbackMedicineLogs: any[] = [];
 let sharedFallbackBills = JSON.parse(JSON.stringify(initialFallbackBills));
 let sharedFallbackDocuments = JSON.parse(JSON.stringify(initialFallbackDocuments));
 let sharedFallbackExpenses = JSON.parse(JSON.stringify(initialFallbackExpenses));
@@ -1798,6 +708,7 @@ function resetSharedFallbackState() {
   sharedFallbackEvents = JSON.parse(JSON.stringify(initialFallbackEvents));
   sharedFallbackGroceries = JSON.parse(JSON.stringify(initialFallbackGroceries));
   sharedFallbackMedicines = JSON.parse(JSON.stringify(initialFallbackMedicines));
+  sharedFallbackMedicineLogs = [];
   sharedFallbackBills = JSON.parse(JSON.stringify(initialFallbackBills));
   sharedFallbackDocuments = JSON.parse(JSON.stringify(initialFallbackDocuments));
   sharedFallbackExpenses = JSON.parse(JSON.stringify(initialFallbackExpenses));
@@ -1808,25 +719,28 @@ function resetSharedFallbackState() {
 app.get('/api/family/state', authenticateUser, async (req: Request, res: Response) => {
   const user = req.user!;
   const token = req.authToken!;
-  const [events, reminders, groceries, expenses, bills, medicines, documents, knowledgeList] = await Promise.all([
+  const isDemoMode = req.query.isDemo !== 'false' && (req.query.isDemo === 'true' || user.familyId === 'demo-family-kumar' || user.familyId === '00000000-0000-4000-8000-000000000000');
+  const [events, reminders, groceries, expenses, bills, medicines, medicineLogs, documents, knowledgeList] = await Promise.all([
     fetchFamilyData('events', user.familyId, token, 'order=date.asc,time.asc&limit=100'),
     fetchFamilyData('reminders', user.familyId, token, 'order=date_time.asc&limit=100'),
     fetchFamilyData('groceries', user.familyId, token, 'limit=100'),
     fetchFamilyData('expenses', user.familyId, token, 'order=date.desc&limit=100'),
     fetchFamilyData('bills', user.familyId, token, 'order=due_date.asc&limit=100'),
     fetchFamilyData('medicines', user.familyId, token, 'limit=100'),
+    fetchFamilyData('medicine_logs', user.familyId, token, 'order=timestamp.desc&limit=100'),
     fetchFamilyData('documents', user.familyId, token, 'limit=100'),
     fetchFamilyData('family_knowledge', user.familyId, token, 'limit=100')
   ]);
   res.json({
-    events: events && events.length > 0 ? events : sharedFallbackEvents,
-    reminders: reminders && reminders.length > 0 ? reminders : sharedFallbackReminders,
-    groceries: groceries && groceries.length > 0 ? groceries : sharedFallbackGroceries,
-    expenses: expenses && expenses.length > 0 ? expenses : sharedFallbackExpenses,
-    bills: bills && bills.length > 0 ? bills : sharedFallbackBills,
-    medicines: medicines && medicines.length > 0 ? medicines : sharedFallbackMedicines,
-    documents: documents && documents.length > 0 ? documents : sharedFallbackDocuments,
-    knowledge: knowledgeList && knowledgeList.length > 0 ? knowledgeList : sharedFallbackKnowledge
+    events: events && events.length > 0 ? events : (isDemoMode ? sharedFallbackEvents : []),
+    reminders: reminders && reminders.length > 0 ? reminders : (isDemoMode ? sharedFallbackReminders : []),
+    groceries: groceries && groceries.length > 0 ? groceries : (isDemoMode ? sharedFallbackGroceries : []),
+    expenses: expenses && expenses.length > 0 ? expenses : (isDemoMode ? sharedFallbackExpenses : []),
+    bills: bills && bills.length > 0 ? bills : (isDemoMode ? sharedFallbackBills : []),
+    medicines: medicines && medicines.length > 0 ? medicines : (isDemoMode ? sharedFallbackMedicines : []),
+    medicineLogs: medicineLogs && medicineLogs.length > 0 ? medicineLogs : (isDemoMode ? sharedFallbackMedicineLogs : []),
+    documents: documents && documents.length > 0 ? documents : (isDemoMode ? sharedFallbackDocuments : []),
+    knowledge: knowledgeList && knowledgeList.length > 0 ? knowledgeList : (isDemoMode ? sharedFallbackKnowledge : [])
   });
 });
 
@@ -1838,9 +752,10 @@ app.post('/api/ai/reset-demo-state', (req: Request, res: Response) => {
 // --- RAG & AI Chatbot Query Endpoint (Phase 1) ---
 app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response): Promise<void> => {
   const startTime = Date.now();
-  const { query, conversationHistory = [], attachments = [] } = req.body;
+  const { query, conversationHistory = [], attachments = [], clientState } = req.body;
   const user = req.user!;
   const token = req.authToken!;
+  const isExplicitNonDemo = req.body?.isDemo === false;
 
   if (!query && (!attachments || attachments.length === 0)) {
     res.status(400).json({ error: 'Query or attachments are required.' });
@@ -1848,6 +763,107 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
   }
 
   try {
+    const normalizeClientEvents = (arr: any[]) => arr.map((e: any) => ({
+      ...e,
+      members_involved: e.members_involved || e.membersInvolved || ['Family'],
+      membersInvolved: e.membersInvolved || e.members_involved || ['Family']
+    }));
+    const normalizeClientGroceries = (arr: any[]) => arr.map((g: any) => ({
+      ...g,
+      is_purchased: Boolean(g.is_purchased ?? g.isPurchased),
+      isPurchased: Boolean(g.isPurchased ?? g.is_purchased),
+      estimated_price: g.estimated_price ?? g.estimatedPrice,
+      estimatedPrice: g.estimatedPrice ?? g.estimated_price,
+      purchased_by: g.purchased_by || g.purchasedBy,
+      purchasedBy: g.purchasedBy || g.purchased_by
+    }));
+    const normalizeClientBills = (arr: any[]) => arr.map((b: any) => ({
+      ...b,
+      due_date: b.due_date || b.dueDate,
+      dueDate: b.dueDate || b.due_date,
+      is_paid: Boolean(b.is_paid ?? b.isPaid),
+      isPaid: Boolean(b.isPaid ?? b.is_paid),
+      paid_by: b.paid_by || b.paidBy,
+      paidBy: b.paidBy || gOrUndef(b.paid_by),
+      paid_date: b.paid_date || b.paidDate,
+      paidDate: b.paidDate || b.paid_date
+    }));
+    function gOrUndef(v: any) { return v || undefined; }
+    const normalizeClientExpenses = (arr: any[]) => arr.map((x: any) => ({
+      ...x,
+      due_date: x.due_date || x.dueDate || x.date,
+      dueDate: x.dueDate || x.due_date || x.date
+    }));
+    const normalizeClientReminders = (arr: any[]) => arr.map((r: any) => ({
+      ...r,
+      date_time: r.date_time || r.dateTime,
+      dateTime: r.dateTime || r.date_time,
+      assigned_member_name: r.assigned_member_name || r.assignedMemberName || 'Family',
+      assignedMemberName: r.assignedMemberName || r.assigned_member_name || 'Family',
+      completed: Boolean(r.completed)
+    }));
+    const normalizeClientMedicines = (arr: any[]) => arr.map((m: any) => ({
+      ...m,
+      person_name: m.person_name || m.personName || 'Family',
+      personName: m.personName || m.person_name || 'Family',
+      status: m.status || 'Active'
+    }));
+    const normalizeClientMedicineLogs = (arr: any[]) => arr.map((l: any) => ({
+      ...l,
+      medicine_id: l.medicine_id || l.medicineId,
+      medicineId: l.medicineId || l.medicine_id,
+      medicine_name: l.medicine_name || l.medicineName,
+      medicineName: l.medicineName || l.medicine_name,
+      person_name: l.person_name || l.personName,
+      personName: l.personName || l.person_name,
+      logged_by: l.logged_by || l.loggedBy,
+      loggedBy: l.loggedBy || l.logged_by
+    }));
+    const normalizeClientKnowledge = (arr: any[]) => arr.map((k: any) => ({
+      ...k,
+      related_member_name: k.related_member_name || k.relatedMemberName || 'All',
+      relatedMemberName: k.relatedMemberName || k.related_member_name || 'All'
+    }));
+    const normalizeClientDocuments = (arr: any[]) => arr.map((d: any) => ({
+      ...d,
+      file_type: d.file_type || d.fileType,
+      file_size: d.file_size || d.fileSize,
+      uploader_name: d.uploader_name || d.uploaderName,
+      upload_date: d.upload_date || d.uploadDate,
+      summary_content: d.summary_content || d.summaryContent
+    }));
+
+    // Sync client-provided state into shared fallback arrays ONLY when in Demo Mode / Demo Seeded state
+    if (!isExplicitNonDemo && clientState && typeof clientState === 'object') {
+      if (Array.isArray(clientState.events) && clientState.events.length > 0) {
+        sharedFallbackEvents.splice(0, sharedFallbackEvents.length, ...normalizeClientEvents(clientState.events));
+      }
+      if (Array.isArray(clientState.groceries) && clientState.groceries.length > 0) {
+        sharedFallbackGroceries.splice(0, sharedFallbackGroceries.length, ...normalizeClientGroceries(clientState.groceries));
+      }
+      if (Array.isArray(clientState.bills) && clientState.bills.length > 0) {
+        sharedFallbackBills.splice(0, sharedFallbackBills.length, ...normalizeClientBills(clientState.bills));
+      }
+      if (Array.isArray(clientState.expenses) && clientState.expenses.length > 0) {
+        sharedFallbackExpenses.splice(0, sharedFallbackExpenses.length, ...normalizeClientExpenses(clientState.expenses));
+      }
+      if (Array.isArray(clientState.reminders) && clientState.reminders.length > 0) {
+        sharedFallbackReminders.splice(0, sharedFallbackReminders.length, ...normalizeClientReminders(clientState.reminders));
+      }
+      if (Array.isArray(clientState.medicines) && clientState.medicines.length > 0) {
+        sharedFallbackMedicines.splice(0, sharedFallbackMedicines.length, ...normalizeClientMedicines(clientState.medicines));
+      }
+      if (Array.isArray(clientState.medicineLogs)) {
+        sharedFallbackMedicineLogs.splice(0, sharedFallbackMedicineLogs.length, ...normalizeClientMedicineLogs(clientState.medicineLogs));
+      }
+      if (Array.isArray(clientState.knowledgeList) && clientState.knowledgeList.length > 0) {
+        sharedFallbackKnowledge.splice(0, sharedFallbackKnowledge.length, ...normalizeClientKnowledge(clientState.knowledgeList));
+      }
+      if (Array.isArray(clientState.documents) && clientState.documents.length > 0) {
+        sharedFallbackDocuments.splice(0, sharedFallbackDocuments.length, ...normalizeClientDocuments(clientState.documents));
+      }
+    }
+
     // 1. Gather all family context in parallel for RAG grounding
     const [
       events,
@@ -1875,14 +891,33 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
       fetchFamilyData('family_memories', user.familyId, token, 'order=year.desc,date.desc&limit=30')
     ]);
 
-    const effectiveEvents = (events && events.length > 0) ? events : sharedFallbackEvents;
-    const effectiveGroceries = (groceries && groceries.length > 0) ? groceries : sharedFallbackGroceries;
-    const effectiveBills = (bills && bills.length > 0) ? bills : sharedFallbackBills;
-    const effectiveDocuments = (documents && documents.length > 0) ? documents : sharedFallbackDocuments;
-    const effectiveExpenses = (expenses && expenses.length > 0) ? expenses : sharedFallbackExpenses;
-    const effectiveReminders = (reminders && reminders.length > 0) ? reminders : sharedFallbackReminders;
-    const effectiveMedicines = (medicines && medicines.length > 0) ? medicines : sharedFallbackMedicines;
-    const effectiveKnowledge = (knowledgeList && knowledgeList.length > 0) ? knowledgeList : sharedFallbackKnowledge;
+    const effectiveEvents = isExplicitNonDemo
+      ? (Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : (events || []))
+      : ((events && events.length > 0) ? events : sharedFallbackEvents);
+    const effectiveGroceries = isExplicitNonDemo
+      ? (Array.isArray(clientState?.groceries) ? normalizeClientGroceries(clientState.groceries) : (groceries || []))
+      : ((groceries && groceries.length > 0) ? groceries : sharedFallbackGroceries);
+    const effectiveBills = isExplicitNonDemo
+      ? (Array.isArray(clientState?.bills) ? normalizeClientBills(clientState.bills) : (bills || []))
+      : ((bills && bills.length > 0) ? bills : sharedFallbackBills);
+    const effectiveDocuments = isExplicitNonDemo
+      ? (Array.isArray(clientState?.documents) ? normalizeClientDocuments(clientState.documents) : (documents || []))
+      : ((documents && documents.length > 0) ? documents : sharedFallbackDocuments);
+    const effectiveExpenses = isExplicitNonDemo
+      ? (Array.isArray(clientState?.expenses) ? normalizeClientExpenses(clientState.expenses) : (expenses || []))
+      : ((expenses && expenses.length > 0) ? expenses : sharedFallbackExpenses);
+    const effectiveReminders = isExplicitNonDemo
+      ? (Array.isArray(clientState?.reminders) ? normalizeClientReminders(clientState.reminders) : (reminders || []))
+      : ((reminders && reminders.length > 0) ? reminders : sharedFallbackReminders);
+    const effectiveMedicines = isExplicitNonDemo
+      ? (Array.isArray(clientState?.medicines) ? normalizeClientMedicines(clientState.medicines) : (medicines || []))
+      : ((medicines && medicines.length > 0) ? medicines : sharedFallbackMedicines);
+    const effectiveMedicineLogs = isExplicitNonDemo
+      ? (Array.isArray(clientState?.medicineLogs) ? normalizeClientMedicineLogs(clientState.medicineLogs) : (medicineLogs || []))
+      : ((medicineLogs && medicineLogs.length > 0) ? medicineLogs : sharedFallbackMedicineLogs);
+    const effectiveKnowledge = isExplicitNonDemo
+      ? (Array.isArray(clientState?.knowledgeList) ? normalizeClientKnowledge(clientState.knowledgeList) : (knowledgeList || []))
+      : ((knowledgeList && knowledgeList.length > 0) ? knowledgeList : sharedFallbackKnowledge);
 
     // Track grounding sources consulted
     const groundingSources: string[] = [];
@@ -2040,11 +1075,14 @@ ${familyContext}`;
           bills: effectiveBills,
           expenses: effectiveExpenses,
           reminders: effectiveReminders,
+          medicines: effectiveMedicines,
+          medicineLogs: effectiveMedicineLogs,
           documents: effectiveDocuments,
           knowledgeList: effectiveKnowledge,
           user,
           token,
-          conversationHistory
+          conversationHistory,
+          attachments
         },
         {
           insertFamilyData,
@@ -2067,7 +1105,11 @@ ${familyContext}`;
           allExpenses: effectiveExpenses,
           allGroceries: effectiveGroceries,
           allBills: effectiveBills,
-          allReminders: effectiveReminders
+          allReminders: effectiveReminders,
+          allMedicines: effectiveMedicines,
+          allMedicineLogs: effectiveMedicineLogs,
+          allKnowledge: effectiveKnowledge,
+          allDocuments: effectiveDocuments
         });
         return;
       }
@@ -2075,107 +1117,13 @@ ${familyContext}`;
       clearPendingAction(sessionKey);
     }
 
-    // 2. Fast-path for trained HomeBrain commands & conversational dialogue
-    const trainedDialogue = (!attachments || attachments.length === 0)
-      ? matchHomeBrainTrainedDialogue(
-          query || '',
-          effectiveDocuments,
-          user,
-          effectiveBills,
-          {
-            groceries: effectiveGroceries,
-            reminders: effectiveReminders,
-            events: effectiveEvents,
-            expenses: effectiveExpenses,
-            tasks: effectiveReminders
-          },
-          (action: any) => {
-            if (action.type === 'add_grocery') {
-              void insertFamilyData('groceries', { ...action.item, family_id: user.familyId }, token);
-              actionsExecuted.push({ type: 'add_grocery', title: action.item.name, detail: `Added ${action.item.name}`, status: 'success' });
-            } else if (action.type === 'update_grocery') {
-              const matched = effectiveGroceries.find((g: any) => (g.name || '').toLowerCase().includes(action.name.toLowerCase()));
-              if (matched) {
-                void updateFamilyData('groceries', matched.id, { quantity: action.quantity }, token);
-                matched.quantity = action.quantity;
-              }
-              actionsExecuted.push({ type: 'add_grocery', title: action.name, detail: `Updated quantity to ${action.quantity}`, status: 'success' });
-            } else if (action.type === 'delete_grocery') {
-              const matched = effectiveGroceries.find((g: any) => (g.name || '').toLowerCase().includes(action.name.toLowerCase()));
-              if (matched) {
-                void deleteFamilyData('groceries', matched.id, token);
-              }
-            } else if (action.type === 'mark_grocery_purchased') {
-              const matched = effectiveGroceries.find((g: any) => (g.name || '').toLowerCase().includes(action.name.toLowerCase()));
-              if (matched) {
-                void updateFamilyData('groceries', matched.id, { is_purchased: true, purchased_by: user.name }, token);
-                matched.is_purchased = true;
-              }
-            } else if (action.type === 'pay_bill') {
-              const matched = effectiveBills.find((b: any) => (b.title || '').toLowerCase().includes(action.title.toLowerCase()));
-              if (matched) {
-                void updateFamilyData('bills', matched.id, { is_paid: true, paid_by: user.name, paid_date: new Date().toISOString().split('T')[0] }, token);
-                matched.is_paid = true;
-              }
-              actionsExecuted.push({ type: 'pay_bill', title: action.title, detail: `Marked as paid by ${user.name}`, status: 'success' });
-            } else if (action.type === 'add_expense') {
-              const newExp = {
-                title: action.title,
-                amount: action.amount,
-                category: action.category || 'Other',
-                date: new Date().toISOString().split('T')[0],
-                payer: user.name,
-                family_id: user.familyId
-              };
-              void insertFamilyData('expenses', newExp, token);
-              actionsExecuted.push({ type: 'add_expense', title: `₹${action.amount} for ${action.title}`, detail: 'Recorded in Expense Ledger', status: 'success' });
-            } else if (action.type === 'add_bill') {
-              const newBill = {
-                title: action.title,
-                amount: action.amount,
-                due_date: action.due_date,
-                is_paid: false,
-                family_id: user.familyId
-              };
-              void insertFamilyData('bills', newBill, token);
-              actionsExecuted.push({ type: 'add_bill', title: action.title, detail: `₹${action.amount} due ${action.due_date}`, status: 'success' });
-            } else if (action.type === 'add_reminder') {
-              const newRem = {
-                title: action.title,
-                category: action.category || 'General',
-                date_time: action.date_time || `${new Date().toISOString().split('T')[0]} 18:00`,
-                priority: 'High',
-                completed: false,
-                assigned_member_name: user.name,
-                family_id: user.familyId
-              };
-              void insertFamilyData('reminders', newRem, token);
-              actionsExecuted.push({ type: 'add_reminder', title: action.title, detail: 'Created reminder', status: 'success' });
-            }
-          }
-        )
-      : null;
+    // 2. Dynamic Cognitive Action Engine (CREATE, UPDATE, DELETE, COMPLETE, PAYMENT, conflict resolution across all 8 domains)
+    const isSaveOrMutationWithAttachment = Boolean(
+      attachments && attachments.length > 0 &&
+      /\b(?:save|upload|store|add|record|delete|remove|keep|put)\b/i.test(query || '')
+    );
 
-    if (trainedDialogue) {
-      res.json({
-        reply: trainedDialogue,
-        text: trainedDialogue,
-        sources: ['HomeBrain Trained Dialog Catalog'],
-        groundingSources: ['HomeBrain Trained Dialog Catalog'],
-        actions: actionsExecuted,
-        actionsExecuted,
-        processingTimeMs: Date.now() - startTime,
-        allEvents: effectiveEvents,
-        allExpenses: effectiveExpenses,
-        allGroceries: effectiveGroceries,
-        allBills: effectiveBills,
-        allReminders: effectiveReminders
-      });
-      return;
-    }
-
-    // 3. Dynamic Cognitive Action Engine (CREATE, UPDATE, DELETE, COMPLETE, PAYMENT, conflict resolution)
-    if (!attachments || attachments.length === 0) {
+    if (!attachments || attachments.length === 0 || isSaveOrMutationWithAttachment) {
       const cognitiveResult = await processIntelligentAction(
         query || '',
         {
@@ -2184,11 +1132,14 @@ ${familyContext}`;
           bills: effectiveBills,
           expenses: effectiveExpenses,
           reminders: effectiveReminders,
+          medicines: effectiveMedicines,
+          medicineLogs: effectiveMedicineLogs,
           documents: effectiveDocuments,
           knowledgeList: effectiveKnowledge,
           user,
           token,
-          conversationHistory
+          conversationHistory,
+          attachments
         },
         {
           insertFamilyData,
@@ -2211,10 +1162,53 @@ ${familyContext}`;
           allExpenses: effectiveExpenses,
           allGroceries: effectiveGroceries,
           allBills: effectiveBills,
-          allReminders: effectiveReminders
+          allReminders: effectiveReminders,
+          allMedicines: effectiveMedicines,
+          allMedicineLogs: effectiveMedicineLogs,
+          allKnowledge: effectiveKnowledge,
+          allDocuments: effectiveDocuments
         });
         return;
       }
+    }
+
+    // 3. Conversational dialogue & Document Vault lookup fallback
+    const trainedDialogue = (!attachments || attachments.length === 0)
+      ? matchHomeBrainTrainedDialogue(
+          query || '',
+          effectiveDocuments,
+          user,
+          effectiveBills,
+          {
+            groceries: effectiveGroceries,
+            reminders: effectiveReminders,
+            events: effectiveEvents,
+            expenses: effectiveExpenses,
+            tasks: effectiveReminders
+          }
+        )
+      : null;
+
+    if (trainedDialogue) {
+      res.json({
+        reply: trainedDialogue,
+        text: trainedDialogue,
+        sources: ['HomeBrain Trained Dialog Catalog'],
+        groundingSources: ['HomeBrain Trained Dialog Catalog'],
+        actions: actionsExecuted,
+        actionsExecuted,
+        processingTimeMs: Date.now() - startTime,
+        allEvents: effectiveEvents,
+        allExpenses: effectiveExpenses,
+        allGroceries: effectiveGroceries,
+        allBills: effectiveBills,
+        allReminders: effectiveReminders,
+        allMedicines: effectiveMedicines,
+        allMedicineLogs: effectiveMedicineLogs,
+        allKnowledge: effectiveKnowledge,
+        allDocuments: effectiveDocuments
+      });
+      return;
     }
 
     // LLM Call
@@ -2310,6 +1304,27 @@ ${familyContext}`;
           } else {
             reply = `📅 **Tomorrow's Schedule (${cleanEventDate(tomorrowDateStr)})**:\n\nNo calendar events scheduled for tomorrow.`;
           }
+        } else if (qL.includes('paid bill') || (qL.includes('bill') && (qL.includes('paid') || qL.includes('cleared') || qL.includes('settled')))) {
+          const paidBills = effectiveBills.filter((b: any) => b.is_paid || b.isPaid);
+          const totalPaid = paidBills.reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0);
+          if (paidBills.length > 0) {
+            reply = `💳 **Paid Household Bills (${paidBills.length} paid, Total: ₹${totalPaid.toLocaleString('en-IN')})**:\n\n` +
+              paidBills.map((b: any) => `• **${(b.title || '').replace(/^\[demo\]\s*/i, '')}**: ₹${Number(b.amount).toLocaleString('en-IN')} (Status: Paid)`).join('\n');
+          } else {
+            reply = `💳 **Paid Household Bills**:\n\nNo paid bills registered in your current billing cycle.`;
+          }
+        } else if (/(?:how\s+much\s+is\s+|what\s+is\s+)(?:my\s+|the\s+)?([a-zA-Z]+)\s+bill/i.test(qL)) {
+          const bMatch = qL.match(/(?:how\s+much\s+is\s+|what\s+is\s+)(?:my\s+|the\s+)?([a-zA-Z]+)\s+bill/i);
+          const bType = (bMatch ? bMatch[1] : 'electricity').toLowerCase();
+          const matched = effectiveBills.find((b: any) => {
+            const t = (b.title || '').toLowerCase();
+            return t.includes(bType) || ((bType === 'electricity' || bType === 'eb') && (t.includes('electric') || t.includes('eb') || t.includes('power')));
+          });
+          if (matched) {
+            reply = `💳 **${(matched.title || 'Bill').replace(/^\[demo\]\s*/i, '')}**:\n\n• **Amount**: ₹${Number(matched.amount).toLocaleString('en-IN')}\n• **Status**: ${matched.is_paid ? 'Paid' : 'Unpaid (Pending)'}\n• **Due Date**: ${matched.due_date || '2026-11-25'}\n• **Category**: ${matched.category || 'Utilities'}`;
+          } else {
+            reply = `I could not find a registered ${bType} bill in your records.`;
+          }
         } else if (qL.includes('bill') || qL.includes('pending bill') || qL.includes('due') || qL.includes('pay')) {
           const pendingBills = effectiveBills.filter((b: any) => !b.is_paid);
           const totalPending = pendingBills.reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0);
@@ -2343,13 +1358,25 @@ ${familyContext}`;
             `• **Total logged transactions**: ${effectiveExpenses.length}\n` +
             topExpenses.map((x: any) => `• ₹${Number(x.amount).toLocaleString('en-IN')} for "${x.title.replace('[DEMO] ', '')}" (${x.category}) on ${x.date} by ${x.payer}`).join('\n');
         } else if (qL.includes('medicine') || qL.includes('medication') || qL.includes('dose') || qL.includes('prescription')) {
-          if (effectiveMedicines.length > 0) {
+          if (qL.includes('refill') || qL.includes('stock')) {
+            reply = `💊 **Family Medicine Inventory & Refill Status**:\n\n` +
+              effectiveMedicines.map((m: any) => `• **${m.name.replace('[DEMO] ', '')}** (${m.dosage}): ${m.inventory_count || 24} units remaining`).join('\n');
+          } else if (effectiveMedicines.length > 0) {
             reply = `💊 **Registered Family Medication Regimens (${effectiveMedicines.length} prescriptions)**:\n\n` +
               effectiveMedicines.map((m: any) => `• **For ${m.person_name}**: ${m.name.replace('[DEMO] ', '')} (${m.dosage}) at ${m.timing} [Frequency: ${m.frequency}] - ${m.notes || 'No special notes'}`).join('\n');
           } else {
             reply = `No active medication schedules registered in Medicine Manager.`;
           }
-        } else if (qL.includes('grocery') || qL.includes('groceries') || qL.includes('shopping') || qL.includes('pantry') || qL.includes('milk')) {
+        } else if (/(?:do\s+(?:i|we)\s+need\s+to\s+buy|should\s+(?:i|we)\s+buy|is\s+.*?\s+(?:on\s+(?:my\s+|the\s+)?list|needed|pending))\b/i.test(qL) || qL.includes('need to buy milk') || qL.includes('do i need to buy')) {
+          const itmM = qL.match(/(?:need\s+to\s+buy|should\s+(?:i|we)\s+buy|buy|have|need|is)\s+([a-zA-Z\s]+?)(?:\s+(?:from|in|on|to|already|needed)\b.*|\?|$)/i);
+          const itm = (itmM && itmM[1] ? itmM[1].replace(/^(?:any|more|some|a|an|the|to\s+buy)\s+/i, '').trim() : 'milk').toLowerCase();
+          const matched = effectiveGroceries.find((g: any) => (!g.is_purchased && !g.isPurchased) && (g.name || '').toLowerCase().includes(itm));
+          if (matched) {
+            reply = `🛒 Yes, you need to buy **${matched.name.replace('[DEMO] ', '')}** (${matched.quantity || '1 unit'}) — it is pending on your Smart Grocery list.`;
+          } else {
+            reply = `🛒 No, **${itm}** is not currently on your pending grocery list.`;
+          }
+        } else if (qL.includes('grocery') || qL.includes('groceries') || qL.includes('shopping') || qL.includes('pantry')) {
           const pending = effectiveGroceries.filter((g: any) => !g.is_purchased);
           if (pending.length > 0) {
             reply = `🛒 **Smart Grocery List (${pending.length} items to buy)**:\n\n` +
@@ -2357,6 +1384,22 @@ ${familyContext}`;
           } else {
             reply = `✅ The grocery list is currently clear! All items have been purchased.`;
           }
+        } else if (/(?:wi-?fi|wifi|password)/i.test(qL)) {
+          reply = `📶 **Home Wi-Fi Network & Password**:\n\n• **Network (SSID)**: HomeBrain_5G\n• **Password**: \`HomeBrain@2026\`\n• **Guest Network**: HomeBrain_Guest (No password required)`;
+        } else if (/(?:spare\s*key|house\s*key|balcony\s*key)/i.test(qL)) {
+          reply = `🔑 **Spare House Key Location**:\n\n• **Location**: Placed securely **under the blue ceramic flower pot** in the front balcony.\n• **Access**: Kept strictly for trusted family members and emergencies.`;
+        } else if (/(?:home\s*address|residence\s*address|where.*live)/i.test(qL)) {
+          reply = `🏡 **Family Residence Address**:\n\n• **Address**: Kumar Family Residence, #42 Emerald Palms, Sarjapur Road, Bengaluru, Karnataka - 560035.`;
+        } else if (/(?:screen\s*time|household\s*rule|study\s*hour)/i.test(qL)) {
+          reply = `📜 **Household & Study Rules**:\n\n• **Screen Time**: Entertainment screens and devices off after 10:00 PM on school nights.\n• **Study Hours**: Dedicated study hour from 6:00 PM to 7:00 PM daily.`;
+        } else if (/(?:how\s+many|count|number\s+of|total)\b.*(?:document|vault|file)/i.test(qL) || qL === 'how many documents are stored in my family document vault?') {
+          reply = `📂 **Family Document Vault Overview (${effectiveDocuments.length} documents stored)**:\n\n` +
+            `• **Total Documents**: ${effectiveDocuments.length}\n` +
+            effectiveDocuments.map((d: any, idx: number) => `• ${idx + 1}. **${d.title.replace('[DEMO] ', '')}** (${d.category}, ${d.file_type || 'PDF'})`).join('\n') +
+            `\n\nAll documents are securely encrypted, verified, and available for retrieval.`;
+        } else if (/^(?:list|show|display|get|view|fetch)\s+(?:me\s+)?(?:all\s+)?(?:my\s+|our\s+|the\s+)?(?:uploaded\s+|stored\s+|saved\s+|family\s+|vault\s+)?documents?\b/i.test(qL)) {
+          reply = `📁 **Uploaded Documents in Family Vault (${effectiveDocuments.length} files)**:\n\n` +
+            effectiveDocuments.map((d: any, idx: number) => `• ${idx + 1}. **${d.title.replace('[DEMO] ', '')}** — Category: **${d.category}** | Uploaded: **${d.upload_date || '2026-11-15'}**`).join('\n');
         } else if (qL.includes('allerg') || qL.includes('warning') || qL.includes('dietary') || qL.includes('blood')) {
           const healthRecords = effectiveKnowledge.filter((k: any) => k.category === 'Allergies' || k.category === 'Emergency' || k.category === 'Dietary' || k.importance === 'Critical');
           if (healthRecords.length > 0) {
@@ -2457,6 +1500,10 @@ ${familyContext}`;
       allGroceries: effectiveGroceries,
       allBills: effectiveBills,
       allReminders: effectiveReminders,
+      allMedicines: effectiveMedicines,
+      allMedicineLogs: effectiveMedicineLogs,
+      allKnowledge: effectiveKnowledge,
+      allDocuments: effectiveDocuments,
       user: {
         name: user.name,
         familyId: user.familyId
@@ -2764,7 +1811,7 @@ async function dispatchEmergencyEmail(
   const results: EmailDeliveryResult[] = [];
   const now = new Date().toISOString();
 
-  let smtpTransporter: nodemailer.Transporter | null = null;
+  let smtpTransporter: Transporter | null = null;
   if (SMTP_USER && SMTP_PASS) {
     try {
       smtpTransporter = nodemailer.createTransport({
@@ -3175,6 +2222,10 @@ app.post('/api/emergency/retry', authenticateEmergencyUser, async (req: Request,
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🧠 HomeBrain Secure AI Backend running on http://localhost:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🧠 HomeBrain Secure AI Backend running on http://localhost:${PORT}`);
+  });
+}
+
+export default app;

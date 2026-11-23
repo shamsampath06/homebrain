@@ -18,9 +18,9 @@ const formatActivityTime = (timestamp?: string): string => {
 };
 
 export const HouseholdActivityFeed: React.FC = () => {
-  const { groceryHistory, medicineLogs, documents, events, navigateToSubScreen } = useHomeBrain();
+  const { groceries, groceryHistory, medicineLogs, medicines, expenses, reminders, knowledgeList, documents, events } = useHomeBrain();
 
-  // Combine activities into a unified chronological feed
+  // Combine activities into a unified chronological feed, prioritizing user-created (non-DEMO) records
   const activities: Array<{
     id: string;
     type: 'grocery' | 'medicine' | 'document' | 'event';
@@ -29,18 +29,89 @@ export const HouseholdActivityFeed: React.FC = () => {
     time: string;
     icon: React.FC<{ className?: string }>;
     colorBadge: string;
+    isUserCreated?: boolean;
   }> = [];
 
   // Recent medicine doses
   medicineLogs.slice(0, 3).forEach(log => {
     activities.push({
-      id: `med-${log.id}`,
+      id: `medlog-${log.id}`,
       type: 'medicine',
       title: `${log.personName} logged ${log.medicineName}`,
       subtitle: `Status: ${log.status || 'Taken'} • Logged by ${log.loggedBy || log.personName}`,
       time: formatActivityTime(log.timestamp),
       icon: Pill,
-      colorBadge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+      colorBadge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30',
+      isUserCreated: true
+    });
+  });
+
+  // User-added medicines
+  medicines.filter(m => !m.name.startsWith('[DEMO]')).slice(0, 2).forEach(med => {
+    activities.push({
+      id: `med-${med.id}`,
+      type: 'medicine',
+      title: `Scheduled ${med.name} (${med.dosage})`,
+      subtitle: `For ${med.personName} at ${med.timing} • ${med.frequency}`,
+      time: 'Just now',
+      icon: Pill,
+      colorBadge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30',
+      isUserCreated: true
+    });
+  });
+
+  // User-added groceries
+  groceries.filter(g => !g.name.startsWith('[DEMO]')).slice(0, 3).forEach(g => {
+    activities.push({
+      id: `groc-item-${g.id}`,
+      type: 'grocery',
+      title: g.isPurchased ? `Purchased ${g.name}` : `Added ${g.name} (${g.quantity}) to Grocery List`,
+      subtitle: `${g.category || 'Pantry'} • ${g.isPurchased ? `Bought by ${g.purchasedBy || 'Family'}` : 'Pending purchase'}`,
+      time: g.purchasedAt ? formatActivityTime(g.purchasedAt) : 'Recent',
+      icon: ShoppingCart,
+      colorBadge: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30',
+      isUserCreated: true
+    });
+  });
+
+  // User-added expenses
+  expenses.filter(x => !x.title.startsWith('[DEMO]')).slice(0, 2).forEach(x => {
+    activities.push({
+      id: `exp-${x.id}`,
+      type: 'document',
+      title: `Logged ₹${x.amount.toLocaleString('en-IN')} for ${x.title}`,
+      subtitle: `${x.category} • Paid by ${x.payer}`,
+      time: formatActivityTime(x.date),
+      icon: FileText,
+      colorBadge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30',
+      isUserCreated: true
+    });
+  });
+
+  // User-added reminders & notes
+  reminders.filter(r => !r.title.startsWith('[DEMO]')).slice(0, 2).forEach(r => {
+    activities.push({
+      id: `rem-${r.id}`,
+      type: 'event',
+      title: `Reminder: ${r.title}`,
+      subtitle: `${r.priority} Priority • Assigned to ${r.assignedMemberName}`,
+      time: formatActivityTime(r.dateTime),
+      icon: Calendar,
+      colorBadge: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30',
+      isUserCreated: true
+    });
+  });
+
+  knowledgeList.filter(k => !k.title.startsWith('[DEMO]')).slice(0, 2).forEach(k => {
+    activities.push({
+      id: `know-${k.id}`,
+      type: 'document',
+      title: `Saved Note: ${k.title}`,
+      subtitle: `${k.category} • ${k.content}`,
+      time: 'Recent',
+      icon: FileText,
+      colorBadge: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30',
+      isUserCreated: true
     });
   });
 
@@ -79,9 +150,12 @@ export const HouseholdActivityFeed: React.FC = () => {
       subtitle: `${e.category} • ${e.time || 'All day'}`,
       time: formatActivityTime(e.date),
       icon: Calendar,
-      colorBadge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+      colorBadge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30',
+      isUserCreated: !e.title.startsWith('[DEMO]')
     });
   });
+
+  activities.sort((a, b) => (b.isUserCreated ? 1 : 0) - (a.isUserCreated ? 1 : 0));
 
   return (
     <div className="spatial-card p-5 sm:p-6 bg-white dark:bg-[#0D1322] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-sm">

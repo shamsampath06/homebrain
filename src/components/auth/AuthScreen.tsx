@@ -343,7 +343,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               className="w-full py-2.5 px-4 rounded-2xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 border border-amber-300 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 font-bold text-xs flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
             >
               <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Explore Instant Demo Mode (Family Workspace)</span>
+              <span>Explore Instant Demo / Agent Account (Family Workspace)</span>
             </button>
           </div>
         )}

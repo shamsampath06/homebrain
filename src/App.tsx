@@ -40,6 +40,14 @@ const AppContent: React.FC = () => {
     signUp
   } = useHomeBrain();
 
+  // Auto-enter demo/agent workspace if requested via query param or hash
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'demo' || params.get('agent') === 'true' || window.location.hash === '#demo') {
+      enterDemoMode();
+    }
+  }, [enterDemoMode]);
+
   // URL Hash synchronization for browser history & deep linking
   React.useEffect(() => {
     const handleHashChange = () => {

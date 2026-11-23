@@ -9,12 +9,15 @@ export const ExpenseCard: React.FC = () => {
   const { expenses, bills, navigateToSubScreen } = useHomeBrain();
 
   const now = new Date();
-  const totalMonthlySpending = expenses
+  const currentMonthSpending = expenses
     .filter(expense => {
       const date = new Date(`${expense.date}T00:00:00`);
       return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
     })
     .reduce((acc, curr) => acc + curr.amount, 0);
+  const totalMonthlySpending = currentMonthSpending > 0
+    ? currentMonthSpending
+    : expenses.reduce((acc, curr) => acc + curr.amount, 0);
   const upcomingBills = bills.filter(b => !b.isPaid);
 
   return (

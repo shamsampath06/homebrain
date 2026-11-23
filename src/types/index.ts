@@ -96,6 +96,7 @@ export interface MedicineItem {
   personName: string; // Person taking medicine
   startDate: string;
   endDate?: string;
+  status?: string;
   notes?: string;
 }
 
@@ -138,10 +139,10 @@ export interface FamilyKnowledge {
   id: string;
   title: string;
   content: string;
-  category: 'Allergies' | 'Dietary' | 'Education' | 'Schedules' | 'Preferences' | 'Emergency' | 'General';
+  category: 'Allergies' | 'Dietary' | 'Medical' | 'Education' | 'Schedules' | 'Preferences' | 'Emergency' | 'Rules' | 'General';
   relatedMemberName: string;
-  importance: 'Critical' | 'Important' | 'Info';
-  createdDate: string;
+  importance: 'Critical' | 'Important' | 'Medium' | 'Info';
+  createdDate?: string;
 }
 
 export interface FamilyKnowledgeFile {

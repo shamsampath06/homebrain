@@ -82,14 +82,53 @@ export const DEMO_FAMILY_MEMBERS: Array<Omit<FamilyMember, 'id'>> = [
   }
 ];
 
-export const isDemoItem = (item: { title?: string; name?: string; notes?: string; description?: string }): boolean => {
+export const isDemoItem = (item: { id?: string; title?: string; name?: string; notes?: string; description?: string }): boolean => {
   return (
+    (item.id && item.id.startsWith('00000000-0000-4000-8000-000000000')) ||
     (item.title && item.title.includes(DEMO_TAG)) ||
     (item.name && item.name.includes(DEMO_TAG)) ||
     (item.notes && item.notes.includes(DEMO_TAG)) ||
     (item.description && item.description.includes(DEMO_TAG)) ||
     false
   );
+};
+
+export const isDemoMember = (m: FamilyMember): boolean => {
+  return Boolean(
+    (m.id && m.id.startsWith('00000000-0000-4000-8000-000000000')) ||
+    (m.email && m.email.endsWith('.demo@homebrain.test')) ||
+    ((m.name === 'Father' || m.name === 'Mother' || m.name === 'Sneha' || m.name === 'Sham') && m.phone?.startsWith('+91 98765 4321'))
+  );
+};
+
+export const isDemoEnabledForFamily = (familyId?: string): boolean => {
+  if (!familyId) return false;
+  if (familyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
+    try {
+      if (typeof window !== 'undefined' && localStorage.getItem(`homebrain_demo_enabled_${familyId}`) === 'false') {
+        return false;
+      }
+    } catch { }
+    return true;
+  }
+  try {
+    return typeof window !== 'undefined' && localStorage.getItem(`homebrain_demo_enabled_${familyId}`) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+export const setDemoEnabledForFamily = (familyId: string, enabled: boolean): void => {
+  try {
+    if (typeof window === 'undefined' || !familyId) return;
+    if (enabled) {
+      localStorage.setItem(`homebrain_demo_enabled_${familyId}`, 'true');
+    } else if (familyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
+      localStorage.setItem(`homebrain_demo_enabled_${familyId}`, 'false');
+    } else {
+      localStorage.removeItem(`homebrain_demo_enabled_${familyId}`);
+    }
+  } catch { }
 };
 
 export interface DemoSeedStatus {
@@ -352,6 +391,42 @@ export const RAW_DEMO_DOCUMENTS: Array<Omit<DocumentItem, 'id'>> = [
     summaryContent: '• CBSE Class XII Senior School Certificate\n• Student: Sarah Kumar\n• Roll No: 8192034\n• Stream: Science\n• Result: 94.2% Distinction'
   },
   {
+    title: `S. Sham 10th mark sheet`,
+    category: 'Education',
+    fileType: 'PDF',
+    fileSize: '0.14 MB',
+    fileUrl: '/demo-documents/Sham_10th_Marksheet.pdf',
+    storagePath: 'demo-documents/Sham_10th_Marksheet.pdf',
+    uploaderName: 'Sham',
+    uploadDate: '2026-11-15',
+    description: 'State Board Secondary School Leaving Certificate (SSLC - 10th Standard) for S. Sham.',
+    summaryContent: 'Verified official Education record: S. Sham 10th mark sheet (Roll No: 1049281, Distinction).'
+  },
+  {
+    title: `sham 11th mark sheet`,
+    category: 'Education',
+    fileType: 'PDF',
+    fileSize: '0.38 MB',
+    fileUrl: '/demo-documents/Sham_11th_Marksheet.pdf',
+    storagePath: 'demo-documents/Sham_11th_Marksheet.pdf',
+    uploaderName: 'Sham',
+    uploadDate: '2026-11-15',
+    description: 'Higher Secondary School Certificate (Class XI) for Sham.',
+    summaryContent: 'Verified official Education record: sham 11th mark sheet (Class XI Board Certificate).'
+  },
+  {
+    title: `sham aadhar card`,
+    category: 'Identity',
+    fileType: 'JPEG',
+    fileSize: '0.08 MB',
+    fileUrl: '/demo-documents/Sham_Aadhar.jpeg',
+    storagePath: 'demo-documents/Sham_Aadhar.jpeg',
+    uploaderName: 'Sham',
+    uploadDate: '2026-11-15',
+    description: 'Unique Identification Authority of India (UIDAI) Aadhaar identity card for Sham.',
+    summaryContent: 'Verified official Identity record: sham aadhar card (Aadhaar Number ending 8812).'
+  },
+  {
     title: `${DEMO_TAG} Grocery Purchase Receipt`,
     category: 'Financial',
     fileType: 'TXT',
@@ -475,10 +550,14 @@ export const RAW_DEMO_KNOWLEDGE: Array<Omit<FamilyKnowledge, 'id'>> = [
   { title: `${DEMO_TAG} Family Address`, category: 'General', importance: 'Important', relatedMemberName: 'Father', createdDate: '2026-11-14', content: '42 Palm Grove Avenue, Anna Nagar West, Chennai 600040, Tamil Nadu, India' },
   { title: `${DEMO_TAG} Family Trip Preference`, category: 'Preferences', importance: 'Important', relatedMemberName: 'Father', createdDate: '2026-11-14', content: 'Family enjoys weekend trips and heritage destinations within driving distance' },
   { title: `${DEMO_TAG} Family Anniversary`, category: 'Schedules', importance: 'Critical', relatedMemberName: 'Father', createdDate: '2026-11-14', content: 'Parents wedding anniversary is celebrated on November 27' },
-  { title: `${DEMO_TAG} Household Note`, category: 'General', importance: 'Important', relatedMemberName: 'Sarah', createdDate: '2026-11-14', content: 'Monthly household planning: Review expenses and bills in the first week of every month' }
+  { title: `${DEMO_TAG} Household Note`, category: 'General', importance: 'Important', relatedMemberName: 'Sarah', createdDate: '2026-11-14', content: 'Monthly household planning: Review expenses and bills in the first week of every month' },
+  { title: `${DEMO_TAG} Wi-Fi Network & Password`, category: 'Rules', importance: 'Important', relatedMemberName: 'Father', createdDate: '2026-11-14', content: 'Home Wi-Fi SSID: HomeBrain_5G, Password: HomeBrain@2026, Router is on the living room TV console' },
+  { title: `${DEMO_TAG} Spare House Key`, category: 'General', importance: 'Critical', relatedMemberName: 'Father', createdDate: '2026-11-14', content: 'Spare house key is kept safely under the blue ceramic flower pot in the front balcony' },
+  { title: `${DEMO_TAG} Screen Time & Study Rule`, category: 'Rules', importance: 'Important', relatedMemberName: 'Mother', createdDate: '2026-11-14', content: 'Family screen time off rule: All devices off after 10:00 PM on weeknights for study and sleep routine' }
 ];
 
 export const seedDemoFamilyData = async (familyId: string, currentUserEmail: string): Promise<{ success: boolean; seededCounts: Record<string, number> }> => {
+  setDemoEnabledForFamily(familyId, true);
   const counts: Record<string, number> = {
     members: 0,
     events: 0,
@@ -692,6 +771,7 @@ export const removeDemoFamilyData = async (
     reminders: ReminderItem[];
   }
 ): Promise<{ success: boolean; removedCount: number }> => {
+  setDemoEnabledForFamily(familyId, false);
   let removed = 0;
 
   const removeList = async (table: string, items: Array<{ id: string }>) => {
@@ -705,7 +785,7 @@ export const removeDemoFamilyData = async (
     }
   };
 
-  const demoMembers = allData.members.filter(m => m.name === 'Father' || m.name === 'Mother' || m.name === 'Sarah' || m.name === 'Sneha' || m.name === 'Sham');
+  const demoMembers = allData.members.filter(isDemoMember);
   const demoEvents = allData.events.filter(isDemoItem);
   const demoMedicines = allData.medicines.filter(isDemoItem);
   const demoExpenses = allData.expenses.filter(isDemoItem);

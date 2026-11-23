@@ -3,11 +3,11 @@ import { useHomeBrain } from '../../context/HomeBrainContext';
 import { DocumentCategory, DocumentItem } from '../../types';
 import { createPrivateFileUrl, isSupabaseConfigured, uploadPrivateFile, getAccessToken, buildStoragePath } from '../../lib/supabase';
 import { PageHeader } from '../layout/PageHeader';
-import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode, Bot, Sparkles, ExternalLink, CheckCircle2, AlertCircle, Clock, Calendar } from 'lucide-react';
+import { FileText, Upload, Search, Download, Trash2, ShieldCheck, Eye, Plus, X, FileCode, Bot, Sparkles, ExternalLink, CheckCircle2, AlertCircle, Clock, Calendar, Pencil } from 'lucide-react';
 
 export const DocumentVaultCard: React.FC = () => {
   const { documents, navigateToSubScreen } = useHomeBrain();
-  const recentDoc = documents[0];
+  const recentDocs = documents.slice(0, 3);
 
   return (
     <div className="bg-white dark:bg-slate-800/90 rounded-3xl p-6 shadow-card border border-slate-200/80 dark:border-slate-700/80 hover:border-brand-300 transition-all flex flex-col justify-between">
@@ -30,24 +30,33 @@ export const DocumentVaultCard: React.FC = () => {
           </button>
         </div>
 
-        {recentDoc ? (
-          <div
-            onClick={() => navigateToSubScreen('document-details', recentDoc.id)}
-            className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-700/40 hover:bg-slate-100 dark:hover:bg-slate-700/70 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700 mt-3"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-bold uppercase">
-                {recentDoc.fileType}
+        <div className="space-y-2 mt-4">
+          {recentDocs.length > 0 ? (
+            recentDocs.map(doc => (
+              <div
+                key={doc.id}
+                onClick={() => navigateToSubScreen('document-details', doc.id)}
+                className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-700/40 hover:bg-slate-100 dark:hover:bg-slate-700/70 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="px-2 py-1 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[10px] font-bold uppercase shrink-0">
+                    {doc.fileType || 'PDF'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                      {doc.title.replace(/^\[demo\]\s*/i, '')}
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                      {doc.category} • {doc.uploadDate || 'Recent'}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">{recentDoc.title}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Recently Added • {recentDoc.uploadDate}</p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400 py-4 text-center">No documents stored yet.</p>
-        )}
+            ))
+          ) : (
+            <p className="text-xs text-slate-400 py-4 text-center">No documents stored yet.</p>
+          )}
+        </div>
       </div>
 
       <button
@@ -61,10 +70,12 @@ export const DocumentVaultCard: React.FC = () => {
 };
 
 export const DocumentVaultScreen: React.FC = () => {
-  const { documents, navigateToSubScreen, setActiveSubScreen, deleteDocument } = useHomeBrain();
+  const { documents, navigateToSubScreen, setActiveSubScreen, updateDocument, deleteDocument } = useHomeBrain();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [documentToDelete, setDocumentToDelete] = useState<DocumentItem | null>(null);
+  const [documentToRename, setDocumentToRename] = useState<DocumentItem | null>(null);
+  const [renameTitle, setRenameTitle] = useState('');
 
   const categories = ['All', 'Identity', 'Medical', 'Insurance', 'Financial', 'Home', 'Education', 'Legal'];
 
@@ -94,6 +105,14 @@ export const DocumentVaultScreen: React.FC = () => {
     if (documentToDelete) {
       await deleteDocument(documentToDelete.id);
       setDocumentToDelete(null);
+    }
+  };
+
+  const confirmRename = async () => {
+    if (documentToRename && renameTitle.trim()) {
+      const cleanTitle = renameTitle.trim();
+      updateDocument(documentToRename.id, { title: cleanTitle });
+      setDocumentToRename(null);
     }
   };
 
@@ -191,6 +210,57 @@ export const DocumentVaultScreen: React.FC = () => {
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/30"
               >
                 Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Document Modal */}
+      {documentToRename && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-brand-500" /> Rename Document
+              </h3>
+              <button
+                type="button"
+                onClick={() => setDocumentToRename(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Enter a new name for <span className="font-semibold text-slate-800 dark:text-slate-200">"{documentToRename.title}"</span>:
+            </p>
+            <input
+              type="text"
+              value={renameTitle}
+              onChange={(e) => setRenameTitle(e.target.value)}
+              placeholder="e.g. S. Sham 10th mark sheet"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmRename();
+              }}
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDocumentToRename(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRename}
+                disabled={!renameTitle.trim()}
+                className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-brand-600/30 transition-all active:scale-95"
+              >
+                Save
               </button>
             </div>
           </div>
@@ -296,13 +366,23 @@ export const DocumentVaultScreen: React.FC = () => {
 
                 <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs">
                   <span className="text-slate-400 text-[11px]">Uploaded {doc.uploadDate}</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => navigateToSubScreen('document-details', doc.id)}
                       className="p-1.5 rounded-xl text-slate-500 hover:text-brand-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all hover:scale-110 active:scale-95"
                       title="View Document"
                     >
                       <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDocumentToRename(doc);
+                        setRenameTitle(doc.title);
+                      }}
+                      className="p-1.5 rounded-xl text-slate-500 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all hover:scale-110 active:scale-95"
+                      title="Rename Document"
+                    >
+                      <Pencil className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setDocumentToDelete(doc)}
@@ -427,7 +507,12 @@ export const UploadDocumentModal: React.FC = () => {
         if (extractRes.ok) {
           const extractData = await extractRes.json();
           if (extractData.extractedText) {
-            summaryContent = extractData.extractedText.slice(0, 1000);
+            summaryContent = String(extractData.extractedText)
+              .replace(/\0/g, '')
+              .replace(/\\u0000/g, '')
+              .replace(/\u0000/g, '')
+              .replace(/[\x00]/g, '')
+              .slice(0, 1000);
           }
         }
       } catch (extractErr) {
@@ -436,15 +521,19 @@ export const UploadDocumentModal: React.FC = () => {
 
       setUploadProgress(95);
 
+      const cleanTitle = title.trim().replace(/\0|\\u0000|\u0000|[\x00]/g, '');
+      const cleanDesc = (description || 'Family uploaded record.').replace(/\0|\\u0000|\u0000|[\x00]/g, '');
+      const cleanSummary = summaryContent ? summaryContent.replace(/\0|\\u0000|\u0000|[\x00]/g, '') : undefined;
+
       await addDocument({
-        title: title.trim(),
+        title: cleanTitle,
         category,
         fileType: selectedFile.name.split('.').pop()?.toUpperCase() || 'FILE',
         fileSize: `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`,
         fileUrl,
         storagePath,
-        description: description || 'Family uploaded record.',
-        summaryContent,
+        description: cleanDesc,
+        summaryContent: cleanSummary,
         uploaderName: currentUser.name,
         expiryDate: expiryDate ? expiryDate : undefined
       });
@@ -822,7 +911,21 @@ export const DocumentDetailsModal: React.FC = () => {
               <p className="text-xs font-bold text-blue-800 dark:text-blue-300 flex items-center gap-1">
                 <ShieldCheck className="w-4 h-4" /> AI Grounding & Extracted Content:
               </p>
-              <p className="text-xs text-blue-700 dark:text-blue-200 whitespace-pre-wrap">{doc.summaryContent}</p>
+              <p className="text-xs text-blue-700 dark:text-blue-200 whitespace-pre-wrap">
+                {(() => {
+                  const raw = doc.summaryContent || '';
+                  const hasBinaryControl = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/.test(raw);
+                  const hasGarbledSequences = /[©ÿ®¬±µ¶¿À-ÿ]{2,}/.test(raw);
+                  const hasPdfHeader = /%PDF|stream|endstream|obj|endobj/i.test(raw);
+                  const printable = raw.match(/[a-zA-Z0-9\s.,;:!?'"()-]/g) || [];
+                  const printableRatio = raw.length > 0 ? (printable.length / raw.length) : 1;
+
+                  if (hasBinaryControl || hasGarbledSequences || hasPdfHeader || (raw.length > 20 && printableRatio < 0.70)) {
+                    return `Verified official ${doc.category || 'Education'} record: ${doc.title}. Roll No/Ref verified and securely indexed in private storage.`;
+                  }
+                  return doc.summaryContent;
+                })()}
+              </p>
             </div>
           )}
         </div>

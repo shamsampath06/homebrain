@@ -31,7 +31,7 @@ export const GroceryCard: React.FC = () => {
         </div>
 
         <div className="space-y-2 mt-4">
-          {groceries.slice(0, 3).map(item => (
+          {(pending.length > 0 ? pending : groceries).slice(0, 4).map(item => (
             <div
               key={item.id}
               onClick={() => toggleGroceryPurchased(item.id)}

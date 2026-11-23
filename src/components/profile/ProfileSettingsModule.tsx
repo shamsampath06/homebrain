@@ -21,51 +21,46 @@ export const ProfileSettingsShell: React.FC = () => {
       <div className="flex border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
         <button
           onClick={() => setCurrentTab('profile')}
-          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${
-            currentTab === 'profile'
-              ? 'border-brand-600 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${currentTab === 'profile'
+            ? 'border-brand-600 text-brand-600 dark:text-brand-400'
+            : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <User className="w-4 h-4" /> User Profile
         </button>
         <button
           onClick={() => setCurrentTab('members')}
-          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${
-            currentTab === 'members'
-              ? 'border-brand-600 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${currentTab === 'members'
+            ? 'border-brand-600 text-brand-600 dark:text-brand-400'
+            : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <Users className="w-4 h-4" /> Family Members
         </button>
         <button
           onClick={() => setCurrentTab('settings')}
-          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${
-            currentTab === 'settings'
-              ? 'border-brand-600 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${currentTab === 'settings'
+            ? 'border-brand-600 text-brand-600 dark:text-brand-400'
+            : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <Settings className="w-4 h-4" /> Preferences
         </button>
         <button
           onClick={() => setCurrentTab('privacy')}
-          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${
-            currentTab === 'privacy'
-              ? 'border-brand-600 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${currentTab === 'privacy'
+            ? 'border-brand-600 text-brand-600 dark:text-brand-400'
+            : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <Shield className="w-4 h-4" /> Privacy & Security
         </button>
         <button
           onClick={() => setCurrentTab('demo')}
-          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${
-            currentTab === 'demo'
-              ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`pb-3 px-5 text-sm font-semibold border-b-2 flex items-center gap-2 transition-all ${currentTab === 'demo'
+            ? 'border-purple-600 text-purple-600 dark:text-purple-400'
+            : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <Sparkles className="w-4 h-4 text-purple-500" /> Demo Family Data
         </button>
@@ -173,7 +168,7 @@ const FamilyMembersPanel: React.FC = () => {
   const hasPhone = Boolean(currentMember?.phone && currentMember.phone.trim().length > 6);
   const hasEmail = Boolean(currentUser?.email && currentUser.email.includes('@'));
   const hasEmergency = emergencyContacts.length > 0;
-  const hasHealth = knowledgeList.some(k => k.category === 'Allergies' || k.category === 'Dietary');
+  const hasHealth = knowledgeList.some(k => k.category === 'Allergies' || k.category === 'Preferences' || k.category === 'Medical' || (k.category as string) === 'Dietary');
   const completedCount = [hasPhone, hasEmail, hasEmergency, hasHealth, Boolean(currentUser?.role)].filter(Boolean).length;
   const completionPercent = Math.round((completedCount / 5) * 100);
 
@@ -583,11 +578,10 @@ const SettingsPanel: React.FC = () => {
         <button
           type="button"
           onClick={handleToggleNotifications}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            notificationsEnabled
-              ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200'
-              : 'bg-brand-600 text-white shadow-sm'
-          }`}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${notificationsEnabled
+            ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200'
+            : 'bg-brand-600 text-white shadow-sm'
+            }`}
         >
           {notificationsEnabled ? '✓ Enabled' : 'Enable Alerts'}
         </button>
@@ -793,21 +787,19 @@ const DemoFamilyDataPanel: React.FC = () => {
             Populate realistic multi-generational household data to demonstrate HomeBrain AI, clinical schedules, bills, and vault records
           </p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold ${
-          seedStatus?.isSeeded
-            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-            : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-        }`}>
+        <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold ${seedStatus?.isSeeded
+          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+          : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+          }`}>
           {seedStatus?.isSeeded ? '✓ Demo Data Loaded' : 'Clean State'}
         </span>
       </div>
 
       {message && (
-        <div className={`p-4 rounded-2xl text-xs flex items-center gap-2 ${
-          message.type === 'success'
-            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border border-emerald-200'
-            : 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border border-rose-200'
-        }`}>
+        <div className={`p-4 rounded-2xl text-xs flex items-center gap-2 ${message.type === 'success'
+          ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border border-emerald-200'
+          : 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border border-rose-200'
+          }`}>
           {message.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />}
           <span>{message.text}</span>
         </div>

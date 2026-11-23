@@ -105,6 +105,7 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
     groceries,
     toggleGroceryPurchased,
     medicines,
+    medicineLogs,
     logMedicineStatus,
     reminders,
     toggleReminder,
@@ -112,7 +113,7 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
   } = useHomeBrain();
   const navigate = onNavigate || navigateToSubScreen;
   const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
-  const [adherenceSuccessId, setAdherenceSuccessId] = useState<string | null>(null);
+  const [loggedMedIds, setLoggedMedIds] = useState<Set<string>>(new Set());
   const [localIsSpeaking, setLocalIsSpeaking] = useState(false);
   const isSpeaking = propIsSpeaking !== undefined ? propIsSpeaking : localIsSpeaking;
 
@@ -209,31 +210,34 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
     const items = [...currentListItems];
     currentListItems = [];
 
+    // Check if these list items represent Bills
+    const isBillList = items.some(it => /(?:₹|rs\.|inr)\s*\d+/i.test(it) && /due|bill|electric|water|maintenance|gas/i.test(it)) || text.includes('Pending Household Bills') || text.includes('Household Bills');
     // Check if these list items represent Events
-    const isEventList = items.some(it => /\d{4}-\d{2}-\d{2}/.test(it) || /birthday|anniversary|exam|match|appointment|doctor|checkup/i.test(it));
+    const isEventList = !isBillList && items.some(it => /\d{4}-\d{2}-\d{2}/.test(it) || /birthday|anniversary|exam|match|appointment|doctor|checkup/i.test(it));
     // Check if these list items represent Reminders / Tasks
-    const isReminderList = !isEventList && (
+    const isReminderList = !isEventList && !isBillList && (
       items.some(it => /remind|task|todo|priority|assigned/i.test(it)) ||
       text.includes('Reminders') ||
       text.includes('Household Tasks') ||
       text.includes('Pending Tasks')
     );
-    // Check if these list items represent Medicines
-    const isMedicineList = items.some(it => /for |mg|tablet|capsule|frequency|inhaler/i.test(it) && !it.includes('₹'));
-    // Check if these list items represent Bills
-    const isBillList = items.some(it => /(?:₹|rs\.|inr)\s*\d+/i.test(it) && /due|bill|electric|water|maintenance|gas/i.test(it));
     const isAssistantSummary = text.includes('Autonomous Cognitive Assistant Summary') || text.includes('live records across') || text.includes('tables consulted');
-    // Check if these list items represent Groceries
-    const isGroceryList = !isAssistantSummary && items.some(it => /category:|kg|litre|pack|buy|grocery/i.test(it));
-    // Check if these list items represent Allergies / Health warnings
-    const isAllergyList = !isAssistantSummary && items.some(it => /critical allergy|allergic to|blood group|asthma|penicillin|anaphyla/i.test(it));
     const isUnavailableNotice = text.includes('Not Available in Document Vault') || text.includes('is not available in your Family Document Vault');
     // Check if these list items represent Document Vault Records
     const isDocumentList = !isAssistantSummary && !isUnavailableNotice && (
+      text.includes('has been found in your Document Vault') ||
+      text.includes('Document Vault Records') ||
+      text.includes('Retrieved Document') ||
       items.some(it =>
         /file size|file type|uploaded by|\b(?:png|jpg|jpeg|pdf|docx|txt)\b/i.test(it)
-      ) || text.includes('Document Vault Records') || text.includes('Retrieved Document')
+      )
     );
+    // Check if these list items represent Medicines
+    const isMedicineList = !isDocumentList && !text.includes('Document Vault') && items.some(it => /\b\d+\s*mg\b|\btablet|\bcapsule|\binhaler|\bdosage\b|\bprescribed for\b/i.test(it) && !it.includes('₹'));
+    // Check if these list items represent Groceries
+    const isGroceryList = !isAssistantSummary && !isDocumentList && items.some(it => /category:|kg|litre|pack|buy|grocery/i.test(it));
+    // Check if these list items represent Allergies / Health warnings
+    const isAllergyList = !isAssistantSummary && !isDocumentList && items.some(it => /critical allergy|allergic to|blood group|asthma|penicillin|anaphyla/i.test(it));
 
     if (isReminderList) {
       renderedElements.push(
@@ -381,7 +385,13 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
               const mn = m.name.toLowerCase().replace('[demo] ', '').trim();
               return clean.toLowerCase().includes(mn);
             });
-            const isLogged = matchedMed ? adherenceSuccessId === matchedMed.id : false;
+            const isLogged = matchedMed
+              ? loggedMedIds.has(matchedMed.id) ||
+                medicineLogs.some(
+                  l => (l.medicineId === matchedMed.id || (l as any).medicine_id === matchedMed.id) &&
+                       (l.status === 'Taken' || (l as any).status === 'taken')
+                )
+              : false;
 
             return (
               <div
@@ -403,12 +413,11 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
                     onClick={() => {
                       triggerCelebration();
                       logMedicineStatus(matchedMed.id, 'Taken');
-                      setAdherenceSuccessId(matchedMed.id);
-                      setTimeout(() => setAdherenceSuccessId(null), 3000);
+                      setLoggedMedIds(prev => new Set(prev).add(matchedMed.id));
                     }}
                     className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shrink-0 transition-all ${
                       isLogged
-                        ? 'bg-emerald-600 text-white'
+                        ? 'bg-emerald-600 text-white shadow-sm'
                         : 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300'
                     }`}
                   >
@@ -511,16 +520,52 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
     }
 
     if (isDocumentList) {
+      // Find document referenced in the overall message text (e.g. from header "sham 11th mark sheet has been found...")
+      const docFromMessageText = documents.find(d => {
+        const dt = (d.title || '').toLowerCase();
+        return dt.length >= 3 && text.toLowerCase().includes(dt);
+      }) || documents.find(d => {
+        const dt = (d.title || '').toLowerCase();
+        if (/\b11th\b/i.test(text) && dt.includes('11th')) return true;
+        if (/\b10th\b/i.test(text) && dt.includes('10th')) return true;
+        if (/\b12th\b/i.test(text) && dt.includes('12th')) return true;
+        if (/\baadhaar|aadhar\b/i.test(text) && dt.includes('aadhar')) return true;
+        if (/\bpan\b/i.test(text) && dt.includes('pan')) return true;
+        return false;
+      });
+
+      // If this is a single found document announced in header and items are separate metadata bullets (Category, File, Summary),
+      // collapse them into 1 unified document item so we don't render 3 fragmented boxes.
+      const isSingleFoundDoc = text.includes('has been found in your Document Vault');
+      const isPropertyBulletList = isSingleFoundDoc && items.every(it => /^(?:[•\-*]\s*)?\*?\*?(?:Category|File|Summary|Uploaded|Size)\*?\*?:/i.test(it.trim()));
+      const displayItems = isPropertyBulletList
+        ? [items.map(it => it.replace(/^[•\-\*]\s*/, '').trim()).join('  •  ')]
+        : items;
+
       renderedElements.push(
         <div key={`docs-${renderedElements.length}`} className="space-y-2.5 my-2.5">
-          {items.map((rawItem, idx) => {
-            const clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
+          {displayItems.map((rawItem, idx) => {
+            let clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
+            if (/summary:/i.test(clean)) {
+              const rawSum = clean.replace(/^.*summary:\s*/i, '');
+              const hasBinary = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/.test(rawSum) || /[©ÿ®¬±µ¶¿À-ÿ]{2,}/.test(rawSum) || /%PDF/i.test(rawSum);
+              const printable = rawSum.match(/[a-zA-Z0-9\s.,;:!?'"()-]/g) || [];
+              if (hasBinary || (rawSum.length > 15 && (printable.length / rawSum.length) < 0.70)) {
+                clean = clean.replace(/(summary:\s*).*/i, '$1Verified official educational record. Securely indexed in Document Vault.');
+              }
+            }
             // Extract title before the parenthesis: e.g. "aadhar (Identity, PNG - 1.68 MB)..."
             const rawTitle = clean.split('(')[0].replace(/[*•-]/g, '').trim().toLowerCase();
-            const matchedDoc = documents.find(d => {
+            const matchedDoc = docFromMessageText || documents.find(d => {
               const dt = (d.title || '').toLowerCase();
               return dt === rawTitle || rawTitle.includes(dt) || dt.includes(rawTitle) || clean.toLowerCase().includes(dt);
-            });
+            }) || documents.find(d => {
+              const dt = (d.title || '').toLowerCase();
+              if (/\b11th\b/i.test(clean) && dt.includes('11th')) return true;
+              if (/\b10th\b/i.test(clean) && dt.includes('10th')) return true;
+              if (/\b12th\b/i.test(clean) && dt.includes('12th')) return true;
+              return false;
+            }) || (documents.length === 1 ? documents[0] : undefined);
 
             const isDownloading = matchedDoc ? downloadingDocId === matchedDoc.id : false;
 

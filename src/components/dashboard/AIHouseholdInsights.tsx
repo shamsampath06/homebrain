@@ -8,7 +8,7 @@ export const AIHouseholdInsights: React.FC = () => {
 
   // 1. Clinical Adherence
   const totalMeds = medicines.length;
-  const takenMedsCount = medicineLogs.length;
+  const takenMedsCount = medicineLogs.filter(l => l.status === 'Taken').length;
   const adherenceRate = totalMeds > 0 ? Math.min(100, Math.round((takenMedsCount / totalMeds) * 100)) : 100;
 
   // 2. Unpaid Bills

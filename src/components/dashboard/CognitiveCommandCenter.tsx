@@ -125,7 +125,7 @@ Standard Single-Doc RAG        & 78.4\\% & 14.1\\% & 0.741 & Unenforced \\\\
   const adherenceMetrics = useMemo(() => {
     if (medicines.length === 0) return { score: 100, takenCount: 0, totalDoses: 0, status: 'Optimal' };
     const today = new Date().toISOString().split('T')[0];
-    const todaysLogs = medicineLogs.filter(log => log.timestamp?.startsWith(today));
+    const todaysLogs = medicineLogs.filter(log => log.timestamp?.startsWith(today) && log.status === 'Taken');
     const totalScheduled = medicines.length; // baseline daily prescriptions
     const score = totalScheduled > 0 ? Math.min(100, Math.round((todaysLogs.length / totalScheduled) * 100)) : 100;
     const status = score >= 80 ? 'Optimal' : score >= 50 ? 'Caution' : 'Critical';

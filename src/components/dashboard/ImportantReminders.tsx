@@ -20,7 +20,10 @@ const formatReminderDateTime = (raw: string): string => {
 export const ImportantReminders: React.FC = () => {
   const { reminders, toggleReminder, navigateToSubScreen } = useHomeBrain();
 
-  const activeReminders = reminders.slice(0, 5);
+  const activeReminders = [
+    ...reminders.filter(r => !r.completed),
+    ...reminders.filter(r => r.completed)
+  ].slice(0, 5);
 
   return (
     <section className="spatial-card p-5 sm:p-6 bg-white dark:bg-[#0D1322] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-sm relative overflow-hidden">

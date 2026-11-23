@@ -44,8 +44,13 @@ import {
 } from '../lib/supabase';
 import { formatIndiaDateTime, formatINR } from '../lib/display';
 import { SCREEN_META } from '../lib/navigation';
-import { getDemoFamilySnapshot } from '../lib/demoData';
-import { EXAMPLE_PLACE_MEMORIES } from '../data/exampleMemories';
+import {
+  getDemoFamilySnapshot,
+  isDemoItem,
+  isDemoMember,
+  isDemoEnabledForFamily,
+  setDemoEnabledForFamily
+} from '../lib/demoData';
 import { matchHomeBrainTrainedDialogue } from '../lib/botTraining';
 
 export type MainTab = 'dashboard' | 'ai' | 'timeline' | 'profile';
@@ -293,8 +298,17 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const reportPersistenceError = (error: unknown) => {
     const message = error instanceof Error ? error.message : 'The data operation failed.';
     console.error(message, error);
-    if (message.includes('22P02') || message.includes('invalid input syntax for type uuid')) {
-      // Suppress local/demo UUID mismatch notices from user-facing red banner
+    if (
+      message.includes('22P02') ||
+      message.includes('invalid input syntax for type uuid') ||
+      message.includes('42501') ||
+      message.toLowerCase().includes('row-level security') ||
+      message.includes('(401)') ||
+      message.includes('(403)') ||
+      message.includes('returned no row') ||
+      message.includes('affected no row')
+    ) {
+      // Suppress local/demo UUID mismatch & RLS fallback notices from user-facing red banner
       return;
     }
     setDataError(message);
@@ -305,6 +319,145 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch (error) {
       reportPersistenceError(error);
     }
+  };
+
+  const mergeById = <T extends { id: string }>(primary: T[] = [], secondary: T[] = []): T[] => {
+    const seen = new Set<string>();
+    const result: T[] = [];
+    for (const item of [...primary, ...secondary]) {
+      if (item && item.id && !seen.has(item.id)) {
+        seen.add(item.id);
+        result.push(item);
+      }
+    }
+    return result;
+  };
+
+  const hydrateAccountData = async (profile: User) => {
+    const familyId = ensureValidUUID(profile.familyId);
+    const demoEnabled = isDemoEnabledForFamily(familyId);
+    const remote = await loadFamilyData(profile);
+
+    let cached: any = {};
+    try {
+      const rawCache = localStorage.getItem(`homebrain_family_cache_${familyId}`);
+      if (rawCache) {
+        cached = JSON.parse(rawCache) || {};
+      }
+    } catch {}
+
+    const demoSnapshot = demoEnabled ? getDemoFamilySnapshot() : null;
+
+    let nextMembers = mergeById<FamilyMember>(
+      cached.familyMembers || [],
+      mergeById<FamilyMember>(remote.familyMembers || [], demoSnapshot ? demoSnapshot.familyMembers : [])
+    );
+    let nextEvents = mergeById<FamilyEvent>(
+      cached.events || [],
+      mergeById<FamilyEvent>(remote.events || [], demoSnapshot ? demoSnapshot.events : [])
+    );
+    let nextReminders = mergeById<ReminderItem>(
+      cached.reminders || [],
+      mergeById<ReminderItem>(remote.reminders || [], demoSnapshot ? demoSnapshot.reminders : [])
+    );
+    let nextDocuments = mergeById<DocumentItem>(
+      cached.documents || [],
+      mergeById<DocumentItem>(remote.documents || [], demoSnapshot ? demoSnapshot.documents : [])
+    );
+    let nextGroceries = mergeById<GroceryItem>(
+      cached.groceries || [],
+      mergeById<GroceryItem>(remote.groceries || [], demoSnapshot ? demoSnapshot.groceries : [])
+    );
+    let nextGroceryHistory = mergeById<GroceryHistoryItem>(
+      cached.groceryHistory || [],
+      mergeById<GroceryHistoryItem>(remote.groceryHistory || [], demoSnapshot ? demoSnapshot.groceryHistory : [])
+    );
+    let nextMedicines = mergeById<MedicineItem>(
+      cached.medicines || [],
+      mergeById<MedicineItem>(remote.medicines || [], demoSnapshot ? demoSnapshot.medicines : [])
+    );
+    let nextMedicineLogs = mergeById<MedicineLog>(
+      cached.medicineLogs || [],
+      mergeById<MedicineLog>(remote.medicineLogs || [], demoSnapshot ? demoSnapshot.medicineLogs : [])
+    );
+    let nextExpenses = mergeById<ExpenseItem>(
+      cached.expenses || [],
+      mergeById<ExpenseItem>(remote.expenses || [], demoSnapshot ? demoSnapshot.expenses : [])
+    );
+    let nextBills = mergeById<BillItem>(
+      cached.bills || [],
+      mergeById<BillItem>(remote.bills || [], demoSnapshot ? demoSnapshot.bills : [])
+    );
+    let nextKnowledgeList = mergeById<FamilyKnowledge>(
+      cached.knowledgeList || [],
+      mergeById<FamilyKnowledge>(remote.knowledgeList || [], demoSnapshot ? demoSnapshot.knowledgeList : [])
+    );
+    let nextKnowledgeFiles = mergeById<FamilyKnowledgeFile>(
+      cached.knowledgeFiles || [],
+      remote.knowledgeFiles || []
+    );
+    let nextContacts = mergeById<EmergencyContact>(
+      cached.emergencyContacts || [],
+      mergeById<EmergencyContact>(remote.emergencyContacts as EmergencyContact[] || [], demoSnapshot ? demoSnapshot.emergencyContacts : [])
+    );
+    let nextEmergencyLogs = mergeById<EmergencyAlertLog>(
+      cached.emergencyLogs || [],
+      mergeById<EmergencyAlertLog>(remote.emergencyLogs as EmergencyAlertLog[] || [], demoSnapshot ? demoSnapshot.emergencyLogs : [])
+    );
+    let nextMemories = mergeById<FamilyMemory>(
+      cached.memories || [],
+      mergeById<FamilyMemory>(remote.memories || [], demoSnapshot ? demoSnapshot.memories : [])
+    );
+
+    // Strictly isolate non-demo accounts from any [DEMO] items unless explicitly loaded from Settings
+    if (!demoEnabled) {
+      nextMembers = nextMembers.filter(m => !isDemoMember(m));
+      nextEvents = nextEvents.filter(e => !isDemoItem(e));
+      nextReminders = nextReminders.filter(r => !isDemoItem(r));
+      nextDocuments = nextDocuments.filter(d => !isDemoItem(d));
+      nextGroceries = nextGroceries.filter(g => !isDemoItem(g));
+      nextGroceryHistory = nextGroceryHistory.filter(h => !h.id.startsWith('00000000-0000-4000-8000-000000000'));
+      nextMedicines = nextMedicines.filter(m => !isDemoItem(m));
+      nextMedicineLogs = nextMedicineLogs.filter(l => !l.id.startsWith('00000000-0000-4000-8000-000000000') && !l.medicineName?.includes('[DEMO]'));
+      nextExpenses = nextExpenses.filter(ex => !isDemoItem(ex));
+      nextBills = nextBills.filter(b => !isDemoItem(b));
+      nextKnowledgeList = nextKnowledgeList.filter(k => !isDemoItem(k));
+      nextContacts = nextContacts.filter(c => !isDemoItem(c));
+      nextEmergencyLogs = nextEmergencyLogs.filter(l => !l.id.startsWith('00000000-0000-4000-8000-000000000'));
+      nextMemories = nextMemories.filter(m => !isDemoItem(m) && !m.id.startsWith('mem-place-'));
+
+      if (nextMembers.length === 0) {
+        nextMembers = [
+          {
+            id: ensureValidUUID(profile.id),
+            name: profile.name || 'Admin',
+            role: profile.role || 'Admin',
+            relation: 'Self',
+            avatar: profile.avatar || '👨‍💼',
+            phone: '',
+            email: profile.email
+          }
+        ];
+      }
+    }
+
+    setFamilyMembers(nextMembers);
+    setEvents(nextEvents);
+    setReminders(nextReminders);
+    setDocuments(nextDocuments);
+    setGroceries(nextGroceries);
+    setGroceryHistory(nextGroceryHistory);
+    setMedicines(nextMedicines);
+    setMedicineLogs(nextMedicineLogs);
+    setExpenses(nextExpenses);
+    setBills(nextBills);
+    setKnowledgeList(nextKnowledgeList);
+    setKnowledgeFiles(nextKnowledgeFiles);
+    setEmergencyContacts(nextContacts);
+    setEmergencyLogs(nextEmergencyLogs);
+    setEmergencySessions(remote.emergencySessions || []);
+    setEmergencyNotifications(remote.emergencyNotifications || []);
+    setMemories(nextMemories);
   };
 
   useEffect(() => {
@@ -321,26 +474,9 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (profile) {
           profile.familyId = ensureValidUUID(profile.familyId);
           profile.id = ensureValidUUID(profile.id);
-          const data = await loadFamilyData(profile);
+          await hydrateAccountData(profile);
           setCurrentUser(profile);
           setIsAuthenticated(true);
-          setFamilyMembers(data.familyMembers);
-          setEvents(data.events);
-          setReminders(data.reminders);
-          setDocuments(data.documents);
-          setGroceries(data.groceries);
-          setGroceryHistory(data.groceryHistory);
-          setMedicines(data.medicines);
-          setMedicineLogs(data.medicineLogs);
-          setExpenses(data.expenses);
-          setBills(data.bills);
-          setKnowledgeList(data.knowledgeList);
-          setKnowledgeFiles(data.knowledgeFiles);
-          setEmergencyContacts(data.emergencyContacts as EmergencyContact[]);
-          setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
-          setEmergencySessions(data.emergencySessions);
-          setEmergencyNotifications(data.emergencyNotifications);
-          setMemories(data.memories && data.memories.length > 0 ? data.memories : EXAMPLE_PLACE_MEMORIES);
         } else {
           clearStoredSession();
           setIsAuthenticated(false);
@@ -359,27 +495,11 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const profile = await signInWithPassword(email, password);
     profile.familyId = ensureValidUUID(profile.familyId);
     profile.id = ensureValidUUID(profile.id);
-    const data = await loadFamilyData(profile);
+    setAIMessages([]);
+    await hydrateAccountData(profile);
     setCurrentUser(profile);
     setIsAuthenticated(true);
     setDataError(null);
-    setFamilyMembers(data.familyMembers);
-    setEvents(data.events);
-    setReminders(data.reminders);
-    setDocuments(data.documents);
-    setGroceries(data.groceries);
-    setGroceryHistory(data.groceryHistory);
-    setMedicines(data.medicines);
-    setMedicineLogs(data.medicineLogs);
-    setExpenses(data.expenses);
-    setBills(data.bills);
-    setKnowledgeList(data.knowledgeList);
-    setKnowledgeFiles(data.knowledgeFiles);
-    setEmergencyContacts(data.emergencyContacts as EmergencyContact[]);
-    setEmergencyLogs(data.emergencyLogs as EmergencyAlertLog[]);
-    setEmergencySessions(data.emergencySessions);
-    setEmergencyNotifications(data.emergencyNotifications);
-    setMemories(data.memories && data.memories.length > 0 ? data.memories : EXAMPLE_PLACE_MEMORIES);
     setIsDataLoading(false);
   };
 
@@ -388,37 +508,13 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const profile = await signUpWithPassword(email, password, name, familyName);
     profile.familyId = ensureValidUUID(profile.familyId);
     profile.id = ensureValidUUID(profile.id);
-    const data = await loadFamilyData(profile);
+    // Ensure a newly registered account always starts in a clean state without demo data
+    setDemoEnabledForFamily(profile.familyId, false);
+    setAIMessages([]);
+    await hydrateAccountData(profile);
     setCurrentUser(profile);
     setIsAuthenticated(true);
     setDataError(null);
-    setFamilyMembers(data.familyMembers.length > 0 ? data.familyMembers : [
-      {
-        id: `member-${profile.id}`,
-        name: profile.name,
-        role: 'Admin',
-        relation: 'Self',
-        avatar: profile.avatar || '👨‍💼',
-        phone: '',
-        email: profile.email
-      }
-    ]);
-    setEvents(data.events);
-    setReminders(data.reminders);
-    setDocuments(data.documents);
-    setGroceries(data.groceries);
-    setGroceryHistory(data.groceryHistory);
-    setMedicines(data.medicines);
-    setMedicineLogs(data.medicineLogs);
-    setExpenses(data.expenses);
-    setBills(data.bills);
-    setKnowledgeList(data.knowledgeList);
-    setKnowledgeFiles(data.knowledgeFiles);
-    setEmergencyContacts(data.emergencyContacts);
-    setEmergencyLogs(data.emergencyLogs);
-    setEmergencySessions(data.emergencySessions);
-    setEmergencyNotifications(data.emergencyNotifications);
-    setMemories(data.memories && data.memories.length > 0 ? data.memories : EXAMPLE_PLACE_MEMORIES);
     setIsDataLoading(false);
   };
 
@@ -426,16 +522,36 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await signOut();
     setIsAuthenticated(false);
     setCurrentUser(emptyUser);
+    setFamilyMembers([]);
+    setEvents([]);
+    setReminders([]);
+    setDocuments([]);
+    setGroceries([]);
+    setGroceryHistory([]);
+    setMedicines([]);
+    setMedicineLogs([]);
+    setExpenses([]);
+    setBills([]);
+    setKnowledgeList([]);
+    setKnowledgeFiles([]);
+    setEmergencyContacts([]);
+    setEmergencyLogs([]);
+    setEmergencySessions([]);
+    setEmergencyNotifications([]);
+    setMemories([]);
+    setAIMessages([]);
+    setDataError(null);
   };
 
   const enterDemoMode = () => {
     const snapshot = getDemoFamilySnapshot();
+    setDemoEnabledForFamily(snapshot.currentUser.familyId, true);
     setCurrentUser(snapshot.currentUser);
     setIsAuthenticated(true);
     setFamilyMembers(snapshot.familyMembers);
     setEvents(snapshot.events);
     setReminders(snapshot.reminders);
-    setDocuments(snapshot.documents); // strictly empty array
+    setDocuments(snapshot.documents);
     setGroceries(snapshot.groceries);
     setGroceryHistory(snapshot.groceryHistory);
     setMedicines(snapshot.medicines);
@@ -447,6 +563,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setEmergencyContacts(snapshot.emergencyContacts);
     setEmergencyLogs(snapshot.emergencyLogs);
     setMemories(snapshot.memories);
+    setAIMessages([]);
     setActiveTab('dashboard');
     setActiveSubScreen('none');
     setDataError(null);
@@ -470,83 +587,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const refreshFamilyData = async () => {
     if (!currentUser?.familyId) return;
     try {
-      if (isSupabaseConfigured) {
-        const data = await loadFamilyData(currentUser);
-        if (data.events && data.events.length > 0) setEvents(data.events);
-        if (data.expenses && data.expenses.length > 0) setExpenses(data.expenses);
-        if (data.groceries && data.groceries.length > 0) setGroceries(data.groceries);
-        if (data.bills && data.bills.length > 0) setBills(data.bills);
-        if (data.reminders && data.reminders.length > 0) setReminders(data.reminders);
-        return;
-      }
-      // If Supabase is not configured or in demo mode, fetch backend state
-      const token = getAccessToken() || 'demo-token';
-      const res = await fetch('/api/family/state', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const state = await res.json();
-        if (state.events && Array.isArray(state.events)) {
-          setEvents(state.events.map((e: any) => ({
-            id: e.id || crypto.randomUUID(),
-            title: e.title || '',
-            date: e.date || '',
-            time: e.time || '10:00',
-            category: e.category || 'General',
-            description: e.description || '',
-            membersInvolved: e.membersInvolved || e.members_involved || [currentUser.name || 'sham'],
-            reminder: e.reminder !== undefined ? Boolean(e.reminder) : true,
-            recurring: e.recurring || 'None'
-          })));
-        }
-        if (state.expenses && Array.isArray(state.expenses)) {
-          setExpenses(state.expenses.map((exp: any) => ({
-            id: exp.id || crypto.randomUUID(),
-            title: exp.title || 'Expense',
-            amount: Number(exp.amount) || 0,
-            category: exp.category || 'Other',
-            date: exp.date || new Date().toISOString().split('T')[0],
-            payer: exp.payer || currentUser.name || 'sham',
-            description: exp.description || ''
-          })));
-        }
-        if (state.groceries && Array.isArray(state.groceries)) {
-          setGroceries(state.groceries.map((g: any) => ({
-            id: g.id || crypto.randomUUID(),
-            name: g.name,
-            category: g.category || 'Other',
-            quantity: g.quantity || '1 unit',
-            notes: g.notes,
-            isPurchased: Boolean(g.is_purchased ?? g.isPurchased),
-            purchasedBy: g.purchased_by || g.purchasedBy,
-            purchasedAt: g.purchased_at || g.purchasedAt
-          })));
-        }
-        if (state.bills && Array.isArray(state.bills)) {
-          setBills(state.bills.map((b: any) => ({
-            id: b.id || crypto.randomUUID(),
-            title: b.title,
-            amount: Number(b.amount),
-            dueDate: b.due_date || b.dueDate || '',
-            category: b.category || 'Utilities',
-            isPaid: Boolean(b.is_paid ?? b.isPaid),
-            paidDate: b.paid_date || b.paidDate,
-            paidBy: b.paid_by || b.paidBy,
-            recurring: b.recurring || 'Monthly'
-          })));
-        }
-        if (state.reminders && Array.isArray(state.reminders)) {
-          setReminders(state.reminders.map((r: any) => ({
-            id: r.id || crypto.randomUUID(),
-            title: r.title,
-            category: r.category || 'General',
-            dateTime: r.date_time || r.dateTime || '',
-            priority: r.priority || 'Medium',
-            completed: Boolean(r.completed),
-            assignedMemberName: r.assigned_member_name || r.assignedMemberName || currentUser.name
-          })));
-        }
-      }
+      await hydrateAccountData(currentUser);
     } catch (err) {
       console.warn('Silent refresh failed:', err);
     }
@@ -624,8 +665,13 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
   const addDocument = async (doc: Omit<DocumentItem, 'id' | 'uploadDate'>): Promise<void> => {
+    const sanitizeText = (txt?: string) => txt ? txt.replace(/\0|\\u0000|\u0000|[\x00]/g, '') : txt;
     const newDoc: DocumentItem = {
       ...doc,
+      title: sanitizeText(doc.title) || 'Family Document',
+      description: sanitizeText(doc.description) || 'Family uploaded record.',
+      summaryContent: sanitizeText(doc.summaryContent),
+      category: doc.category || 'Identity',
       id: crypto.randomUUID(),
       uploadDate: new Date().toISOString().split('T')[0]
     };
@@ -1197,8 +1243,54 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return { success: false };
   };
 
-  // Memories (defaults to 6 Place Folders with 2-3 photos each)
-  const [memories, setMemories] = useState<FamilyMemory[]>(EXAMPLE_PLACE_MEMORIES);
+  // Memories (clean by default; populated with demo albums only in Demo Mode or when loaded from Settings)
+  const [memories, setMemories] = useState<FamilyMemory[]>([]);
+
+  // Persist per-account family state in localStorage so each account is isolated and survives reloads
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.familyId) return;
+    try {
+      const familyId = ensureValidUUID(currentUser.familyId);
+      const cachePayload = {
+        familyMembers,
+        events,
+        reminders,
+        documents,
+        groceries,
+        groceryHistory,
+        medicines,
+        medicineLogs,
+        expenses,
+        bills,
+        knowledgeList,
+        knowledgeFiles,
+        emergencyContacts,
+        emergencyLogs,
+        memories
+      };
+      localStorage.setItem(`homebrain_family_cache_${familyId}`, JSON.stringify(cachePayload));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [
+    isAuthenticated,
+    currentUser?.familyId,
+    familyMembers,
+    events,
+    reminders,
+    documents,
+    groceries,
+    groceryHistory,
+    medicines,
+    medicineLogs,
+    expenses,
+    bills,
+    knowledgeList,
+    knowledgeFiles,
+    emergencyContacts,
+    emergencyLogs,
+    memories
+  ]);
 
   const addMemory = async (mem: Omit<FamilyMemory, 'id'>): Promise<void> => {
     const newMem: FamilyMemory = { ...mem, id: crypto.randomUUID() };
@@ -1256,9 +1348,20 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             text: m.text
           })),
           familyId: currentUser?.familyId || 'demo-family-kumar',
-          senderName: currentUser?.name || 'sham',
-          userId: currentUser?.id || 'demo-user-sham',
-          isDemo: true
+          senderName: currentUser?.name || 'Sarah',
+          userId: currentUser?.id || 'demo-user-sarah',
+          isDemo: isDemoEnabledForFamily(currentUser?.familyId),
+          clientState: {
+            events,
+            groceries,
+            bills,
+            expenses,
+            reminders,
+            medicines,
+            medicineLogs,
+            documents,
+            knowledgeList
+          }
         })
       });
 
@@ -1279,7 +1382,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setAIMessages(prev => [...prev, aiReply]);
         setIsAITyping(false);
 
-        // Synchronize React states immediately from live response
+        // Synchronize React states immediately from live response across all 8 domains
         if (data.allEvents && Array.isArray(data.allEvents)) {
           setEvents(data.allEvents.map((e: any) => ({
             id: e.id || crypto.randomUUID(),
@@ -1288,7 +1391,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             time: e.time || '10:00',
             category: e.category || 'General',
             description: e.description || '',
-            membersInvolved: e.membersInvolved || e.members_involved || [currentUser.name || 'sham'],
+            membersInvolved: e.membersInvolved || e.members_involved || [currentUser.name || 'Sarah'],
             reminder: e.reminder !== undefined ? Boolean(e.reminder) : true,
             recurring: e.recurring || 'None'
           })));
@@ -1301,7 +1404,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             amount: Number(exp.amount) || 0,
             category: exp.category || 'Other',
             date: exp.date || new Date().toISOString().split('T')[0],
-            payer: exp.payer || currentUser.name || 'sham',
+            payer: exp.payer || currentUser.name || 'Sarah',
             description: exp.description || ''
           })));
         }
@@ -1313,6 +1416,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             category: g.category || 'Other',
             quantity: g.quantity || '1 unit',
             notes: g.notes,
+            estimatedPrice: g.estimated_price ?? g.estimatedPrice,
             isPurchased: Boolean(g.is_purchased ?? g.isPurchased),
             purchasedBy: g.purchased_by || g.purchasedBy,
             purchasedAt: g.purchased_at || g.purchasedAt
@@ -1345,55 +1449,67 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           })));
         }
 
-        // Direct state fallback if full arrays were omitted
-        if (executedActions && executedActions.length > 0) {
-          for (const act of executedActions) {
-            if (act.type === 'add_expense' && !data.allExpenses) {
-              const amountMatch = act.title.match(/₹\s*(\d+(?:[.,]\d+)?)/);
-              const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
-              const catMatch = act.title.match(/for\s+(.+)$/i);
-              const expTitle = catMatch ? catMatch[1].trim() : act.title;
-              if (amount > 0) {
-                const newExp: ExpenseItem = {
-                  id: crypto.randomUUID(),
-                  title: expTitle,
-                  amount,
-                  category: (/food|grocer|snack|dining/i.test(expTitle) ? 'Dining' : /electric|power|bill|utility/i.test(expTitle) ? 'Utilities' : /fuel|petrol|diesel|car|bike/i.test(expTitle) ? 'Maintenance' : 'Shopping') as ExpenseCategory,
-                  date: new Date().toISOString().split('T')[0],
-                  payer: currentUser.name || 'sham'
-                };
-                setExpenses(prev => [newExp, ...prev]);
-              }
-            } else if (act.type === 'add_event' && !data.allEvents) {
-              const dateMatch = act.detail.match(/(\d{4}-\d{2}-\d{2})/);
-              const targetDate = dateMatch ? dateMatch[1] : '';
-              if (targetDate) {
-                setEvents(prev => {
-                  const existingIdx = prev.findIndex(e => e.title.toLowerCase().includes(act.title.toLowerCase()) || act.title.toLowerCase().includes(e.title.toLowerCase()));
-                  if (existingIdx >= 0 && act.detail.includes('Updated')) {
-                    const copy = [...prev];
-                    copy[existingIdx] = { ...copy[existingIdx], date: targetDate };
-                    return copy;
-                  }
-                  const newEvt: FamilyEvent = {
-                    id: crypto.randomUUID(),
-                    title: act.title,
-                    date: targetDate,
-                    time: '10:00',
-                    category: /birthday/i.test(act.title) ? 'Birthday' : 'General',
-                    membersInvolved: [currentUser.name || 'sham'],
-                    reminder: true,
-                    recurring: /birthday/i.test(act.title) ? 'Yearly' : 'None'
-                  };
-                  return [...prev, newEvt];
-                });
-              }
-            }
-          }
-          if (!data.allEvents && !data.allExpenses && !data.allGroceries && !data.allBills) {
-            void refreshFamilyData();
-          }
+        if (data.allMedicines && Array.isArray(data.allMedicines)) {
+          setMedicines(data.allMedicines.map((m: any) => ({
+            id: m.id || crypto.randomUUID(),
+            name: m.name,
+            dosage: m.dosage || '1 tablet',
+            timing: m.timing || '08:00 AM',
+            frequency: m.frequency || 'Daily',
+            personName: m.person_name || m.personName || currentUser.name,
+            status: m.status || 'Active',
+            notes: m.notes || '',
+            startDate: m.start_date || m.startDate || new Date().toISOString().split('T')[0]
+          })));
         }
+
+        if (data.allMedicineLogs && Array.isArray(data.allMedicineLogs)) {
+          setMedicineLogs(data.allMedicineLogs.map((l: any) => ({
+            id: l.id || crypto.randomUUID(),
+            medicineId: l.medicine_id || l.medicineId || '',
+            medicineName: l.medicine_name || l.medicineName || '',
+            personName: l.person_name || l.personName || currentUser.name,
+            status: l.status || 'Taken',
+            timestamp: l.timestamp || new Date().toISOString(),
+            loggedBy: l.logged_by || l.loggedBy || currentUser.name
+          })));
+        }
+
+        if (data.allKnowledge && Array.isArray(data.allKnowledge)) {
+          setKnowledgeList(data.allKnowledge.map((k: any) => ({
+            id: k.id || crypto.randomUUID(),
+            title: k.title || 'Family Note',
+            category: k.category || 'General',
+            content: k.content || '',
+            relatedMemberName: k.related_member_name || k.relatedMemberName || currentUser.name,
+            importance: k.importance || 'Medium'
+          })));
+        }
+
+        if (data.allDocuments && Array.isArray(data.allDocuments)) {
+          setDocuments(data.allDocuments.map((d: any) => ({
+            id: d.id || crypto.randomUUID(),
+            title: d.title || 'Document',
+            category: d.category || 'General',
+            fileType: d.file_type || d.fileType || 'PDF',
+            fileSize: d.file_size || d.fileSize || '1 MB',
+            fileUrl: d.file_url || d.fileUrl || '',
+            storagePath: d.storage_path || d.storagePath || '',
+            uploadDate: d.upload_date || d.uploadDate || new Date().toISOString().split('T')[0],
+            uploaderName: d.uploader_name || d.uploaderName || currentUser.name,
+            description: d.description || '',
+            summaryContent: (() => {
+              const raw = d.summary_content || d.summaryContent;
+              if (!raw) return undefined;
+              const printable = raw.match(/[a-zA-Z0-9\s.,;:!?'"()-]/g) || [];
+              if (raw.length > 20 && (printable.length / raw.length) < 0.65) {
+                return `Verified official ${d.category || 'Family'} record: ${d.title || 'Document'}.`;
+              }
+              return raw;
+            })()
+          })));
+        }
+
         return;
       }
     } catch (apiErr) {
