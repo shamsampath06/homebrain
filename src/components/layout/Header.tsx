@@ -27,22 +27,21 @@ export const Header: React.FC = () => {
   });
 
   return (
-    <header className="sticky top-0 z-30 bg-[#fffdf7]/95 dark:bg-[#080B12]/95 backdrop-blur-2xl border-b border-[#eee3c5] dark:border-white/10 text-slate-900 dark:text-white transition-colors shadow-[0_10px_30px_-10px_rgba(122,91,24,0.18)]">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
+    <header className="sticky top-0 z-30 bg-[#fffdf7]/95 dark:bg-[#080B12]/95 backdrop-blur-2xl border-b border-[#eee3c5] dark:border-white/10 text-slate-900 dark:text-white transition-colors shadow-sm shrink-0">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 pt-[max(0.75rem,env(safe-area-inset-top))] flex items-center justify-between gap-2">
         {/* Greeting & Date */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <img
             src="/homebrain-logo.jpg"
             alt="HomeBrain Logo"
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl object-cover ring-1 ring-cyan-400/40 shadow-md shadow-cyan-500/20 lg:hidden shrink-0"
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl object-cover ring-1 ring-cyan-400/40 shadow-sm shrink-0"
           />
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="text-sm sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-1 sm:gap-2 font-mono truncate">
-                {getGreeting()}, {currentUser.name.split(' ')[0]} <span className="animate-bounce inline-block">👋</span>
-              </h1>
-            </div>
-            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate max-w-[140px] xs:max-w-[200px] sm:max-w-none">
+            <h1 className="text-sm sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1 font-mono leading-tight">
+              <span>{getGreeting()}, {currentUser.name.split(' ')[0]}</span>
+              <span className="animate-bounce inline-block">👋</span>
+            </h1>
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate max-w-[150px] xs:max-w-[200px] sm:max-w-none">
               {currentDate} • <span className="text-brand-600 dark:text-cyan-400/90 font-medium">Telemetry Active</span>
             </p>
           </div>

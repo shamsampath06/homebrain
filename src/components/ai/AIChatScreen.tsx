@@ -297,7 +297,7 @@ export const AIChatScreen: React.FC = () => {
   }, [speakingMsgId]);
 
   return (
-    <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-card border border-slate-200/80 dark:border-slate-700/80 overflow-hidden min-h-0">
+    <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col bg-white dark:bg-slate-900 sm:rounded-3xl shadow-card sm:border sm:border-slate-200/80 sm:dark:border-slate-700/80 overflow-hidden min-h-0">
       {/* AI Header */}
       <div className="p-3.5 sm:p-4 sm:px-6 bg-gradient-to-r from-brand-600 via-brand-500 to-amber-500 text-white flex items-center justify-between shadow-md shrink-0">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -701,54 +701,56 @@ export const AIChatScreen: React.FC = () => {
       {/* Input Bar */}
       <form
         onSubmit={handleSend}
-        className="p-2 sm:p-3.5 bg-slate-50 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-700 flex items-center gap-1.5 sm:gap-2 shrink-0 z-10"
+        className="p-2 sm:p-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-700 flex items-center gap-1 sm:gap-2 shrink-0 z-10 w-full"
       >
-        <button
-          type="button"
-          onClick={() => setShowUploadModal(true)}
-          className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors relative shrink-0 active:scale-95 touch-manipulation"
-          title="Upload Documents or Photos (Multimodal)"
-        >
-          <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
-          {attachments.length > 0 && (
-            <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-brand-500 ring-2 ring-white" />
-          )}
-        </button>
+        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowUploadModal(true)}
+            className="p-1.5 sm:p-2 rounded-xl text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors relative shrink-0 active:scale-95 touch-manipulation"
+            title="Upload Documents or Photos (Multimodal)"
+          >
+            <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+            {attachments.length > 0 && (
+              <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-brand-500 ring-2 ring-white" />
+            )}
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setShowVisionModal(true)}
-          className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors shrink-0 active:scale-95 touch-manipulation"
-          title="Multimodal Camera & Vision Scanner"
-        >
-          <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
-        </button>
+          <button
+            type="button"
+            onClick={() => setShowVisionModal(true)}
+            className="p-1.5 sm:p-2 rounded-xl text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors shrink-0 active:scale-95 touch-manipulation"
+            title="Multimodal Camera & Vision Scanner"
+          >
+            <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
 
-        <button
-          type="button"
-          onClick={handleToggleVoice}
-          className={`p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-colors shrink-0 active:scale-95 touch-manipulation ${
-            isVoiceActive
-              ? 'bg-rose-500 text-white animate-pulse'
-              : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'
-          }`}
-          title="Voice Assistant Mode"
-        >
-          <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
-        </button>
+          <button
+            type="button"
+            onClick={handleToggleVoice}
+            className={`p-1.5 sm:p-2 rounded-xl transition-colors shrink-0 active:scale-95 touch-manipulation ${
+              isVoiceActive
+                ? 'bg-rose-500 text-white animate-pulse'
+                : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'
+            }`}
+            title="Voice Assistant Mode"
+          >
+            <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
+        </div>
 
         <input
           type="text"
           placeholder="Ask HomeBrain AI..."
           value={inputText}
           onChange={e => setInputText(e.target.value)}
-          className="flex-1 min-w-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-xs sm:text-sm focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white"
+          className="flex-1 w-0 min-w-0 px-3 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-xs sm:text-sm focus:ring-2 focus:ring-brand-500 text-slate-900 dark:text-white"
         />
 
         <button
           type="submit"
           disabled={!inputText.trim() && attachments.length === 0}
-          className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white shadow-md transition-all flex items-center justify-center shrink-0 active:scale-95 touch-manipulation cursor-pointer"
+          className="shrink-0 p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white shadow-md transition-all flex items-center justify-center min-w-[36px] h-[36px] sm:min-w-[42px] sm:h-[42px] active:scale-95 touch-manipulation cursor-pointer"
           title="Send message"
         >
           <Send className="w-4 h-4 sm:w-5 sm:h-5" />

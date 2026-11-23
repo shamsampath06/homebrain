@@ -197,8 +197,8 @@ const AppContent: React.FC = () => {
         {/* Dynamic Screen Viewport with Staggered Entrance */}
         <main className={`flex-1 overflow-y-auto ${
           activeTab === 'ai' && activeSubScreen === 'none'
-            ? 'p-2 sm:p-4 lg:p-6 pb-20 lg:pb-6 flex flex-col min-h-0'
-            : 'px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 lg:pb-8'
+            ? 'p-0 sm:p-4 lg:p-6 pb-16 lg:pb-6 flex flex-col min-h-0'
+            : 'px-3 sm:px-6 lg:px-8 py-3 sm:py-6 pb-20 lg:pb-8'
         }`}>
           {isDataLoading && (
             <div className="max-w-7xl mx-auto mb-4 rounded-2xl bg-brand-50/90 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 px-4 py-3 text-sm text-brand-700 dark:text-brand-300 flex items-center gap-2 shadow-sm animate-pulse">
