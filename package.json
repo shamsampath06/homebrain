@@ -5,11 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build:api": "esbuild server/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external",
+    "build": "tsc && vite build && npm run build:api",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "server": "ts-node-esm server/index.ts",
     "start": "vite"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",
