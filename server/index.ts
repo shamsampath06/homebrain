@@ -1559,7 +1559,12 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || '';
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || '';
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || '';
 const FAST2SMS_API_KEY = process.env.FAST2SMS_API_KEY || '';
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.RESEND_API_KEY_SHAM || '';
+// Multiple Resend accounts: sandbox keys can only deliver to their own account owner's inbox,
+// so each key is tried in turn until one accepts the recipient.
+const RESEND_API_KEYS = [process.env.RESEND_API_KEY, process.env.RESEND_API_KEY_SHAM]
+  .filter((k): k is string => Boolean(k && k.trim()))
+  .filter((k, i, arr) => arr.indexOf(k) === i);
 const EMAIL_FROM = process.env.EMAIL_FROM || 'HomeBrain SOS <onboarding@resend.dev>';
 
 const SMTP_USER = process.env.SMTP_USER || process.env.GMAIL_USER || '';
@@ -1897,56 +1902,54 @@ async function dispatchEmergencyEmail(
       }
     }
 
-    // 2. Try Resend if configured
-    if (RESEND_API_KEY) {
-      try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            from: EMAIL_FROM,
-            to: [rawEmail],
-            subject,
-            html: emailHtml
-          })
-        });
-
-        const resData = await res.json() as any;
-        if (res.ok && resData.id) {
-          results.push({
-            recipient: rawEmail,
-            recipientName: c.name,
-            status: 'ACCEPTED',
-            provider: 'resend',
-            messageId: resData.id,
-            dispatchedAt: now
+    // 2. Try Resend if configured (each configured key in turn)
+    if (RESEND_API_KEYS.length > 0) {
+      let lastError = 'Resend rejected email';
+      let delivered = false;
+      for (const apiKey of RESEND_API_KEYS) {
+        try {
+          const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              from: EMAIL_FROM,
+              to: [rawEmail],
+              subject,
+              html: emailHtml
+            })
           });
-          continue;
-        } else {
-          results.push({
-            recipient: rawEmail,
-            recipientName: c.name,
-            status: 'FAILED',
-            provider: 'resend',
-            error: resData.message || 'Resend rejected email',
-            dispatchedAt: now
-          });
-          continue;
+          const resData = await res.json().catch(() => ({})) as any;
+          if (res.ok && resData.id) {
+            results.push({
+              recipient: rawEmail,
+              recipientName: c.name,
+              status: 'ACCEPTED',
+              provider: 'resend',
+              messageId: resData.id,
+              dispatchedAt: now
+            });
+            delivered = true;
+            break;
+          }
+          lastError = resData.message || `Resend rejected email (HTTP ${res.status})`;
+        } catch (err: any) {
+          lastError = err.message || 'Resend network error';
         }
-      } catch (err: any) {
+      }
+      if (!delivered) {
         results.push({
           recipient: rawEmail,
           recipientName: c.name,
           status: 'FAILED',
           provider: 'resend',
-          error: err.message || 'Resend network error',
+          error: lastError,
           dispatchedAt: now
         });
-        continue;
       }
+      continue;
     }
 
     // 3. Neither configured
@@ -2009,15 +2012,21 @@ app.post('/api/emergency/alert', authenticateEmergencyUser, async (req: Request,
 
     // If client supplied verified contact list (e.g. in demo or recent update), merge them
     if (recipients.length > 0) {
-      const existingPhones = new Set(contactList.map(c => c.phone.replace(/[\s\-\(\)]/g, '')));
+      const existingPhones = new Set(contactList.map(c => (c.phone || '').replace(/[\s\-\(\)]/g, '')).filter(Boolean));
+      const existingEmails = new Set(contactList.map(c => (c.email || '').trim().toLowerCase()).filter(Boolean));
       recipients.forEach((r: any) => {
         const clean = (r.phone || '').replace(/[\s\-\(\)]/g, '');
-        if (clean && !existingPhones.has(clean)) {
+        const email = (r.email || '').trim().toLowerCase();
+        const phoneIsNew = Boolean(clean) && !existingPhones.has(clean);
+        const emailIsNew = Boolean(email) && !existingEmails.has(email);
+        if (phoneIsNew || emailIsNew) {
           contactList.push({
             name: r.name,
-            phone: r.phone,
+            phone: r.phone || '',
             email: r.email
           });
+          if (clean) existingPhones.add(clean);
+          if (email) existingEmails.add(email);
         }
       });
     }
@@ -2101,8 +2110,8 @@ app.post('/api/emergency/alert', authenticateEmergencyUser, async (req: Request,
         results: smsResults
       },
       email: {
-        providerConfigured: Boolean(RESEND_API_KEY),
-        activeProvider: RESEND_API_KEY ? 'resend' : 'none',
+        providerConfigured: Boolean(SMTP_USER && SMTP_PASS) || RESEND_API_KEYS.length > 0,
+        activeProvider: (SMTP_USER && SMTP_PASS) ? 'nodemailer' : RESEND_API_KEYS.length > 0 ? 'resend' : 'none',
         results: emailResults
       }
     };

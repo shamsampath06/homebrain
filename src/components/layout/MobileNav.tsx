@@ -35,7 +35,7 @@ export const MobileNav: React.FC = () => {
     },
     {
       id: 'modules',
-      label: 'Module Cards',
+      label: 'Cards',
       icon: LayoutGrid,
       isActive: isModulesActive,
       onClick: handleModulesClick

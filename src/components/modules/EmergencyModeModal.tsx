@@ -26,6 +26,7 @@ import {
   Clock
 } from 'lucide-react';
 import { EmergencyAlertLog } from '../../types';
+import { getSosRecipients } from '../../lib/sos';
 
 const DEFAULT_HOME_LOCATION = {
   address: 'Kadambanallur, Chennai Metropolitan Area, Arakkonam, Ranipet, Tamil Nadu, 631151, India',
@@ -78,12 +79,16 @@ export const EmergencyModeModal: React.FC = () => {
   const mapElement = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const watchId = useRef<number | null>(null);
-  const isIncomingSession = Boolean(emergencySession && emergencySession.initiatedBy !== currentUser.id);
+  const ownUserId = currentUser.id || 'demo-user-sarah';
+  const isIncomingSession = Boolean(emergencySession && emergencySession.status === 'active' && emergencySession.initiatedBy !== ownUserId);
   const locationForDisplay = useMemo(() => isIncomingSession && emergencySession
     ? { latitude: emergencySession.latitude, longitude: emergencySession.longitude, accuracyMeters: emergencySession.accuracyMeters || 0 }
     : coordinates, [emergencySession, isIncomingSession, coordinates]);
   const addressForDisplay = isIncomingSession && emergencySession ? emergencySession.address : address;
-  const isOwnActiveSession = emergencySession?.initiatedBy === currentUser.id && emergencySession.status === 'active';
+  const isOwnActiveSession = emergencySession?.initiatedBy === ownUserId && emergencySession.status === 'active';
+  // When the panel is reopened after an SOS, restore the latest alert so status + cancel stay available.
+  const currentAlert: EmergencyAlertLog | null = lastAlert || (isOwnActiveSession || step === 'sent' ? emergencyLogs[0] || null : null);
+  const sosRecipients = getSosRecipients(emergencyContacts);
   const getMapUrl = (location: { latitude: number; longitude: number }) =>
     `https://www.openstreetmap.org/?mlat=${location.latitude}&mlon=${location.longitude}#map=18/${location.latitude}/${location.longitude}`;
   const mapUrl = locationForDisplay ? getMapUrl(locationForDisplay) : '';
@@ -644,47 +649,88 @@ export const EmergencyModeModal: React.FC = () => {
       {(step === 'sent' || isOwnActiveSession) && !isIncomingSession && (
         <div className="py-4 space-y-4">
           {/* Dynamic Emergency Status Header */}
-          {lastAlert?.isResolved || lastAlert?.status === 'Cancelled' ? (
-            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-center space-y-1">
-              <ShieldCheck className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto" />
-              <h3 className="text-lg font-black text-emerald-900 dark:text-emerald-100">
-                EMERGENCY ALERT CANCELLED & MARKED SAFE
-              </h3>
-              <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                {cancelMessage || lastAlert?.resolvedReason || 'Situation resolved. Safe notice sent to emergency contacts.'}
-              </p>
-            </div>
-          ) : (lastAlert?.emailResults?.some(e => e.status === 'ACCEPTED' || e.status === 'SENT' || e.status === 'DELIVERED') || lastAlert?.overallStatus === 'EMAIL_DELIVERED' || lastAlert?.overallStatus === 'EMAIL_SENT' || lastAlert?.overallStatus === 'SMS_SENT' || lastAlert?.overallStatus === 'SMS_DELIVERED') ? (
-            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-center space-y-1 shadow-sm">
-              <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto animate-bounce" />
-              <h3 className="text-lg font-black text-emerald-900 dark:text-emerald-100 flex items-center justify-center gap-2">
-                <span>🚨 EMERGENCY SOS DISPATCHED – EMAIL DELIVERED</span>
-              </h3>
-              <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                Emergency alert successfully delivered to <strong>harleysham6925@gmail.com</strong> via Resend at {lastAlert?.timestamp ? formatIndiaDateTime(lastAlert.timestamp) : new Date().toLocaleTimeString('en-IN')}.
-              </p>
-            </div>
-          ) : (lastAlert?.overallStatus === 'EMAIL_FAILED') ? (
-            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-center space-y-1 shadow-sm">
-              <AlertTriangle className="w-10 h-10 text-rose-600 mx-auto animate-pulse" />
-              <h3 className="text-lg font-black text-rose-900 dark:text-rose-100 flex items-center justify-center gap-2">
-                <span>⚠️ EMAIL DISPATCH FAILED</span>
-              </h3>
-              <p className="text-xs text-rose-800 dark:text-rose-300 font-medium">
-                Emergency event is recorded in the household database, but email delivery encountered an issue.
-              </p>
-            </div>
-          ) : (
-            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 text-center space-y-1 shadow-sm">
-              <AlertTriangle className="w-10 h-10 text-amber-600 mx-auto animate-pulse" />
-              <h3 className="text-lg font-black text-amber-900 dark:text-amber-100 flex items-center justify-center gap-2">
-                <span>🚨 EMERGENCY SOS RECORDED</span>
-              </h3>
-              <p className="text-xs text-amber-800 dark:text-amber-300 font-medium">
-                Emergency event is recorded in the household database with live GPS coordinates.
-              </p>
-            </div>
-          )}
+          {(() => {
+            const isCancelled = Boolean(currentAlert?.isResolved || currentAlert?.status === 'Cancelled');
+            const emailResults = currentAlert?.emailResults || [];
+            const delivered = emailResults.filter(e => e.status === 'ACCEPTED' || e.status === 'SENT' || e.status === 'DELIVERED');
+            const failed = emailResults.filter(e => e.status === 'FAILED' || e.status === 'UNCONFIGURED');
+            const isSending = !currentAlert || (currentAlert.overallStatus === 'SOS_CREATED' && emailResults.length === 0);
+            const recipientRows = emailResults.length > 0
+              ? emailResults.map(e => ({ email: e.recipient, name: e.recipientName || e.recipient, status: e.status, error: e.error }))
+              : sosRecipients.filter(r => r.email).map(r => ({ email: r.email, name: r.name, status: isSending ? 'SENDING' : 'PENDING', error: undefined as string | undefined }));
+
+            return (
+              <div className="space-y-3">
+                <div className={`p-4 rounded-2xl border text-center space-y-1 shadow-sm ${
+                  isCancelled
+                    ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800'
+                    : delivered.length > 0
+                    ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-800'
+                    : failed.length > 0
+                    ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800'
+                    : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-800'
+                }`}>
+                  {isCancelled
+                    ? <ShieldCheck className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto" />
+                    : <AlertTriangle className="w-10 h-10 text-rose-600 mx-auto animate-pulse" />}
+                  <h3 className={`text-base sm:text-lg font-black ${isCancelled ? 'text-emerald-900 dark:text-emerald-100' : 'text-rose-900 dark:text-rose-100'}`}>
+                    {isCancelled
+                      ? '✅ SOS CANCELLED – MARKED SAFE'
+                      : isSending
+                      ? '🚨 SENDING EMERGENCY SOS...'
+                      : delivered.length > 0
+                      ? '🚨 SOS ACTIVE – ALERT EMAILS SENT'
+                      : '🚨 SOS ACTIVE – EMAIL NOT DELIVERED'}
+                  </h3>
+                  <p className={`text-xs ${isCancelled ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-300'}`}>
+                    {isCancelled
+                      ? (cancelMessage || currentAlert?.resolvedReason || 'Safe notice sent to your emergency contacts.')
+                      : `Triggered ${currentAlert?.timestamp ? formatIndiaDateTime(currentAlert.timestamp) : 'just now'}. Your location was sent to the emails below.`}
+                  </p>
+                </div>
+
+                {/* Prominent Cancel / Mark Safe — always at the top while SOS is active */}
+                {!isCancelled && (
+                  <button
+                    type="button"
+                    onClick={handleCancelAlert}
+                    disabled={isCancelling}
+                    className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 active:scale-95 transition-all disabled:opacity-60 cursor-pointer touch-manipulation"
+                  >
+                    <ShieldCheck className="w-5 h-5" />
+                    <span>{isCancelling ? 'Cancelling SOS...' : "CANCEL SOS – I'M SAFE"}</span>
+                  </button>
+                )}
+
+                {/* Exactly which inboxes the location was sent to */}
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-left space-y-2">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Mail className="w-4 h-4 text-indigo-500" /> Location sent to ({recipientRows.length}):
+                  </p>
+                  {recipientRows.map(row => {
+                    const ok = row.status === 'ACCEPTED' || row.status === 'SENT' || row.status === 'DELIVERED';
+                    const bad = row.status === 'FAILED' || row.status === 'UNCONFIGURED';
+                    return (
+                      <div key={row.email} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-semibold text-slate-800 dark:text-slate-200 break-all">{row.email}</span>
+                          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            ok ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300'
+                              : bad ? 'bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-950 dark:text-rose-300'
+                              : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/70 dark:text-amber-300'
+                          }`}>
+                            {ok ? '✓ Sent' : bad ? '✕ Failed' : row.status === 'SENDING' ? 'Sending…' : 'Pending'}
+                          </span>
+                        </div>
+                        {bad && row.error && <p className="mt-1 text-[10px] text-rose-600 dark:text-rose-400">{row.error}</p>}
+                        {ok && <p className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-400">Check the Inbox and Spam folder of this email.</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {cancelMessage && (
             <div className="p-3 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 border border-emerald-300 text-xs font-semibold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
@@ -740,102 +786,26 @@ export const EmergencyModeModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Emergency Email Notifications */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm space-y-3 text-left">
-            <div className="flex items-center justify-between">
+          {/* Direct Phone Call Quick Dial for emergency contacts */}
+          {emergencyContacts.filter(c => Boolean(c.phone)).length > 0 && (
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm space-y-2 text-left">
               <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Mail className="w-4 h-4 text-indigo-500" />
-                Emergency Email Notifications ({emergencyContacts.length})
+                <Phone className="w-4 h-4 text-emerald-500" /> Direct Voice Call:
               </p>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
-                Resend Active
-              </span>
-            </div>
-
-            <div className="space-y-2">
-              {emergencyContacts.map(c => {
-                const activeAlert = lastAlert || emergencyLogs[0];
-                const resolvedEmail = (c.email && c.email.includes('@') && !c.email.endsWith('.internal'))
-                  ? c.email.toLowerCase()
-                  : 'harleysham6925@gmail.com';
-
-                const emailResult = activeAlert?.emailResults?.find(e =>
-                  (e.recipient && e.recipient.toLowerCase() === resolvedEmail) ||
-                  (c.email && e.recipient && e.recipient.toLowerCase() === c.email.toLowerCase()) ||
-                  e.recipientName === c.name ||
-                  e.recipient === 'harleysham6925@gmail.com'
-                );
-                const status = emailResult?.status || 'UNCONFIGURED';
-
-                return (
-                  <div
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {emergencyContacts.filter(c => Boolean(c.phone)).map(c => (
+                  <a
                     key={c.id}
-                    className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700 space-y-2 text-xs"
+                    href={`tel:${c.phone}`}
+                    className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 font-bold flex items-center justify-between text-xs hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-all active:scale-95"
                   >
-                    <div className="flex items-center justify-between flex-wrap gap-1">
-                      <div>
-                        <p className="font-semibold text-slate-800 dark:text-slate-200">{c.name}</p>
-                        <p className="text-[11px] text-slate-500 font-mono">
-                          {resolvedEmail}
-                        </p>
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300'
-                            : status === 'FAILED'
-                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-300'
-                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300'
-                        }`}
-                      >
-                        {status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED'
-                          ? '✓ Delivered via Resend'
-                          : status === 'FAILED'
-                          ? '✕ Email Failed'
-                          : '⚠️ SMTP/Resend Unconfigured'}
-                      </span>
-                    </div>
-
-                    {emailResult?.messageId && (
-                      <p className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono">
-                        Resend Message ID: {emailResult.messageId}
-                      </p>
-                    )}
-
-                    {status === 'FAILED' && emailResult?.error && (
-                      <p className="text-[10px] text-rose-600 dark:text-rose-400 font-medium">
-                        Gateway Error: {emailResult.error}
-                      </p>
-                    )}
-
-                    {status === 'UNCONFIGURED' && (
-                      <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                        Automatic email gateway unconfigured in <code className="px-1 py-0.5 bg-amber-200/70 dark:bg-amber-900/80 rounded font-mono">.env.local</code>.
-                      </p>
-                    )}
-
-                    {(status === 'ACCEPTED' || status === 'SENT' || status === 'DELIVERED') && (
-                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                        ✓ Dispatched to {resolvedEmail} via Resend. Check your inbox and spam folders.
-                      </p>
-                    )}
-
-                    {/* Direct Voice Call Option */}
-                    {c.phone && (
-                      <div className="pt-1">
-                        <a
-                          href={`tel:${c.phone}`}
-                          className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs shadow-sm transition-all active:scale-[0.98]"
-                        >
-                          <Phone className="w-3.5 h-3.5" /> Call Now ({c.name}: {c.phone})
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                    <span>📞 {c.name}</span>
+                    <span className="font-mono text-[11px] text-emerald-700 dark:text-emerald-300">{c.phone}</span>
+                  </a>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Action Buttons: Cancel Alert / Retry / Close */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
@@ -851,7 +821,7 @@ export const EmergencyModeModal: React.FC = () => {
             </button>
 
             {/* Cancel Alert / Mark Safe */}
-            {(!lastAlert?.isResolved && lastAlert?.status !== 'Cancelled') && (
+            {(!currentAlert?.isResolved && currentAlert?.status !== 'Cancelled') && (
               <button
                 type="button"
                 onClick={handleCancelAlert}

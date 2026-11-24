@@ -22,6 +22,7 @@ import {
   FamilyMemory,
   AIMessage
 } from '../types';
+import { getSosRecipients } from '../lib/sos';
 import {
   deleteRow,
   insertRow,
@@ -1007,8 +1008,16 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const refresh = async () => {
       try {
         const data = await loadEmergencyData(currentUser.familyId);
-        setEmergencySessions(data.sessions);
-        setEmergencyNotifications(data.notifications);
+        // Merge remote data with local-only sessions so a just-triggered SOS (demo/offline)
+        // is not wiped out by an empty remote poll.
+        setEmergencySessions(prev => {
+          const remoteIds = new Set(data.sessions.map(s => s.id));
+          return [...data.sessions, ...prev.filter(s => !remoteIds.has(s.id))];
+        });
+        setEmergencyNotifications(prev => {
+          const remoteIds = new Set(data.notifications.map(n => n.id));
+          return [...data.notifications, ...prev.filter(n => !remoteIds.has(n.id))];
+        });
       } catch (error) {
         reportPersistenceError(error);
       }
@@ -1068,26 +1077,26 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           idempotencyKey: location.idempotencyKey,
           senderName: currentUser.name || 'Sarah',
           familyId: currentUser.familyId || 'demo-family-kumar',
-          recipients: emergencyContacts.map(c => ({
-            id: c.id,
-            name: c.name,
-            email: (c.email && c.email.includes('@') && !c.email.endsWith('.internal')) ? c.email : 'harleysham6925@gmail.com',
-            phone: c.phone
-          }))
+          recipients: getSosRecipients(emergencyContacts)
         })
       });
 
-      if (res.ok) {
+      if (!res.ok) {
+        throw new Error(`SOS server responded with HTTP ${res.status}`);
+      }
+      {
         const data = await res.json();
+        const emailResults = data.email?.results || [];
+        const smsResults = data.sms?.results || [];
+        const anyAccepted = [...emailResults, ...smsResults].some((r: any) => r.status === 'ACCEPTED' || r.status === 'SENT' || r.status === 'DELIVERED');
+        const anyFailed = [...emailResults, ...smsResults].some((r: any) => r.status === 'FAILED');
         const updatedLog: EmergencyAlertLog = {
           ...initialLog,
           id: data.eventId || initialLog.id,
-          status: (data.overallStatus === 'EMAIL_DELIVERED' || data.overallStatus === 'EMAIL_SENT' || data.overallStatus === 'SMS_SENT' || data.overallStatus === 'SMS_DELIVERED')
-            ? 'Delivered'
-            : (data.overallStatus === 'SOS_CREATED' ? 'Logged' : (data.overallStatus === 'EMAIL_FAILED' || data.overallStatus === 'SMS_FAILED' ? 'Failed' : 'Sent')),
-          overallStatus: data.overallStatus || 'SOS_CREATED',
-          smsResults: data.sms?.results || [],
-          emailResults: data.email?.results || []
+          status: anyAccepted ? 'Delivered' : anyFailed ? 'Failed' : 'Logged',
+          overallStatus: anyAccepted ? 'EMAIL_DELIVERED' : anyFailed ? 'EMAIL_FAILED' : (data.overallStatus || 'SOS_CREATED'),
+          smsResults,
+          emailResults
         };
         setEmergencyLogs(prev => prev.map(l => (l.id === initialLog.id ? updatedLog : l)));
         initialLog = updatedLog;
@@ -1099,12 +1108,12 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         status: 'Sent',
         overallStatus: 'LOCAL_DISPATCHED',
         smsResults: [],
-        emailResults: emergencyContacts.map(c => ({
-          recipient: (c.email && c.email.includes('@') && !c.email.endsWith('.internal')) ? c.email : 'harleysham6925@gmail.com',
-          recipientName: c.name,
-          status: 'UNCONFIGURED',
+        emailResults: getSosRecipients(emergencyContacts).filter(r => r.email).map(r => ({
+          recipient: r.email,
+          recipientName: r.name,
+          status: 'FAILED',
           provider: 'none',
-          error: 'Backend unreachable or RESEND_API_KEY not in .env.local',
+          error: 'Could not reach the HomeBrain SOS server. Check your internet connection and tap Retry.',
           dispatchedAt: new Date().toISOString()
         }))
       };
