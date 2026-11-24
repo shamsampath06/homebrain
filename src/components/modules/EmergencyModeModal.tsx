@@ -153,12 +153,17 @@ export const EmergencyModeModal: React.FC = () => {
     setStep('sending');
 
     try {
-      await startEmergencySession({
-        address: locAddress,
-        latitude: locCoords.latitude,
-        longitude: locCoords.longitude,
-        accuracyMeters: locCoords.accuracyMeters
-      });
+      try {
+        await startEmergencySession({
+          address: locAddress,
+          latitude: locCoords.latitude,
+          longitude: locCoords.longitude,
+          accuracyMeters: locCoords.accuracyMeters
+        });
+      } catch (sessionErr) {
+        console.warn('Emergency session initialization notice:', sessionErr);
+      }
+
       const alertLog = await triggerEmergencyAlert({
         address: locAddress,
         latitude: locCoords.latitude,
@@ -210,12 +215,17 @@ export const EmergencyModeModal: React.FC = () => {
 
     setStep('sending');
     try {
-      await startEmergencySession({
-        address,
-        latitude: coordinates.latitude,
-        longitude: coordinates.longitude,
-        accuracyMeters: coordinates.accuracyMeters
-      });
+      try {
+        await startEmergencySession({
+          address,
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+          accuracyMeters: coordinates.accuracyMeters
+        });
+      } catch (sessionErr) {
+        console.warn('Emergency session start notice:', sessionErr);
+      }
+
       const alertLog = await triggerEmergencyAlert({
         address,
         latitude: coordinates.latitude,
@@ -358,15 +368,15 @@ export const EmergencyModeModal: React.FC = () => {
   };
 
   return (
-    <div className="max-w-xl mx-auto bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border-2 border-rose-500/50">
+    <div className="max-w-xl mx-auto bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-6 shadow-2xl border-2 border-rose-500/50 mb-24 sm:mb-8 relative">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-rose-100 dark:border-rose-950">
-        <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-lg">
-          <ShieldAlert className="w-6 h-6 animate-pulse" /> Emergency Mode SOS
+      <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-rose-100 dark:border-rose-950">
+        <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-base sm:text-lg">
+          <ShieldAlert className="w-5 h-5 sm:w-6 sm:h-6 animate-pulse" /> Emergency Mode SOS
         </div>
         <button
           onClick={() => setActiveSubScreen('none')}
-          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
         >
           <X className="w-5 h-5" />
         </button>
@@ -390,10 +400,31 @@ export const EmergencyModeModal: React.FC = () => {
       )}
 
       {step === 'explain' && !isIncomingSession && !isOwnActiveSession && (
-        <div className="space-y-4 mt-4">
-          <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-900 dark:text-rose-200 leading-relaxed">
-            <p className="font-bold text-sm mb-1">🚨 Safety Confirmation Step</p>
-            Emergency SOS records your location and shares it with authorized HomeBrain family accounts. You can broadcast your live GPS or your registered household address.
+        <div className="space-y-4 mt-3 sm:mt-4">
+          {/* Top Hero Instant SOS Trigger */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-rose-500/10 via-red-500/15 to-rose-600/10 border-2 border-rose-500/80 dark:border-rose-500/70 text-center space-y-3 shadow-lg shadow-rose-500/10">
+            <div className="flex items-center justify-center gap-2 text-rose-600 dark:text-rose-400 font-extrabold text-xs uppercase tracking-wider">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+              <span>Immediate Emergency Action</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleInstantSOS}
+              className="w-full py-4 px-4 sm:px-6 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-700 hover:to-rose-800 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-rose-600/40 active:scale-95 transition-all cursor-pointer border border-rose-400/40 ring-4 ring-rose-500/20"
+            >
+              <Zap className="w-5 h-5 fill-white animate-pulse" />
+              <span>🚨 TRIGGER INSTANT SOS NOW</span>
+            </button>
+
+            <p className="text-[11px] sm:text-xs text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
+              One tap dispatches emergency alerts with your live location to all family emergency contacts via Email &amp; SMS.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-900 dark:text-rose-200 leading-relaxed">
+            <p className="font-bold text-xs mb-0.5">ℹ️ Location &amp; Alert Details</p>
+            Emergency SOS records your location and broadcasts alerts to your designated emergency contacts. Customize location or review contacts below if needed.
           </div>
           {locationError && <p className="text-xs text-rose-600 font-semibold">{locationError}</p>}
 
@@ -512,31 +543,35 @@ export const EmergencyModeModal: React.FC = () => {
             </div>}
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-800">
+          {/* Sticky Bottom Trigger Bar */}
+          <div className="sticky bottom-0 left-0 right-0 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 p-3 sm:p-4 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-rose-200 dark:border-rose-900/60 flex items-center gap-2 z-20 rounded-b-3xl shadow-[0_-4px_16px_rgba(0,0,0,0.1)]">
             <button
+              type="button"
+              onClick={handleInstantSOS}
+              className="flex-1 py-3 px-3 sm:px-5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 active:scale-95 transition-all cursor-pointer"
+            >
+              <Zap className="w-4 h-4 fill-white" />
+              <span>🚨 TRIGGER INSTANT SOS</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleFetchLocation}
+              disabled={isLocating || isResolvingAddress}
+              className="hidden sm:flex px-3.5 py-3 rounded-xl bg-slate-900 dark:bg-slate-800 text-white font-bold text-xs items-center gap-1.5 shrink-0"
+              title="Acquire browser GPS"
+            >
+              <MapPin className="w-3.5 h-3.5 text-rose-400" />
+              <span>{isLocating ? 'Acquiring...' : 'GPS'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveSubScreen('none')}
-              className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:underline"
+              className="px-3.5 py-3 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
             >
               Cancel
             </button>
-            <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={handleInstantSOS}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/30 active:scale-[0.98] transition-all"
-              >
-                <Zap className="w-4 h-4 fill-white" />
-                <span>🚨 Instant 1-Click SOS</span>
-              </button>
-              <button
-                onClick={handleFetchLocation}
-                disabled={isLocating || isResolvingAddress}
-                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
-              >
-                <MapPin className="w-4 h-4 text-rose-400" />
-                <span>{isLocating ? 'Acquiring GPS...' : isResolvingAddress ? 'Finding address...' : 'Verify Live GPS & Proceed'}</span>
-              </button>
-            </div>
           </div>
           {emergencyLogs.length > 0 && (
             <div className="border-t pt-4 space-y-2">
