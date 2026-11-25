@@ -279,12 +279,14 @@ export const EmergencyModeModal: React.FC = () => {
         address: address || DEFAULT_HOME_LOCATION.address
       });
       setIsCancelling(false);
+      const updatedEmailResults = res.emailResults && res.emailResults.length > 0 ? res.emailResults : (lastAlert?.emailResults || []);
       setLastAlert(prev => prev ? {
         ...prev,
         status: 'Cancelled',
         isResolved: true,
         resolvedAt: new Date().toISOString(),
-        resolvedReason: 'Marked safe by user'
+        resolvedReason: 'Marked safe by user',
+        emailResults: updatedEmailResults
       } : {
         id: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
@@ -296,7 +298,8 @@ export const EmergencyModeModal: React.FC = () => {
         recipients: sosRecipients.map(r => r.name || r.email),
         isResolved: true,
         resolvedAt: new Date().toISOString(),
-        resolvedReason: 'Marked safe by user'
+        resolvedReason: 'Marked safe by user',
+        emailResults: updatedEmailResults
       });
       setCancelMessage(res.message || 'Emergency alert cancelled. All contacts notified that family is safe.');
       if (watchId.current !== null) {
@@ -758,7 +761,8 @@ export const EmergencyModeModal: React.FC = () => {
                 {/* Exactly which inboxes the location was sent to */}
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-left space-y-2">
                   <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Mail className="w-4 h-4 text-indigo-500" /> Location sent to ({recipientRows.length}):
+                    {isCancelled ? <ShieldCheck className="w-4 h-4 text-emerald-500" /> : <Mail className="w-4 h-4 text-indigo-500" />}
+                    {isCancelled ? `Safety Resolution Notice sent to (${recipientRows.length}):` : `Location sent to (${recipientRows.length}):`}
                   </p>
                   {recipientRows.map(row => {
                     const ok = row.status === 'ACCEPTED' || row.status === 'SENT' || row.status === 'DELIVERED';
@@ -776,7 +780,11 @@ export const EmergencyModeModal: React.FC = () => {
                           </span>
                         </div>
                         {bad && row.error && <p className="mt-1 text-[10px] text-rose-600 dark:text-rose-400">{row.error}</p>}
-                        {ok && <p className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-400">Check the Inbox and Spam folder of this email.</p>}
+                        {ok && (
+                          <p className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                            {isCancelled ? 'Resolution email dispatched. Check your Inbox and Spam folder.' : 'Check the Inbox and Spam folder of this email.'}
+                          </p>
+                        )}
                       </div>
                     );
                   })}

@@ -1,6 +1,15 @@
 // HomeBrain Trained Conversational & Document Vault Resolver (Shared Client & Server)
 import type { DocumentItem, User } from '../types';
 
+function formatCleanSummary(summary?: string): string {
+  if (!summary) return 'Verified Household Record';
+  return summary
+    .split('\n')
+    .map(line => line.replace(/^[•\-\*]\s*/, '').trim())
+    .filter(Boolean)
+    .join(' • ');
+}
+
 export function matchHomeBrainTrainedDialogue(
   rawQuery: string,
   effectiveDocuments: DocumentItem[] | any[],
@@ -417,7 +426,7 @@ export function matchHomeBrainTrainedDialogue(
     });
 
     if (doc) {
-      return checkMsg + `${person} Aadhaar card has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${doc.summary_content || doc.summaryContent || doc.description || 'Verified Aadhaar Card'}`;
+      return checkMsg + `${person} Aadhaar card has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${formatCleanSummary(doc.summary_content || doc.summaryContent || doc.description || 'Verified Aadhaar Card')}`;
     } else {
       if (personName === 'Sham') {
         return checkMsg + "I couldn't find Sham's Aadhaar card in the Document Vault.\n\nPlease upload the Aadhaar card so I can store it and make it available for future retrieval.";
@@ -446,7 +455,7 @@ export function matchHomeBrainTrainedDialogue(
     });
 
     if (doc) {
-      return checkMsg + `${person} PAN card has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${doc.summary_content || doc.summaryContent || doc.description || 'Official PAN record'}`;
+      return checkMsg + `${person} PAN card has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${formatCleanSummary(doc.summary_content || doc.summaryContent || doc.description || 'Official PAN record')}`;
     } else {
       return checkMsg + "I couldn't find the PAN card in your Document Vault. Please upload it so I can retrieve it next time.";
     }
@@ -473,7 +482,7 @@ export function matchHomeBrainTrainedDialogue(
     });
 
     if (doc) {
-      return checkMsg + `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${doc.summary_content || doc.summaryContent || doc.description || 'Permanent Driving License'}`;
+      return checkMsg + `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${formatCleanSummary(doc.summary_content || doc.summaryContent || doc.description || 'Permanent Driving License')}`;
     } else {
       return checkMsg + "Your driving licence is not currently available in the Document Vault. Please upload it first.";
     }
@@ -505,7 +514,7 @@ export function matchHomeBrainTrainedDialogue(
     });
 
     if (doc) {
-      return checkMsg + `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${doc.summary_content || doc.summaryContent || doc.description}`;
+      return checkMsg + `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${formatCleanSummary(doc.summary_content || doc.summaryContent || doc.description)}`;
     } else {
       if (/degree/i.test(clean)) {
         return "Your degree certificate hasn't been found in the Document Vault.";
@@ -519,7 +528,7 @@ export function matchHomeBrainTrainedDialogue(
     const doc = effectiveDocuments.find(d => (d.title || '').toLowerCase().includes('passport') || (d.description || '').toLowerCase().includes('passport'));
     if (doc) {
       return "I'll check your Document Vault for your passport.\n\n" +
-        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${doc.summary_content || doc.summaryContent || doc.description}`;
+        `${(doc.title || '').replace('[DEMO] ', '')} has been found in your Document Vault. Would you like to view or download it?\n\n• **${(doc.title || '').replace('[DEMO] ', '')}** (${doc.category}, ${doc.file_type || doc.fileType} - ${doc.file_size || doc.fileSize}): Uploaded by ${doc.uploader_name || doc.uploaderName}\n  📝 **Summary**: ${formatCleanSummary(doc.summary_content || doc.summaryContent || doc.description)}`;
     }
     return "I couldn't find an uploaded passport. Would you like to upload it?";
   }

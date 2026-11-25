@@ -4129,7 +4129,12 @@ export async function processIntelligentAction(
       if (matched) {
         const cleanDocTitle = (matched.title || docType || 'Document').replace(/^\[demo\]\s*/i, '');
         const personDisplay = (person && !cleanDocTitle.toLowerCase().includes(person.toLowerCase())) ? `${person}'s ` : '';
-        const cleanSummary = cleanDocumentSummary(matched.summary_content || matched.summaryContent || matched.description, cleanDocTitle, matched.category);
+        const rawSummary = cleanDocumentSummary(matched.summary_content || matched.summaryContent || matched.description, cleanDocTitle, matched.category);
+        const cleanSummary = rawSummary
+          .split('\n')
+          .map((line: string) => line.replace(/^[•\-\*]\s*/, '').trim())
+          .filter(Boolean)
+          .join(' • ');
         const fileType = matched.file_type || matched.fileType || 'PDF';
         const fileSize = matched.file_size || matched.fileSize || '0.38 MB';
         const uploader = matched.uploader_name || matched.uploaderName || (person || user.name || 'Family');

@@ -225,7 +225,6 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
     const isUnavailableNotice = text.includes('Not Available in Document Vault') || text.includes('is not available in your Family Document Vault');
     // Check if these list items represent Document Vault Records
     const isDocumentList = !isAssistantSummary && !isUnavailableNotice && (
-      text.includes('has been found in your Document Vault') ||
       text.includes('Document Vault Records') ||
       text.includes('Retrieved Document') ||
       items.some(it =>
@@ -542,9 +541,38 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
         ? [items.map(it => it.replace(/^[•\-\*]\s*/, '').trim()).join('  •  ')]
         : items;
 
+      // Only items that contain document metadata represent a downloadable document card
+      // Sub-bullets such as "Passport No: ...", "Holder: ...", "Expiry: ..." should never be treated as separate document cards!
+      const docCardItems = displayItems.filter(it =>
+        /file size|file type|uploaded by|\b(?:png|jpg|jpeg|pdf|docx|txt)\b/i.test(it) ||
+        /\([A-Za-z]+,\s*[A-Z0-9]+/i.test(it)
+      );
+      const otherDetailItems = displayItems.filter(it => !docCardItems.includes(it));
+
+      // If no item is an actual document card, render items as standard clean bullet rows
+      if (docCardItems.length === 0) {
+        renderedElements.push(
+          <div key={`generic-list-${renderedElements.length}`} className="space-y-1.5 my-2">
+            {displayItems.map((it, idx) => {
+              const clean = it.replace(/^[•\-\*]\s*/, '');
+              return (
+                <div
+                  key={idx}
+                  className="flex items-start gap-2 p-2 rounded-xl bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60 text-xs leading-relaxed"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand-500 shrink-0 mt-1.5" />
+                  <div>{renderInlineFormatting(clean)}</div>
+                </div>
+              );
+            })}
+          </div>
+        );
+        return;
+      }
+
       renderedElements.push(
         <div key={`docs-${renderedElements.length}`} className="space-y-2.5 my-2.5">
-          {displayItems.map((rawItem, idx) => {
+          {docCardItems.map((rawItem, idx) => {
             let clean = rawItem.replace(/^[•\-\*]\s*/, '').replace(/\[DEMO\]\s*/g, '');
             if (/summary:/i.test(clean)) {
               const rawSum = clean.replace(/^.*summary:\s*/i, '');
@@ -628,6 +656,22 @@ export const CleanChatMessage: React.FC<CleanChatMessageProps> = ({
               </div>
             );
           })}
+          {otherDetailItems.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              {otherDetailItems.map((it, idx) => {
+                const clean = it.replace(/^[•\-\*]\s*/, '');
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-2 p-2 rounded-xl bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60 text-xs leading-relaxed"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-500 shrink-0 mt-1.5" />
+                    <div>{renderInlineFormatting(clean)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
       return;
