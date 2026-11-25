@@ -28,7 +28,7 @@ export const Header: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-30 bg-[#fffdf7]/95 dark:bg-[#080B12]/95 backdrop-blur-2xl border-b border-[#eee3c5] dark:border-white/10 text-slate-900 dark:text-white transition-colors shadow-sm shrink-0">
-      <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-2 sm:py-3.5 pt-[max(0.75rem,env(safe-area-inset-top))] flex items-center justify-between gap-1.5 sm:gap-2">
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-2 sm:py-3.5 pt-[max(0.6rem,env(safe-area-inset-top))] flex items-center justify-between gap-1.5 sm:gap-2">
         {/* Greeting & Date */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <img
@@ -37,7 +37,7 @@ export const Header: React.FC = () => {
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl object-cover ring-1 ring-cyan-400/40 shadow-sm shrink-0"
           />
           <div className="min-w-0">
-            <h1 className="text-xs sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1 font-mono leading-tight truncate">
+            <h1 className="text-xs sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1 font-mono leading-snug truncate">
               <span>{getGreeting()}, {currentUser?.name ? currentUser.name.split(' ')[0] : 'Family'}</span>
               <span className="animate-bounce inline-block">👋</span>
             </h1>
