@@ -98,14 +98,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   };
 
   return (
-    <main className="relative min-h-screen flex items-center justify-center bg-family-warm dark:bg-[#080B12] px-4 py-10 overflow-hidden text-slate-900 dark:text-slate-100 font-sans selection:bg-brand-500 selection:text-white">
+    <main className="relative min-h-screen min-h-[100dvh] w-full flex items-center justify-center bg-family-warm dark:bg-[#080B12] px-4 py-8 sm:py-12 overflow-y-auto text-slate-900 dark:text-slate-100 font-sans selection:bg-brand-500 selection:text-white">
       {/* Ambient Spatial Glowing Light Spheres */}
-      <div className="absolute -top-32 -left-32 w-[34rem] h-[34rem] bg-brand-500/20 rounded-full blur-[130px] pointer-events-none animate-float-slow" />
-      <div className="absolute top-1/2 -right-32 w-[32rem] h-[32rem] bg-amber-300/20 rounded-full blur-[130px] pointer-events-none animate-float-slow [animation-delay:-4s]" />
-      <div className="absolute -bottom-32 left-1/4 w-[30rem] h-[30rem] bg-brand-200/20 rounded-full blur-[130px] pointer-events-none animate-float-slow [animation-delay:-2s]" />
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-32 -left-32 w-[34rem] h-[34rem] bg-brand-500/20 rounded-full blur-[130px] animate-float-slow" />
+        <div className="absolute top-1/2 -right-32 w-[32rem] h-[32rem] bg-amber-300/20 rounded-full blur-[130px] animate-float-slow [animation-delay:-4s]" />
+        <div className="absolute -bottom-32 left-1/4 w-[30rem] h-[30rem] bg-brand-200/20 rounded-full blur-[130px] animate-float-slow [animation-delay:-2s]" />
+      </div>
 
       {/* Main Glass Authentication Card */}
-      <div className="relative z-10 w-full max-w-lg bg-[#fffdf7]/95 dark:bg-[#0D1220]/95 backdrop-blur-2xl rounded-3xl p-7 sm:p-10 border border-[#eee3c5] dark:border-white/10 shadow-[0_25px_60px_-15px_rgba(122,91,24,0.2)] space-y-6">
+      <div className="relative z-10 w-full max-w-lg my-auto bg-[#fffdf7]/95 dark:bg-[#0D1220]/95 backdrop-blur-2xl rounded-3xl p-6 sm:p-10 border border-[#eee3c5] dark:border-white/10 shadow-[0_25px_60px_-15px_rgba(122,91,24,0.2)] space-y-5 sm:space-y-6">
         {/* Specular Top Shimmer */}
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-400/60 to-transparent pointer-events-none rounded-t-3xl" />
 
