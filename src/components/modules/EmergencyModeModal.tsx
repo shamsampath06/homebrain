@@ -26,7 +26,7 @@ import {
   Clock
 } from 'lucide-react';
 import { EmergencyAlertLog } from '../../types';
-import { getSosRecipients } from '../../lib/sos';
+import { getSosRecipients, isRealEmail } from '../../lib/sos';
 
 const DEFAULT_HOME_LOCATION = {
   address: 'Kadambanallur, Chennai Metropolitan Area, Arakkonam, Ranipet, Tamil Nadu, 631151, India',
@@ -279,6 +279,25 @@ export const EmergencyModeModal: React.FC = () => {
         address: address || DEFAULT_HOME_LOCATION.address
       });
       setIsCancelling(false);
+      setLastAlert(prev => prev ? {
+        ...prev,
+        status: 'Cancelled',
+        isResolved: true,
+        resolvedAt: new Date().toISOString(),
+        resolvedReason: 'Marked safe by user'
+      } : {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        userLocation: address || DEFAULT_HOME_LOCATION.address,
+        latitude: coordinates?.latitude || DEFAULT_HOME_LOCATION.latitude,
+        longitude: coordinates?.longitude || DEFAULT_HOME_LOCATION.longitude,
+        userName: currentUser.name || 'Sarah',
+        status: 'Cancelled',
+        recipients: sosRecipients.map(r => r.name || r.email),
+        isResolved: true,
+        resolvedAt: new Date().toISOString(),
+        resolvedReason: 'Marked safe by user'
+      });
       setCancelMessage(res.message || 'Emergency alert cancelled. All contacts notified that family is safe.');
       if (watchId.current !== null) {
         navigator.geolocation.clearWatch(watchId.current);
@@ -286,6 +305,13 @@ export const EmergencyModeModal: React.FC = () => {
       }
     } catch (err: any) {
       setIsCancelling(false);
+      setLastAlert(prev => prev ? {
+        ...prev,
+        status: 'Cancelled',
+        isResolved: true,
+        resolvedAt: new Date().toISOString(),
+        resolvedReason: 'Marked safe by user'
+      } : null);
       setCancelMessage('Emergency alert marked as safe.');
     }
   };
@@ -656,8 +682,8 @@ export const EmergencyModeModal: React.FC = () => {
             const failed = emailResults.filter(e => e.status === 'FAILED' || e.status === 'UNCONFIGURED');
             const isSending = !currentAlert || (currentAlert.overallStatus === 'SOS_CREATED' && emailResults.length === 0);
             const recipientRows = emailResults.length > 0
-              ? emailResults.map(e => ({ email: e.recipient, name: e.recipientName || e.recipient, status: e.status, error: e.error }))
-              : sosRecipients.filter(r => r.email).map(r => ({ email: r.email, name: r.name, status: isSending ? 'SENDING' : 'PENDING', error: undefined as string | undefined }));
+              ? emailResults.filter(e => isRealEmail(e.recipient)).map(e => ({ email: e.recipient, name: e.recipientName || e.recipient, status: e.status, error: e.error }))
+              : sosRecipients.filter(r => isRealEmail(r.email)).map(r => ({ email: r.email, name: r.name, status: isSending ? 'SENDING' : 'PENDING', error: undefined as string | undefined }));
 
             return (
               <div className="space-y-3">
@@ -675,7 +701,7 @@ export const EmergencyModeModal: React.FC = () => {
                     : <AlertTriangle className="w-10 h-10 text-rose-600 mx-auto animate-pulse" />}
                   <h3 className={`text-base sm:text-lg font-black ${isCancelled ? 'text-emerald-900 dark:text-emerald-100' : 'text-rose-900 dark:text-rose-100'}`}>
                     {isCancelled
-                      ? '✅ SOS CANCELLED – MARKED SAFE'
+                      ? '✅ SOS CANCELLED – YOU ARE MARKED SAFE'
                       : isSending
                       ? '🚨 SENDING EMERGENCY SOS...'
                       : delivered.length > 0
@@ -684,7 +710,7 @@ export const EmergencyModeModal: React.FC = () => {
                   </h3>
                   <p className={`text-xs ${isCancelled ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-300'}`}>
                     {isCancelled
-                      ? (cancelMessage || currentAlert?.resolvedReason || 'Safe notice sent to your emergency contacts.')
+                      ? (cancelMessage || currentAlert?.resolvedReason || 'Safe notice has been recorded and broadcast to family contacts.')
                       : `Triggered ${currentAlert?.timestamp ? formatIndiaDateTime(currentAlert.timestamp) : 'just now'}. Your location was sent to the emails below.`}
                   </p>
                 </div>
@@ -700,6 +726,33 @@ export const EmergencyModeModal: React.FC = () => {
                     <ShieldCheck className="w-5 h-5" />
                     <span>{isCancelling ? 'Cancelling SOS...' : "CANCEL SOS – I'M SAFE"}</span>
                   </button>
+                )}
+
+                {/* When Cancelled: prominent action buttons to return to setup or close */}
+                {isCancelled && (
+                  <div className="space-y-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLastAlert(null);
+                        setStep('explain');
+                        setCancelMessage(null);
+                        setLocationError('');
+                      }}
+                      className="w-full py-3.5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 touch-manipulation"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Start Fresh / Back to SOS Setup</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSubScreen('none')}
+                      className="w-full py-2.5 rounded-2xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 touch-manipulation"
+                    >
+                      <X className="w-4 h-4" />
+                      <span>Close Emergency Window</span>
+                    </button>
+                  </div>
                 )}
 
                 {/* Exactly which inboxes the location was sent to */}

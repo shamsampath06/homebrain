@@ -5781,7 +5781,13 @@ Automated emergency notification.`;
   }
   return results;
 }
+var isDeliverableEmail = (email) => {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return lower.includes("@") && !lower.endsWith(".test") && !lower.endsWith(".internal") && !lower.endsWith(".example") && !lower.endsWith(".invalid") && !lower.includes("demo@") && !lower.includes("apollohospitals.test");
+};
 async function dispatchEmergencyEmail(contacts, details) {
+  const filteredContacts = contacts.filter((c) => isDeliverableEmail(c.email));
   const results = [];
   const now = (/* @__PURE__ */ new Date()).toISOString();
   let smtpTransporter = null;
@@ -5800,7 +5806,7 @@ async function dispatchEmergencyEmail(contacts, details) {
       console.warn("Failed to initialize SMTP transporter:", err);
     }
   }
-  for (const c of contacts) {
+  for (const c of filteredContacts) {
     const rawEmail = (c.email || "").trim().toLowerCase();
     if (!rawEmail || !rawEmail.includes("@")) continue;
     const subject = details.isCancellation ? `RESOLVED: Emergency SOS Cancelled \u2013 ${details.senderName} is Safe` : `\u{1F6A8} URGENT: Emergency SOS Alert \u2013 ${details.senderName} Needs Help!`;

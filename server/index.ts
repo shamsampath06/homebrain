@@ -1797,6 +1797,20 @@ async function dispatchEmergencySMS(
   return results;
 }
 
+const isDeliverableEmail = (email?: string): boolean => {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return (
+    lower.includes('@') &&
+    !lower.endsWith('.test') &&
+    !lower.endsWith('.internal') &&
+    !lower.endsWith('.example') &&
+    !lower.endsWith('.invalid') &&
+    !lower.includes('demo@') &&
+    !lower.includes('apollohospitals.test')
+  );
+};
+
 // Dispatch real email via Nodemailer (SMTP / Gmail) or Resend
 async function dispatchEmergencyEmail(
   contacts: Array<{ name: string; email: string }>,
@@ -1813,6 +1827,7 @@ async function dispatchEmergencyEmail(
     cancellationReason?: string;
   }
 ): Promise<EmailDeliveryResult[]> {
+  const filteredContacts = contacts.filter(c => isDeliverableEmail(c.email));
   const results: EmailDeliveryResult[] = [];
   const now = new Date().toISOString();
 
@@ -1833,7 +1848,7 @@ async function dispatchEmergencyEmail(
     }
   }
 
-  for (const c of contacts) {
+  for (const c of filteredContacts) {
     const rawEmail = (c.email || '').trim().toLowerCase();
     if (!rawEmail || !rawEmail.includes('@')) continue;
 

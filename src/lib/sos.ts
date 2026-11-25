@@ -13,8 +13,19 @@ export const DEFAULT_SOS_RECIPIENTS: SosRecipient[] = [
   { id: 'default-sos-sham', name: 'Sham Sampath', email: 'shamsampth06@gmail.com', phone: '' }
 ];
 
-const isRealEmail = (email?: string) =>
-  Boolean(email && email.includes('@') && !email.trim().toLowerCase().endsWith('.internal'));
+export const isRealEmail = (email?: string) => {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return (
+    lower.includes('@') &&
+    !lower.endsWith('.internal') &&
+    !lower.endsWith('.test') &&
+    !lower.endsWith('.example') &&
+    !lower.endsWith('.invalid') &&
+    !lower.includes('demo@') &&
+    !lower.includes('apollohospitals.test')
+  );
+};
 
 /** Saved emergency contacts plus the default household recipients, de-duplicated by email. */
 export function getSosRecipients(contacts: EmergencyContact[]): SosRecipient[] {

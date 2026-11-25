@@ -696,14 +696,12 @@ export const seedDemoFamilyData = async (familyId: string, currentUserEmail: str
       name: `${DEMO_TAG} Dr. K. Sharma (Family Physician)`,
       relation: 'Doctor',
       phone: '+91 98400 12345',
-      email: 'dr.sharma.demo@apollohospitals.test',
       isPrimary: true
     },
     {
       name: `${DEMO_TAG} Uncle Vikram (Father's Brother)`,
       relation: 'Uncle',
       phone: '+91 94440 98765',
-      email: 'vikram.demo@homebrain.test',
       isPrimary: false
     }
   ];
@@ -935,7 +933,6 @@ export const getDemoFamilySnapshot = () => {
       name: `${DEMO_TAG} Dr. K. Sharma (Family Physician)`,
       relation: 'Doctor',
       phone: '+91 98400 12345',
-      email: 'dr.sharma.demo@apollohospitals.test',
       isPrimary: true
     },
     {
@@ -943,7 +940,6 @@ export const getDemoFamilySnapshot = () => {
       name: `${DEMO_TAG} Uncle Vikram (Father's Brother)`,
       relation: 'Uncle',
       phone: '+91 94440 98765',
-      email: 'vikram.demo@homebrain.test',
       isPrimary: false
     }
   ];
