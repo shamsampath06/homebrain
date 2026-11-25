@@ -92,6 +92,7 @@ export type SubScreen =
   | 'memory-details'
   | 'user-profile'
   | 'family-members'
+  | 'family-hub'
   | 'settings'
   | 'privacy'
   | 'auth'
@@ -234,7 +235,16 @@ interface HomeBrainContextType {
   isAuthenticated: boolean;
   enterDemoMode: () => void;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, name: string, familyName: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    name: string,
+    familyName: string,
+    inviteCode?: string,
+    relation?: string,
+    role?: User['role'],
+    mode?: 'create' | 'join'
+  ) => Promise<void>;
   signOut: () => Promise<void>;
   updatePassword: (currentPassword: string, password: string) => Promise<void>;
 }
@@ -504,9 +514,27 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setIsDataLoading(false);
   };
 
-  const signUp = async (email: string, password: string, name: string, familyName: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    familyName: string,
+    inviteCode?: string,
+    relation?: string,
+    role?: User['role'],
+    mode?: 'create' | 'join'
+  ) => {
     authGeneration.current += 1;
-    const profile = await signUpWithPassword(email, password, name, familyName);
+    const profile = await signUpWithPassword({
+      email,
+      password,
+      name,
+      familyName,
+      inviteCode,
+      relation,
+      role,
+      mode
+    });
     profile.familyId = ensureValidUUID(profile.familyId);
     profile.id = ensureValidUUID(profile.id);
     // Ensure a newly registered account always starts in a clean state without demo data
@@ -518,6 +546,52 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setDataError(null);
     setIsDataLoading(false);
   };
+
+  // Real-Time Background Synchronization Loop across Family Devices
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.familyId || currentUser.familyId === '00000000-0000-4000-8000-000000000000') {
+      return;
+    }
+
+    let isMounted = true;
+    const syncInterval = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+
+      try {
+        const remote = await loadFamilyData(currentUser);
+        if (!isMounted || !remote) return;
+
+        if (remote.groceries && remote.groceries.length > 0) {
+          setGroceries(prev => mergeById(remote.groceries, prev));
+        }
+        if (remote.expenses && remote.expenses.length > 0) {
+          setExpenses(prev => mergeById(remote.expenses, prev));
+        }
+        if (remote.reminders && remote.reminders.length > 0) {
+          setReminders(prev => mergeById(remote.reminders, prev));
+        }
+        if (remote.events && remote.events.length > 0) {
+          setEvents(prev => mergeById(remote.events, prev));
+        }
+        if (remote.familyMembers && remote.familyMembers.length > 0) {
+          setFamilyMembers(prev => mergeById(remote.familyMembers, prev));
+        }
+        if (remote.emergencySessions && remote.emergencySessions.length > 0) {
+          setEmergencySessions(remote.emergencySessions);
+        }
+        if (remote.emergencyNotifications && remote.emergencyNotifications.length > 0) {
+          setEmergencyNotifications(remote.emergencyNotifications);
+        }
+      } catch {
+        // Silent background sync error handler
+      }
+    }, 7000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(syncInterval);
+    };
+  }, [isAuthenticated, currentUser?.familyId]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -622,7 +696,12 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [events, setEvents] = useState<FamilyEvent[]>([]);
 
   const addEvent = (event: Omit<FamilyEvent, 'id'>) => {
-    const newEvt: FamilyEvent = { ...event, id: crypto.randomUUID() };
+    const newEvt: FamilyEvent = {
+      ...event,
+      id: crypto.randomUUID(),
+      userId: event.userId || currentUser.id,
+      createdByName: event.createdByName || currentUser.name
+    };
     setEvents(prev => [...prev, newEvt]);
     void persist(() => insertRow('events', currentUser.familyId, newEvt).then(() => undefined));
   };
@@ -641,7 +720,12 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
 
   const addReminder = (rem: Omit<ReminderItem, 'id'>) => {
-    const newRem: ReminderItem = { ...rem, id: crypto.randomUUID() };
+    const newRem: ReminderItem = {
+      ...rem,
+      id: crypto.randomUUID(),
+      userId: rem.userId || currentUser.id,
+      createdByName: rem.createdByName || currentUser.name
+    };
     setReminders(prev => [newRem, ...prev]);
     void persist(() => insertRow('reminders', currentUser.familyId, newRem).then(() => undefined));
   };
@@ -674,7 +758,9 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       summaryContent: sanitizeText(doc.summaryContent),
       category: doc.category || 'Identity',
       id: crypto.randomUUID(),
-      uploadDate: new Date().toISOString().split('T')[0]
+      uploadDate: new Date().toISOString().split('T')[0],
+      userId: doc.userId || currentUser.id,
+      createdByName: doc.createdByName || currentUser.name
     };
     setDocuments(prev => [newDoc, ...prev]);
     if (isSupabaseConfigured) {
@@ -792,7 +878,12 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [bills, setBills] = useState<BillItem[]>([]);
 
   const addExpense = (exp: Omit<ExpenseItem, 'id'>) => {
-    const newExp: ExpenseItem = { ...exp, id: crypto.randomUUID() };
+    const newExp: ExpenseItem = {
+      ...exp,
+      id: crypto.randomUUID(),
+      userId: exp.userId || currentUser.id,
+      createdByName: exp.createdByName || currentUser.name
+    };
     setExpenses(prev => [newExp, ...prev]);
     void persist(() => insertRow('expenses', currentUser.familyId, newExp).then(() => undefined));
   };

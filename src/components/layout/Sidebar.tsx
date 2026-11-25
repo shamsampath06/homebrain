@@ -1,6 +1,6 @@
 import React from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
-import { LayoutDashboard, Bot, Clock, User, ShieldAlert, ChevronRight, LogIn, LayoutGrid } from 'lucide-react';
+import { LayoutDashboard, Bot, Clock, User, ShieldAlert, ChevronRight, LogIn, LayoutGrid, Users } from 'lucide-react';
 import { InitialAvatar } from '../common/InitialAvatar';
 
 export const Sidebar: React.FC = () => {
@@ -69,6 +69,16 @@ export const Sidebar: React.FC = () => {
         setActiveSubScreen('none');
       },
       isActive: activeTab === 'timeline' && activeSubScreen === 'none'
+    },
+    {
+      key: 'family-hub',
+      label: 'Family Hub',
+      icon: Users,
+      description: 'Household Members & Roles',
+      onClick: () => {
+        setActiveSubScreen('family-hub');
+      },
+      isActive: activeSubScreen === 'family-hub'
     },
     {
       key: 'profile',
@@ -171,8 +181,12 @@ export const Sidebar: React.FC = () => {
           <div className="flex items-center gap-2.5 min-w-0">
             <InitialAvatar name={currentUser.name} className="w-8 h-8 text-xs shrink-0 ring-1 ring-cyan-400/40" />
             <div className="min-w-0">
-              <p className="text-xs font-black text-slate-900 dark:text-white truncate group-hover:text-brand-700 dark:group-hover:text-cyan-300 transition-colors">{currentUser.name}</p>
-              <p className="text-[10px] text-slate-400 truncate">{currentUser.role} • {currentUser.familyName?.replace(/Kumar Household/i, 'Household') || 'Household'}</p>
+              <p className="text-xs font-black text-slate-900 dark:text-white truncate group-hover:text-brand-700 dark:group-hover:text-cyan-300 transition-colors">
+                {currentUser.name}
+              </p>
+              <p className="text-[10px] text-slate-400 truncate">
+                {currentUser.relation || 'Member'} • <span className="text-brand-600 dark:text-cyan-400 font-bold">{currentUser.role}</span>
+              </p>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-500 shrink-0 group-hover:text-white transition-colors" />

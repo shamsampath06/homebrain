@@ -61,9 +61,10 @@ export const CalendarCard: React.FC = () => {
 };
 
 export const CalendarScreen: React.FC = () => {
-  const { events, familyMembers, navigateToSubScreen, setActiveSubScreen } = useHomeBrain();
+  const { events, familyMembers, navigateToSubScreen, setActiveSubScreen, currentUser } = useHomeBrain();
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedMember, setSelectedMember] = useState<string>('All');
+  const [spaceFilter, setSpaceFilter] = useState<'all' | 'shared' | 'personal'>('all');
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
 
   const categories = ['All', 'Birthday', 'Appointment', 'Holiday', 'School', 'Bill', 'General'];
@@ -73,6 +74,14 @@ export const CalendarScreen: React.FC = () => {
     const matchesMember =
       selectedMember === 'All' ||
       (e.membersInvolved && e.membersInvolved.some(m => m.toLowerCase().includes(selectedMember.toLowerCase())));
+    const matchesSpace =
+      spaceFilter === 'all'
+        ? true
+        : spaceFilter === 'personal'
+        ? e.isPersonal === true || e.userId === currentUser.id
+        : !e.isPersonal;
+
+    if (!matchesSpace) return false;
 
     if (viewMode === 'day') {
       const todayStr = new Date().toISOString().split('T')[0];
@@ -102,7 +111,7 @@ export const CalendarScreen: React.FC = () => {
         }
       />
 
-      {/* View Switcher & Family Member Filter Bar */}
+      {/* View Switcher, Space Filter & Family Member Filter Bar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
         {/* Day / Week / Month View Switcher */}
         <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
@@ -119,6 +128,40 @@ export const CalendarScreen: React.FC = () => {
               {mode} View
             </button>
           ))}
+        </div>
+
+        {/* Space Filter: All | Shared Family | Personal Schedule */}
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+          <button
+            onClick={() => setSpaceFilter('all')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+              spaceFilter === 'all'
+                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            All Events
+          </button>
+          <button
+            onClick={() => setSpaceFilter('shared')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+              spaceFilter === 'shared'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            👨‍👩‍👧‍👦 Family
+          </button>
+          <button
+            onClick={() => setSpaceFilter('personal')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+              spaceFilter === 'personal'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            🔒 Personal
+          </button>
         </div>
 
         {/* Member Filter Dropdown */}
@@ -183,9 +226,20 @@ export const CalendarScreen: React.FC = () => {
           >
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300">
-                  {evt.category}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300">
+                    {evt.category}
+                  </span>
+                  {evt.isPersonal ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60">
+                      🔒 Private
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-700/60">
+                      👨‍👩‍👧‍👦 Family
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs text-slate-400">{evt.recurring !== 'None' ? `🔄 ${evt.recurring}` : ''}</span>
               </div>
               <h3 className="font-bold text-base text-slate-900 dark:text-white">{evt.title}</h3>
@@ -218,6 +272,7 @@ export const AddEventModal: React.FC = () => {
   const [category, setCategory] = useState<EventCategory>(existing?.category || 'Appointment');
   const [description, setDescription] = useState(existing?.description || '');
   const [recurring, setRecurring] = useState<'None' | 'Daily' | 'Weekly' | 'Monthly' | 'Yearly'>(existing?.recurring || 'None');
+  const [isPersonal, setIsPersonal] = useState(existing?.isPersonal || false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,9 +284,14 @@ export const AddEventModal: React.FC = () => {
       time,
       category,
       description,
-      membersInvolved: [currentUser.name, ...familyMembers.filter(member => member.name !== currentUser.name).map(member => member.name)],
+      membersInvolved: isPersonal
+        ? [currentUser.name]
+        : [currentUser.name, ...familyMembers.filter(member => member.name !== currentUser.name).map(member => member.name)],
       reminder: true,
-      recurring
+      recurring,
+      isPersonal,
+      userId: currentUser.id,
+      createdByName: currentUser.name
     };
     if (editing && existing) updateEvent(existing.id, payload);
     else addEvent(payload);
@@ -326,6 +386,26 @@ export const AddEventModal: React.FC = () => {
             onChange={e => setDescription(e.target.value)}
             className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
           />
+        </div>
+
+        {/* Personal vs Shared Event Toggle */}
+        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPersonal}
+              onChange={e => setIsPersonal(e.target.checked)}
+              className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+            />
+            <div>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                Personal Schedule (Private to My Account)
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                When checked, only you will see this event. When unchecked, it appears on the shared family calendar for all household members.
+              </span>
+            </div>
+          </label>
         </div>
 
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">

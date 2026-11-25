@@ -1,4 +1,4 @@
-export type UserRole = 'Admin' | 'Parent' | 'Member' | 'Senior' | 'Child';
+export type UserRole = 'Admin' | 'Co-Admin' | 'Parent' | 'Member' | 'Senior' | 'Child';
 
 export interface User {
   id: string;
@@ -8,6 +8,8 @@ export interface User {
   role: UserRole;
   familyId: string;
   familyName: string;
+  relation?: string;
+  inviteCode?: string;
 }
 
 export interface FamilyMember {
@@ -18,6 +20,8 @@ export interface FamilyMember {
   role: UserRole;
   phone: string;
   email: string;
+  userId?: string;
+  isRegistered?: boolean;
   age?: number;
   birthday?: string; // YYYY-MM-DD (requires migration 007)
   preferences?: string;
@@ -35,6 +39,9 @@ export interface FamilyEvent {
   membersInvolved: string[]; // Member names or IDs
   reminder: boolean;
   recurring: 'None' | 'Daily' | 'Weekly' | 'Monthly' | 'Yearly';
+  isPersonal?: boolean;
+  userId?: string;
+  createdByName?: string;
 }
 
 export interface ReminderItem {
@@ -45,6 +52,9 @@ export interface ReminderItem {
   priority: 'High' | 'Medium' | 'Low';
   completed: boolean;
   assignedMemberName: string;
+  isPersonal?: boolean;
+  userId?: string;
+  createdByName?: string;
 }
 
 export type DocumentCategory = 'Identity' | 'Medical' | 'Financial' | 'Home' | 'Education' | 'Legal' | 'Insurance' | 'General';
@@ -62,6 +72,9 @@ export interface DocumentItem {
   summaryContent?: string;
   uploaderName: string;
   expiryDate?: string; // YYYY-MM-DD
+  isPersonal?: boolean;
+  userId?: string;
+  createdByName?: string;
 }
 
 export type GroceryCategory = 'Dairy' | 'Produce' | 'Bakery' | 'Meat' | 'Pantry' | 'Household' | 'Beverages';
@@ -121,6 +134,9 @@ export interface ExpenseItem {
   payer: string;
   description?: string;
   receiptUrl?: string;
+  isPersonal?: boolean;
+  userId?: string;
+  createdByName?: string;
 }
 
 export interface BillItem {

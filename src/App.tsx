@@ -8,6 +8,7 @@ import { DashboardScreen } from './components/dashboard/DashboardScreen';
 import { AIChatScreen } from './components/ai/AIChatScreen';
 import { FamilyTimelineScreen, AddMemoryModal, MemoryDetailsModal } from './components/modules/FamilyTimelineModule';
 import { ProfileSettingsShell } from './components/profile/ProfileSettingsModule';
+import { FamilyHubModule } from './components/modules/FamilyHubModule';
 
 import { CalendarScreen, AddEventModal, EventDetailsModal } from './components/modules/CalendarModule';
 import { DocumentVaultScreen, UploadDocumentModal, DocumentDetailsModal } from './components/modules/DocumentVaultModule';
@@ -84,8 +85,8 @@ const AppContent: React.FC = () => {
           await signIn(email, password);
           setActiveSubScreen('none');
         }}
-        onSignedUp={async (email, password, name, familyName) => {
-          await signUp(email, password, name, familyName);
+        onSignedUp={async (email, password, name, familyName, inviteCode, relation, role, mode) => {
+          await signUp(email, password, name, familyName, inviteCode, relation, role, mode);
           setActiveSubScreen('none');
         }}
         onGoogleSignIn={signInWithGoogle}
@@ -158,6 +159,7 @@ const AppContent: React.FC = () => {
         return <MemoryDetailsModal />;
       case 'user-profile':
       case 'family-members':
+      case 'family-hub':
       case 'settings':
       case 'privacy':
         return <ProfileSettingsShell />;

@@ -749,6 +749,203 @@ app.post('/api/ai/reset-demo-state', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Demo fallback state successfully reset' });
 });
 
+// --- Multi-User Family Hub & Permissions Management ---
+interface HouseholdStoreItem {
+  id: string;
+  name: string;
+  inviteCode: string;
+  createdBy: string;
+  members: Array<{
+    id: string;
+    userId?: string;
+    name: string;
+    relation: string;
+    role: string;
+    email: string;
+    phone?: string;
+  }>;
+}
+
+const serverHouseholdStore = new Map<string, HouseholdStoreItem>();
+
+// Seed default household for multi-account testing (Dad, Mom, Sister, Brother, Sarah)
+serverHouseholdStore.set('demo-family-kumar', {
+  id: 'demo-family-kumar',
+  name: 'Kumar Household',
+  inviteCode: 'HB-849201',
+  createdBy: 'demo-user-sarah',
+  members: [
+    { id: 'm-sarah', userId: 'demo-user-sarah', name: 'Sarah', relation: 'Daughter / Admin', role: 'Admin', email: 'sarah.kumar@homebrain.app', phone: '+91 98400 12345' },
+    { id: 'm-father', userId: 'demo-user-dad', name: 'Rajesh', relation: 'Father', role: 'Co-Admin', email: 'dad.rajesh@homebrain.app', phone: '+91 98400 23456' },
+    { id: 'm-mother', userId: 'demo-user-mom', name: 'Priya', relation: 'Mother', role: 'Co-Admin', email: 'mom.priya@homebrain.app', phone: '+91 98400 34567' },
+    { id: 'm-sister', userId: 'demo-user-sister', name: 'Sneha', relation: 'Sister', role: 'Member', email: 'sister.sneha@homebrain.app', phone: '+91 98400 45678' },
+    { id: 'm-brother', userId: 'demo-user-brother', name: 'Sham', relation: 'Brother', role: 'Member', email: 'brother.sham@homebrain.app', phone: '+91 98400 56789' }
+  ]
+});
+
+// GET /api/family/hub: Retrieve household details and all connected family accounts
+app.get('/api/family/hub', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  const user = req.user!;
+  const token = req.authToken!;
+
+  try {
+    let familyName = 'Family Household';
+    let inviteCode = 'HB-849201';
+    let membersList: any[] = [];
+
+    if (SUPABASE_URL && token !== 'demo-token' && token !== SUPABASE_ANON_KEY) {
+      const famRows = await fetchFamilyData('families', user.familyId, token);
+      if (famRows && famRows.length > 0) {
+        familyName = famRows[0].name || familyName;
+        inviteCode = famRows[0].invite_code || inviteCode;
+      }
+      const memRows = await fetchFamilyData('family_members', user.familyId, token);
+      if (memRows && memRows.length > 0) {
+        membersList = memRows;
+      }
+    }
+
+    if (membersList.length === 0) {
+      const stored = serverHouseholdStore.get(user.familyId);
+      if (stored) {
+        familyName = stored.name;
+        inviteCode = stored.inviteCode;
+        membersList = stored.members;
+      } else {
+        membersList = [
+          { id: 'm-sarah', name: user.name, relation: 'Admin', role: user.role, email: user.email }
+        ];
+      }
+    }
+
+    res.json({
+      success: true,
+      familyId: user.familyId,
+      familyName,
+      inviteCode,
+      currentUser: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      },
+      members: membersList
+    });
+  } catch (err: any) {
+    console.warn('Family hub retrieval error:', err);
+    res.status(500).json({ error: err.message || 'Failed to retrieve family hub data.' });
+  }
+});
+
+// POST /api/family/join: Connect a user account to an existing household with an invite code
+app.post('/api/family/join', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  const user = req.user!;
+  const { inviteCode, relation = 'Member', role = 'Member' } = req.body;
+
+  if (!inviteCode) {
+    res.status(400).json({ error: 'Family invitation code is required.' });
+    return;
+  }
+
+  const cleanCode = String(inviteCode).trim().toUpperCase();
+
+  // Find target household
+  let targetFamilyId: string | null = null;
+  let targetFamilyName = 'Family Household';
+
+  for (const [fId, item] of serverHouseholdStore.entries()) {
+    if (item.inviteCode.toUpperCase() === cleanCode) {
+      targetFamilyId = fId;
+      targetFamilyName = item.name;
+      break;
+    }
+  }
+
+  if (!targetFamilyId && (cleanCode === 'HB-849201' || cleanCode.startsWith('HB-'))) {
+    targetFamilyId = 'demo-family-kumar';
+    targetFamilyName = 'Kumar Household';
+  }
+
+  if (!targetFamilyId) {
+    res.status(404).json({ error: `Household invitation code "${cleanCode}" was not found.` });
+    return;
+  }
+
+  // Update in server store
+  const fam = serverHouseholdStore.get(targetFamilyId);
+  if (fam) {
+    const existingIdx = fam.members.findIndex(m => m.email?.toLowerCase() === user.email?.toLowerCase());
+    const memberEntry = {
+      id: `m_${Date.now()}`,
+      userId: user.id,
+      name: user.name,
+      relation,
+      role,
+      email: user.email
+    };
+    if (existingIdx >= 0) {
+      fam.members[existingIdx] = memberEntry;
+    } else {
+      fam.members.push(memberEntry);
+    }
+  }
+
+  res.json({
+    success: true,
+    familyId: targetFamilyId,
+    familyName: targetFamilyName,
+    inviteCode: cleanCode,
+    relation,
+    role
+  });
+});
+
+// PATCH /api/family/member-role: Admin promotes or demotes member roles
+app.patch('/api/family/member-role', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  const user = req.user!;
+  const { memberId, newRole } = req.body;
+
+  if (user.role !== 'Admin') {
+    res.status(403).json({ error: 'Only Family Admins can manage household roles.' });
+    return;
+  }
+
+  const fam = serverHouseholdStore.get(user.familyId);
+  if (fam) {
+    const member = fam.members.find(m => m.id === memberId || m.userId === memberId);
+    if (member) {
+      member.role = newRole;
+    }
+  }
+
+  res.json({ success: true, memberId, newRole });
+});
+
+// POST /api/family/sync: Multi-device delta synchronization
+app.post('/api/family/sync', authenticateUser, async (req: Request, res: Response): Promise<void> => {
+  const user = req.user!;
+  const token = req.authToken!;
+
+  const [events, reminders, groceries, expenses, bills] = await Promise.all([
+    fetchFamilyData('events', user.familyId, token, 'order=date.asc,time.asc&limit=100'),
+    fetchFamilyData('reminders', user.familyId, token, 'order=date_time.asc&limit=100'),
+    fetchFamilyData('groceries', user.familyId, token, 'limit=100'),
+    fetchFamilyData('expenses', user.familyId, token, 'order=date.desc&limit=100'),
+    fetchFamilyData('bills', user.familyId, token, 'order=due_date.asc&limit=100')
+  ]);
+
+  res.json({
+    success: true,
+    timestamp: new Date().toISOString(),
+    familyId: user.familyId,
+    groceries: groceries || sharedFallbackGroceries,
+    expenses: expenses || sharedFallbackExpenses,
+    reminders: reminders || sharedFallbackReminders,
+    events: events || sharedFallbackEvents,
+    bills: bills || sharedFallbackBills
+  });
+});
+
 // --- RAG & AI Chatbot Query Endpoint (Phase 1) ---
 app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response): Promise<void> => {
   const startTime = Date.now();

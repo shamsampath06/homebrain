@@ -40,9 +40,9 @@ export const DashboardScreen: React.FC = () => {
     <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 pb-12">
       {/* 1. Household Core Summary Metrics Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3.5">
-        {/* Metric 1: Family Members */}
+        {/* Metric 1: Family Members & Household Hub */}
         <div
-          onClick={() => navigateToSubScreen('family-members')}
+          onClick={() => navigateToSubScreen('family-hub')}
           className="spatial-card p-2.5 sm:p-4 flex items-center gap-2 sm:gap-3 cursor-pointer hover:border-brand-300 dark:hover:border-brand-600 transition-all group"
         >
           <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 group-hover:scale-105 transition-transform shrink-0">

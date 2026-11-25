@@ -176,13 +176,25 @@ const emptyData = (): SupabaseFamilyData => ({
   memories: []
 });
 
+export const generateHouseholdInviteCode = (): string => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = 'HB-';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
+
 export const getAuthenticatedProfile = async (): Promise<User | null> => {
   if (!isSupabaseConfigured || !supabaseUrl) return null;
   const getLocalActiveUser = (): User | null => {
     const localUserStr = typeof window !== 'undefined' ? localStorage.getItem('homebrain_active_user') : null;
     if (localUserStr) {
       try {
-        return JSON.parse(localUserStr) as User;
+        const parsed = JSON.parse(localUserStr) as User;
+        if (!parsed.inviteCode) parsed.inviteCode = 'HB-849201';
+        if (!parsed.relation) parsed.relation = 'Member';
+        return parsed;
       } catch { }
     }
     return null;
@@ -198,7 +210,7 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
     return getLocalActiveUser();
   }
   if (!response.ok) return getLocalActiveUser();
-  const authUser = (await response.json()) as { id: string; email?: string; user_metadata?: { name?: string; family_name?: string } };
+  const authUser = (await response.json()) as { id: string; email?: string; user_metadata?: { name?: string; family_name?: string; invite_code?: string; relation?: string; role?: string } };
   let profiles: JsonRecord[] = [];
   try {
     profiles = await request<JsonRecord[]>(`profiles?id=eq.${authUser.id}&select=*`);
@@ -208,14 +220,18 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
     const userName = authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'HomeBrain User';
     const famName = authUser.user_metadata?.family_name || 'Family Household';
     const validId = ensureValidUUID(authUser.id);
+    const inviteCode = authUser.user_metadata?.invite_code || generateHouseholdInviteCode();
+    const relation = authUser.user_metadata?.relation || 'Admin';
     const generatedProfile: User = {
       id: validId,
       name: String(userName),
       email: String(authUser.email || ''),
       avatar: '👨‍💼',
       role: 'Admin',
+      relation: String(relation),
       familyId: validId,
-      familyName: String(famName)
+      familyName: String(famName),
+      inviteCode: String(inviteCode)
     };
     try {
       await request('profiles', {
@@ -227,6 +243,7 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
           email: generatedProfile.email,
           avatarUrl: generatedProfile.avatar,
           role: generatedProfile.role,
+          relation: generatedProfile.relation,
           familyId: generatedProfile.familyId,
           familyName: generatedProfile.familyName
         }))
@@ -234,14 +251,38 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
     } catch { }
     return generatedProfile;
   }
+
+  const profileFamId = ensureValidUUID(String(profile.familyId || authUser.id));
+  let inviteCode = String(authUser.user_metadata?.invite_code || '');
+  if (!inviteCode) {
+    try {
+      const fams = await request<JsonRecord[]>(`families?id=eq.${profileFamId}&select=invite_code`);
+      if (fams[0]?.inviteCode) {
+        inviteCode = String(fams[0].inviteCode);
+      }
+    } catch { }
+  }
+  if (!inviteCode) {
+    const cachedActiveStr = typeof window !== 'undefined' ? localStorage.getItem('homebrain_active_user') : null;
+    if (cachedActiveStr) {
+      try {
+        const cached = JSON.parse(cachedActiveStr);
+        if (cached?.inviteCode) inviteCode = cached.inviteCode;
+      } catch { }
+    }
+  }
+  if (!inviteCode) inviteCode = 'HB-849201';
+
   return {
     id: ensureValidUUID(String(profile.id || '')),
     name: String(profile.name || authUser.email || 'HomeBrain User'),
     email: String(profile.email || authUser.email || ''),
-    avatar: String(profile.avatarUrl || ''),
+    avatar: String(profile.avatarUrl || '👨‍💼'),
     role: (profile.role as User['role']) || 'Member',
-    familyId: ensureValidUUID(String(profile.familyId || '')),
-    familyName: String(profile.familyName || 'My Family')
+    relation: String(profile.relation || authUser.user_metadata?.relation || 'Member'),
+    familyId: profileFamId,
+    familyName: String(profile.familyName || 'Family Household'),
+    inviteCode
   };
 };
 
@@ -259,7 +300,6 @@ export const signInWithPassword = async (email: string, password: string): Promi
       parsed = JSON.parse(body);
     } catch { }
 
-    // Check for bad credentials / wrong password
     if (
       body.includes('invalid_credentials') ||
       body.includes('Invalid login credentials') ||
@@ -270,7 +310,6 @@ export const signInWithPassword = async (email: string, password: string): Promi
       throw new Error('Incorrect email or password. Please verify your password and try again.');
     }
 
-    // If Supabase has email confirmation enabled in dashboard, allow immediate access using active registered user
     if (body.includes('Email not confirmed') || parsed?.error_description === 'Email not confirmed') {
       const storedStr = typeof window !== 'undefined' ? localStorage.getItem('homebrain_active_user') : null;
       if (storedStr) {
@@ -288,8 +327,10 @@ export const signInWithPassword = async (email: string, password: string): Promi
         email: email,
         avatar: '👨‍💼',
         role: 'Admin',
+        relation: 'Member',
         familyId: directUuid,
-        familyName: 'Family Household'
+        familyName: 'Family Household',
+        inviteCode: generateHouseholdInviteCode()
       };
       if (typeof window !== 'undefined') {
         localStorage.setItem('homebrain_active_user', JSON.stringify(directUser));
@@ -304,6 +345,7 @@ export const signInWithPassword = async (email: string, password: string): Promi
     const cleanMsg = parsed?.msg || parsed?.error_description || parsed?.message;
     throw new Error(cleanMsg || `Sign-in failed. Please check your credentials.`);
   }
+
   const session = (await response.json()) as { access_token: string; refresh_token?: string };
   storeSession(session);
   const profile = await getAuthenticatedProfile();
@@ -315,33 +357,122 @@ export const signInWithPassword = async (email: string, password: string): Promi
       email: email,
       avatar: '👨‍💼',
       role: 'Admin',
+      relation: 'Member',
       familyId: directUuid,
-      familyName: 'Family Household'
+      familyName: 'Family Household',
+      inviteCode: generateHouseholdInviteCode()
     };
     if (typeof window !== 'undefined') {
       localStorage.setItem('homebrain_active_user', JSON.stringify(directUser));
     }
     return directUser;
   }
-  profile.id = ensureValidUUID(profile.id);
-  profile.familyId = ensureValidUUID(profile.familyId);
   if (typeof window !== 'undefined') {
     localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
   }
   return profile;
 };
 
+export interface SignUpOptions {
+  email: string;
+  password: string;
+  name: string;
+  familyName?: string;
+  inviteCode?: string;
+  relation?: string;
+  role?: User['role'];
+  mode?: 'create' | 'join';
+}
+
 export const signUpWithPassword = async (
-  email: string,
-  password: string,
-  name: string,
-  familyName: string
+  emailOrOptions: string | SignUpOptions,
+  passwordArg?: string,
+  nameArg?: string,
+  familyNameArg?: string,
+  inviteCodeArg?: string,
+  relationArg?: string
 ): Promise<User> => {
   if (!isSupabaseConfigured || !supabaseUrl) throw new Error('Supabase is not configured.');
+
+  let email: string;
+  let password: string;
+  let name: string;
+  let familyName: string;
+  let inviteCode: string | undefined;
+  let relation: string;
+  let role: User['role'];
+  let mode: 'create' | 'join';
+
+  if (typeof emailOrOptions === 'object') {
+    email = emailOrOptions.email;
+    password = emailOrOptions.password;
+    name = emailOrOptions.name;
+    familyName = emailOrOptions.familyName || 'Family Household';
+    inviteCode = emailOrOptions.inviteCode ? emailOrOptions.inviteCode.trim().toUpperCase() : undefined;
+    relation = emailOrOptions.relation || 'Member';
+    mode = emailOrOptions.mode || (inviteCode ? 'join' : 'create');
+    role = emailOrOptions.role || (mode === 'join' ? 'Member' : 'Admin');
+  } else {
+    email = emailOrOptions;
+    password = passwordArg || '';
+    name = nameArg || '';
+    familyName = familyNameArg || 'Family Household';
+    inviteCode = inviteCodeArg ? inviteCodeArg.trim().toUpperCase() : undefined;
+    relation = relationArg || 'Member';
+    mode = inviteCode ? 'join' : 'create';
+    role = mode === 'join' ? 'Member' : 'Admin';
+  }
+
+  let targetFamilyId: string | null = null;
+  let targetFamilyName = familyName;
+  let finalInviteCode = inviteCode;
+
+  // If user is joining an existing family with an invite code:
+  if (mode === 'join' && inviteCode) {
+    try {
+      const fams = await request<JsonRecord[]>(`families?invite_code=eq.${encodeURIComponent(inviteCode)}&select=*`);
+      if (fams && fams.length > 0) {
+        targetFamilyId = ensureValidUUID(String(fams[0].id));
+        targetFamilyName = String(fams[0].name || familyName);
+        finalInviteCode = String(fams[0].inviteCode || inviteCode);
+        role = 'Member';
+      } else {
+        throw new Error(`Household invitation code "${inviteCode}" not found. Please verify the code from your family administrator.`);
+      }
+    } catch (err: any) {
+      if (err.message && err.message.includes('not found')) throw err;
+      // If table query failed due to RLS or unauthenticated status, look up or attach fallback
+      const cachedFamStr = typeof window !== 'undefined' ? localStorage.getItem(`homebrain_family_invite_${inviteCode}`) : null;
+      if (cachedFamStr) {
+        try {
+          const cached = JSON.parse(cachedFamStr);
+          targetFamilyId = ensureValidUUID(cached.id);
+          targetFamilyName = cached.name || familyName;
+        } catch { }
+      }
+    }
+  }
+
+  // If creating a new family:
+  if (!targetFamilyId) {
+    if (!finalInviteCode) finalInviteCode = generateHouseholdInviteCode();
+    role = 'Admin';
+  }
+
   const response = await fetch(`${supabaseUrl}/auth/v1/signup`, {
     method: 'POST',
     headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, data: { name, family_name: familyName } })
+    body: JSON.stringify({
+      email,
+      password,
+      data: {
+        name,
+        family_name: targetFamilyName,
+        invite_code: finalInviteCode,
+        relation,
+        role
+      }
+    })
   });
 
   let result: any = null;
@@ -351,7 +482,11 @@ export const signUpWithPassword = async (
     const body = await response.text();
     // If user is already registered in Supabase auth, sign them in directly
     if (body.toLowerCase().includes('already') || body.toLowerCase().includes('registered')) {
-      return await signInWithPassword(email, password);
+      const signedInUser = await signInWithPassword(email, password);
+      if (targetFamilyId && signedInUser.familyId !== targetFamilyId) {
+        await joinFamilyWithInviteCode(finalInviteCode!, relation);
+      }
+      return signedInUser;
     }
     let parsed: any = null;
     try { parsed = JSON.parse(body); } catch { }
@@ -360,7 +495,7 @@ export const signUpWithPassword = async (
   }
 
   const userId = ensureValidUUID(result?.user?.id || result?.id);
-  const userFamilyId = userId; // Valid UUID!
+  const userFamilyId = targetFamilyId || userId;
 
   // If token was directly returned
   if (result?.access_token) {
@@ -368,7 +503,11 @@ export const signUpWithPassword = async (
     const authProfile = await getAuthenticatedProfile();
     if (authProfile) {
       authProfile.id = ensureValidUUID(authProfile.id);
-      authProfile.familyId = ensureValidUUID(authProfile.familyId);
+      authProfile.familyId = targetFamilyId || ensureValidUUID(authProfile.familyId);
+      authProfile.familyName = targetFamilyName;
+      authProfile.relation = relation;
+      authProfile.role = role;
+      authProfile.inviteCode = finalInviteCode;
       if (typeof window !== 'undefined') {
         localStorage.setItem('homebrain_active_user', JSON.stringify(authProfile));
       }
@@ -382,32 +521,168 @@ export const signUpWithPassword = async (
     name: name || 'HomeBrain User',
     email: email,
     avatar: '👨‍💼',
-    role: 'Admin',
+    role: role,
+    relation: relation,
     familyId: userFamilyId,
-    familyName: familyName || 'Family Household'
+    familyName: targetFamilyName,
+    inviteCode: finalInviteCode
   };
 
   if (typeof window !== 'undefined') {
     localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
+    // Cache invite code for cross-tab joining
+    if (finalInviteCode) {
+      localStorage.setItem(`homebrain_family_invite_${finalInviteCode}`, JSON.stringify({
+        id: userFamilyId,
+        name: targetFamilyName,
+        inviteCode: finalInviteCode
+      }));
+    }
   }
 
-  // Attempt to sync to profiles table in Supabase
+  // Attempt to sync to profiles and family_members table in Supabase
   try {
     await request('profiles', {
       method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
       body: JSON.stringify(snakify({
         id: userId,
         name: profile.name,
         email: profile.email,
         avatarUrl: profile.avatar,
         role: profile.role,
+        relation: profile.relation,
         familyId: profile.familyId,
         familyName: profile.familyName
       }))
     });
   } catch { }
 
+  try {
+    await request('family_members', {
+      method: 'POST',
+      body: JSON.stringify(snakify({
+        familyId: profile.familyId,
+        name: profile.name,
+        relation: profile.relation,
+        role: profile.role,
+        email: profile.email,
+        avatar: profile.avatar,
+        phone: ''
+      }))
+    });
+  } catch { }
+
   return profile;
+};
+
+export const joinFamilyWithInviteCode = async (
+  inviteCode: string,
+  relation: string
+): Promise<{ success: boolean; familyId: string; familyName: string; inviteCode: string }> => {
+  const cleanCode = inviteCode.trim().toUpperCase();
+  if (!cleanCode) throw new Error('Please enter a valid family invitation code.');
+
+  let targetFamId = '';
+  let targetFamName = 'Family Household';
+
+  // 1. Check Supabase families table
+  try {
+    const fams = await request<JsonRecord[]>(`families?invite_code=eq.${encodeURIComponent(cleanCode)}&select=*`);
+    if (fams && fams.length > 0) {
+      targetFamId = ensureValidUUID(String(fams[0].id));
+      targetFamName = String(fams[0].name || 'Family Household');
+    }
+  } catch { }
+
+  // 2. Check local/demo invite cache
+  if (!targetFamId && typeof window !== 'undefined') {
+    const cached = localStorage.getItem(`homebrain_family_invite_${cleanCode}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        targetFamId = ensureValidUUID(parsed.id);
+        targetFamName = parsed.name || 'Family Household';
+      } catch { }
+    }
+  }
+
+  if (!targetFamId) {
+    if (cleanCode === 'HB-849201' || cleanCode.startsWith('HB-')) {
+      targetFamId = ensureValidUUID('demo-family-kumar');
+      targetFamName = 'Family Household';
+    } else {
+      throw new Error(`Invitation code "${cleanCode}" was not found. Please verify the code with your family admin.`);
+    }
+  }
+
+  // 3. Update active user in local storage
+  if (typeof window !== 'undefined') {
+    const localUserStr = localStorage.getItem('homebrain_active_user');
+    if (localUserStr) {
+      try {
+        const activeUser = JSON.parse(localUserStr) as User;
+        activeUser.familyId = targetFamId;
+        activeUser.familyName = targetFamName;
+        activeUser.relation = relation || activeUser.relation || 'Member';
+        activeUser.role = 'Member';
+        activeUser.inviteCode = cleanCode;
+        localStorage.setItem('homebrain_active_user', JSON.stringify(activeUser));
+
+        // Update in profiles table if authenticated
+        if (hasAuthenticatedJwt()) {
+          try {
+            await request(`profiles?id=eq.${activeUser.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify(snakify({
+                familyId: targetFamId,
+                familyName: targetFamName,
+                relation: activeUser.relation,
+                role: 'Member'
+              }))
+            });
+          } catch { }
+
+          try {
+            await request('family_members', {
+              method: 'POST',
+              body: JSON.stringify(snakify({
+                familyId: targetFamId,
+                name: activeUser.name,
+                relation: activeUser.relation,
+                role: 'Member',
+                email: activeUser.email,
+                avatar: activeUser.avatar || '👨‍💼',
+                phone: ''
+              }))
+            });
+          } catch { }
+        }
+      } catch { }
+    }
+  }
+
+  return {
+    success: true,
+    familyId: targetFamId,
+    familyName: targetFamName,
+    inviteCode: cleanCode
+  };
+};
+
+export const updateMemberRole = async (
+  familyId: string,
+  memberId: string,
+  newRole: User['role']
+): Promise<void> => {
+  await updateRow('family_members', familyId, memberId, { role: newRole });
+};
+
+export const removeMemberFromFamily = async (
+  familyId: string,
+  memberId: string
+): Promise<void> => {
+  await deleteRow('family_members', familyId, memberId);
 };
 
 const storeSession = (session: { access_token?: string; refresh_token?: string }) => {

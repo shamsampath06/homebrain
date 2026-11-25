@@ -70,9 +70,10 @@ export const DocumentVaultCard: React.FC = () => {
 };
 
 export const DocumentVaultScreen: React.FC = () => {
-  const { documents, navigateToSubScreen, setActiveSubScreen, updateDocument, deleteDocument } = useHomeBrain();
+  const { documents, navigateToSubScreen, setActiveSubScreen, updateDocument, deleteDocument, currentUser } = useHomeBrain();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [spaceFilter, setSpaceFilter] = useState<'all' | 'shared' | 'personal'>('all');
   const [documentToDelete, setDocumentToDelete] = useState<DocumentItem | null>(null);
   const [documentToRename, setDocumentToRename] = useState<DocumentItem | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
@@ -98,7 +99,13 @@ export const DocumentVaultScreen: React.FC = () => {
       (doc.summaryContent && doc.summaryContent.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesCat = selectedCategory === 'All' || doc.category === selectedCategory;
-    return matchesSearch && matchesCat;
+    const matchesSpace =
+      spaceFilter === 'all'
+        ? true
+        : spaceFilter === 'personal'
+        ? doc.isPersonal === true || doc.userId === currentUser.id
+        : !doc.isPersonal;
+    return matchesSearch && matchesCat && matchesSpace;
   });
 
   const confirmDelete = async () => {
@@ -279,6 +286,46 @@ export const DocumentVaultScreen: React.FC = () => {
         />
       </div>
 
+      {/* Space Filter: All | Shared Family | Personal Private */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+          <button
+            onClick={() => setSpaceFilter('all')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              spaceFilter === 'all'
+                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            All Documents
+          </button>
+          <button
+            onClick={() => setSpaceFilter('shared')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              spaceFilter === 'shared'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            👨‍👩‍👧‍👦 Shared Family Vault
+          </button>
+          <button
+            onClick={() => setSpaceFilter('personal')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              spaceFilter === 'personal'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            🔒 My Private Vault
+          </button>
+        </div>
+
+        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          {filteredDocs.length} {filteredDocs.length === 1 ? 'document' : 'documents'}
+        </span>
+      </div>
+
       {/* Category Pills */}
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
         {categories.map(cat => (
@@ -316,9 +363,20 @@ export const DocumentVaultScreen: React.FC = () => {
               >
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-200/50 dark:border-blue-900/50">
-                      {doc.category}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-200/50 dark:border-blue-900/50">
+                        {doc.category}
+                      </span>
+                      {doc.isPersonal ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60 flex items-center gap-1">
+                          🔒 Private
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-700/60 flex items-center gap-1">
+                          👨‍👩‍👧‍👦 Family
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs font-semibold text-slate-400">{doc.fileSize}</span>
                   </div>
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
@@ -410,6 +468,7 @@ export const UploadDocumentModal: React.FC = () => {
   const [expiryDate, setExpiryDate] = useState('');
   const [fileName, setFileName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isPersonal, setIsPersonal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -535,6 +594,9 @@ export const UploadDocumentModal: React.FC = () => {
         description: cleanDesc,
         summaryContent: cleanSummary,
         uploaderName: currentUser.name,
+        isPersonal,
+        userId: currentUser.id,
+        createdByName: currentUser.name,
         expiryDate: expiryDate ? expiryDate : undefined
       });
 
@@ -701,6 +763,26 @@ export const UploadDocumentModal: React.FC = () => {
               onChange={e => setDescription(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-brand-500"
             />
+          </div>
+
+          {/* Personal vs Shared Space Toggle */}
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isPersonal}
+                onChange={e => setIsPersonal(e.target.checked)}
+                className="mt-0.5 rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+              />
+              <div>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  Keep Private to My Personal Vault
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                  When enabled, this document is only visible and searchable by your account. Other household members will not see or query it.
+                </span>
+              </div>
+            </label>
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">

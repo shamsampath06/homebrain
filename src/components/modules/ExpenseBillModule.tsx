@@ -75,13 +75,21 @@ export const ExpenseCard: React.FC = () => {
 };
 
 export const ExpenseDashboardScreen: React.FC = () => {
-  const { expenses, bills, navigateToSubScreen, setActiveSubScreen, deleteExpense } = useHomeBrain();
+  const { expenses, bills, navigateToSubScreen, setActiveSubScreen, deleteExpense, currentUser } = useHomeBrain();
+  const [spaceFilter, setSpaceFilter] = useState<'all' | 'shared' | 'personal'>('all');
 
-  const totalSpending = expenses.reduce((acc, curr) => acc + curr.amount, 0);
+  const filteredExpenses = expenses.filter(exp => {
+    const isMine = exp.userId === currentUser.id || exp.payer === currentUser.name;
+    if (spaceFilter === 'personal') return exp.isPersonal && isMine;
+    if (spaceFilter === 'shared') return !exp.isPersonal;
+    return !exp.isPersonal || isMine;
+  });
+
+  const totalSpending = filteredExpenses.reduce((acc, curr) => acc + curr.amount, 0);
 
   // Group by category for simple progress bar analytics
   const categoriesMap: { [key: string]: number } = {};
-  expenses.forEach(e => {
+  filteredExpenses.forEach(e => {
     categoriesMap[e.category] = (categoriesMap[e.category] || 0) + e.amount;
   });
 
@@ -107,6 +115,40 @@ export const ExpenseDashboardScreen: React.FC = () => {
           </div>
         }
       />
+
+      {/* Space Toggle: Family Shared vs Personal */}
+      <div className="flex p-1 rounded-2xl bg-brand-50 dark:bg-slate-800 border border-brand-200 dark:border-slate-700 w-fit">
+        <button
+          onClick={() => setSpaceFilter('all')}
+          className={`py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all ${
+            spaceFilter === 'all'
+              ? 'bg-amber-500 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+          }`}
+        >
+          All Expenses
+        </button>
+        <button
+          onClick={() => setSpaceFilter('shared')}
+          className={`py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all ${
+            spaceFilter === 'shared'
+              ? 'bg-amber-500 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+          }`}
+        >
+          👨‍👩‍👧‍👦 Shared Family
+        </button>
+        <button
+          onClick={() => setSpaceFilter('personal')}
+          className={`py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all ${
+            spaceFilter === 'personal'
+              ? 'bg-amber-500 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+          }`}
+        >
+          🔒 Private Personal
+        </button>
+      </div>
 
       {/* Analytics Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -144,9 +186,9 @@ export const ExpenseDashboardScreen: React.FC = () => {
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-card border border-slate-200 dark:border-slate-700 space-y-4">
         <h3 className="font-bold text-base text-slate-900 dark:text-white">Recent Household Expenses</h3>
 
-        {expenses.length === 0 ? (
+        {filteredExpenses.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-sm text-slate-500 dark:text-slate-400">No household expenses logged yet.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">No expenses logged in this space yet.</p>
             <button
               onClick={() => navigateToSubScreen('add-expense')}
               className="mt-3 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm"
@@ -156,14 +198,25 @@ export const ExpenseDashboardScreen: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-2.5">
-          {expenses.map(exp => (
+          {filteredExpenses.map(exp => (
             <div
               key={exp.id}
               className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-700/40 flex items-center justify-between"
             >
               <div>
-                <p className="text-sm font-bold text-slate-900 dark:text-white">{exp.title}</p>
-                <p className="text-xs text-slate-500">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">{exp.title}</p>
+                  {exp.isPersonal ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                      🔒 Personal
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                      👨‍👩‍👧‍👦 Family
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
                   {exp.date} • Paid by <span className="font-semibold text-slate-700 dark:text-slate-300">{exp.payer}</span> • Category: {exp.category}
                 </p>
                 {exp.description && <p className="text-xs text-slate-400 mt-0.5">{exp.description}</p>}
@@ -205,6 +258,7 @@ export const AddExpenseModal: React.FC = () => {
   const [date, setDate] = useState(existing?.date || new Date().toISOString().split('T')[0]);
   const [payer, setPayer] = useState(existing?.payer || currentUser.name);
   const [description, setDescription] = useState(existing?.description || '');
+  const [isPersonal, setIsPersonal] = useState(existing?.isPersonal || false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -216,7 +270,10 @@ export const AddExpenseModal: React.FC = () => {
       category,
       date,
       payer,
-      description
+      description,
+      isPersonal,
+      userId: currentUser.id,
+      createdByName: currentUser.name
     };
     if (editing && existing) updateExpense(existing.id, payload);
     else addExpense(payload);
@@ -312,6 +369,16 @@ export const AddExpenseModal: React.FC = () => {
             className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm"
           />
         </div>
+
+        <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 pt-1 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isPersonal}
+            onChange={e => setIsPersonal(e.target.checked)}
+            className="rounded text-amber-500 focus:ring-amber-500 w-4 h-4"
+          />
+          <span>🔒 Keep Private (Personal expense - only visible in my account)</span>
+        </label>
 
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
           <button

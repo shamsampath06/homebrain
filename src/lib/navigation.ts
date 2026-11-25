@@ -51,6 +51,7 @@ export const SCREEN_META: Record<Exclude<SubScreen, 'none'>, ScreenMeta> = {
   'memory-details': { label: 'Memory', parent: 'none', tab: 'timeline' },
   'user-profile': { label: 'My Profile', parent: 'none', tab: 'profile' },
   'family-members': { label: 'Family Members', parent: 'none', tab: 'profile' },
+  'family-hub': { label: 'Family Hub', parent: 'none', tab: 'profile' },
   settings: { label: 'Settings', parent: 'none', tab: 'profile' },
   privacy: { label: 'Privacy & Security', parent: 'none', tab: 'profile' },
   auth: { label: 'Sign In / Account', parent: 'none', tab: 'profile' },

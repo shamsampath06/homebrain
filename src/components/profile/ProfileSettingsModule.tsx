@@ -3,12 +3,21 @@ import { useHomeBrain } from '../../context/HomeBrainContext';
 import { UserRole } from '../../types';
 import { InitialAvatar } from '../common/InitialAvatar';
 import { PageHeader } from '../layout/PageHeader';
+import { FamilyHubModule } from '../modules/FamilyHubModule';
 import { seedDemoFamilyData, removeDemoFamilyData, checkDemoSeedStatus } from '../../lib/demoData';
 import { User, Users, Settings, Shield, Plus, Trash2, Check, Lock, Sun, Moon, LogOut, X, Bell, Download, FileSpreadsheet, Sparkles, Database, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export const ProfileSettingsShell: React.FC = () => {
   const { activeSubScreen, setActiveSubScreen } = useHomeBrain();
-  const [currentTab, setCurrentTab] = useState<'profile' | 'members' | 'settings' | 'privacy' | 'demo'>('profile');
+  const [currentTab, setCurrentTab] = useState<'profile' | 'members' | 'settings' | 'privacy' | 'demo'>(
+    activeSubScreen === 'family-hub' || activeSubScreen === 'family-members' ? 'members' : 'profile'
+  );
+
+  useEffect(() => {
+    if (activeSubScreen === 'family-hub' || activeSubScreen === 'family-members') {
+      setCurrentTab('members');
+    }
+  }, [activeSubScreen]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -68,7 +77,7 @@ export const ProfileSettingsShell: React.FC = () => {
 
       {/* Tab Panels */}
       {currentTab === 'profile' && <UserProfilePanel />}
-      {currentTab === 'members' && <FamilyMembersPanel />}
+      {currentTab === 'members' && <FamilyHubModule />}
       {currentTab === 'settings' && <SettingsPanel />}
       {currentTab === 'privacy' && <PrivacySecurityPanel />}
       {currentTab === 'demo' && <DemoFamilyDataPanel />}
