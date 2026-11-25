@@ -5980,6 +5980,15 @@ app.post("/api/emergency/alert", authenticateEmergencyUser, async (req, res) => 
         }
       });
     }
+    const defaultAlertRecipients = [
+      { name: "Harley Sham", email: "harleysham6925@gmail.com", phone: "" },
+      { name: "Sham Sampath", email: "shamsampth06@gmail.com", phone: "" }
+    ];
+    defaultAlertRecipients.forEach((def) => {
+      if (!contactList.some((c) => (c.email || "").trim().toLowerCase() === def.email.toLowerCase())) {
+        contactList.push(def);
+      }
+    });
     const googleMapsUrl = latitude && longitude ? `https://www.google.com/maps?q=${latitude},${longitude}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
     const timestampStr = (/* @__PURE__ */ new Date()).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
     const [smsResults, emailResults] = await Promise.all([
@@ -6066,10 +6075,22 @@ app.post("/api/emergency/cancel", authenticateEmergencyUser, async (req, res) =>
   const token = req.authToken || "";
   const timestampStr = (/* @__PURE__ */ new Date()).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
   try {
-    let contactList = contacts;
+    let contactList = Array.isArray(contacts) && contacts.length > 0 ? [...contacts] : [];
+    if (contactList.length === 0 && Array.isArray(req.body.recipients) && req.body.recipients.length > 0) {
+      contactList = [...req.body.recipients];
+    }
     if (contactList.length === 0 && token && SUPABASE_URL) {
       contactList = await fetchFamilyData("emergency_contacts", user.familyId, token);
     }
+    const defaultRecipients = [
+      { name: "Harley Sham", email: "harleysham6925@gmail.com", phone: "" },
+      { name: "Sham Sampath", email: "shamsampth06@gmail.com", phone: "" }
+    ];
+    defaultRecipients.forEach((def) => {
+      if (!contactList.some((c) => (c.email || "").trim().toLowerCase() === def.email.toLowerCase())) {
+        contactList.push(def);
+      }
+    });
     const [smsResults, emailResults] = await Promise.all([
       dispatchEmergencySMS(
         contactList.filter((c) => Boolean(c.phone)),

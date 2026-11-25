@@ -1179,7 +1179,8 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           reason,
           senderName: currentUser.name || 'Sarah',
           familyId: currentUser.familyId || 'demo-family-kumar',
-          contacts: emergencyContacts
+          contacts: getSosRecipients(emergencyContacts),
+          recipients: getSosRecipients(emergencyContacts)
         })
       });
 
