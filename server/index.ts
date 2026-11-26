@@ -211,24 +211,62 @@ serverHouseholdStore.set('demo-family-kumar', {
   medicines: []
 });
 
+export function generateSessionToken(user: ServerUser): string {
+  const payload = Buffer.from(JSON.stringify({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    familyId: user.familyId,
+    familyName: user.familyName,
+    inviteCode: user.inviteCode,
+    role: user.role,
+    relation: user.relation
+  })).toString('base64url');
+  return 'hb-sess-' + payload;
+}
+
 export function findHousehold(familyId?: string, inviteCode?: string): HouseholdStoreItem {
   const cleanCode = inviteCode ? String(inviteCode).trim().toUpperCase() : '';
-  if (cleanCode && (cleanCode === 'HB-849201' || cleanCode.includes('849201'))) {
-    return serverHouseholdStore.get('demo-family-kumar') || serverHouseholdStore.values().next().value;
+  if (cleanCode) {
+    for (const h of serverHouseholdStore.values()) {
+      if (h.inviteCode?.toUpperCase() === cleanCode) {
+        return h;
+      }
+    }
   }
+
   if (familyId) {
     if (familyId === 'demo-family-kumar' || familyId === '00000000-0000-4000-8000-000000000001' || familyId === '736d58c4-bfae-4a53-a3c6-24ad8797ba59') {
-      return serverHouseholdStore.get('demo-family-kumar') || serverHouseholdStore.values().next().value;
+      return serverHouseholdStore.get('demo-family-kumar')!;
     }
     const direct = serverHouseholdStore.get(familyId);
     if (direct) return direct;
+
+    // Create isolated household for this familyId so it NEVER leaks other households
+    const newHousehold: HouseholdStoreItem = {
+      id: familyId,
+      name: 'Family Household',
+      inviteCode: cleanCode || ('HB-' + Math.random().toString(36).substring(2, 8).toUpperCase()),
+      createdBy: '',
+      members: [],
+      events: [],
+      groceries: [],
+      expenses: [],
+      bills: [],
+      reminders: [],
+      documents: [],
+      memories: [],
+      medicines: []
+    };
+    serverHouseholdStore.set(familyId, newHousehold);
+    return newHousehold;
   }
-  for (const h of serverHouseholdStore.values()) {
-    if (cleanCode && h.inviteCode?.toUpperCase() === cleanCode) {
-      return h;
-    }
+
+  if (cleanCode && (cleanCode === 'HB-849201' || cleanCode.includes('849201'))) {
+    return serverHouseholdStore.get('demo-family-kumar')!;
   }
-  return serverHouseholdStore.get('demo-family-kumar') || serverHouseholdStore.values().next().value;
+
+  return serverHouseholdStore.get('demo-family-kumar')!;
 }
 
 // Initial cloud store load
@@ -270,16 +308,6 @@ function dedupeServerMembers(members: any[]): any[] {
   return result;
 }
 
-export function generateSessionToken(user: ServerUser): string {
-  const payload = Buffer.from(JSON.stringify({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    familyId: user.familyId,
-    role: user.role
-  })).toString('base64url');
-  return 'hb-sess-' + payload;
-}
 
 declare global {
   namespace Express {
