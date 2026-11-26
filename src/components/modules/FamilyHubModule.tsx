@@ -3,6 +3,7 @@ import { useHomeBrain } from '../../context/HomeBrainContext';
 import { UserRole, FamilyMember } from '../../types';
 import { InitialAvatar } from '../common/InitialAvatar';
 import { PageHeader } from '../layout/PageHeader';
+import { dedupeMembers } from '../../lib/supabase';
 import {
   Users,
   Shield,
@@ -267,40 +268,43 @@ export const FamilyHubModule: React.FC = () => {
 
       {/* Connected Family Members Roster */}
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Users className="w-5 h-5 text-brand-500" />
-              <span>Connected Family Members ({familyMembers.length})</span>
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              All family and friend accounts connected with code <strong className="font-mono text-brand-600 dark:text-amber-400">{currentInviteCode}</strong> are synchronized across devices.
-            </p>
-          </div>
+        {(() => {
+          const displayedMembers = dedupeMembers(familyMembers);
+          return (
+            <>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <Users className="w-5 h-5 text-brand-500" />
+                    <span>Connected Family Members ({displayedMembers.length})</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    All family and friend accounts connected with code <strong className="font-mono text-brand-600 dark:text-amber-400">{currentInviteCode}</strong> are synchronized across devices.
+                  </p>
+                </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Live Cloud Synced</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleManualSync}
-              disabled={isSyncing}
-              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#141C2E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-              title="Refresh connected members list"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-brand-500 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Syncing...' : 'Refresh Roster'}</span>
-            </button>
-          </div>
-        </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Live Cloud Synced</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleManualSync}
+                    disabled={isSyncing}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#141C2E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                    title="Refresh connected members list"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-brand-500 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Syncing...' : 'Refresh Roster'}</span>
+                  </button>
+                </div>
+              </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {familyMembers.map(member => {
-            const isSelf = (member.email && currentUser.email && member.email.toLowerCase() === currentUser.email.toLowerCase()) ||
-              member.name.toLowerCase() === currentUser.name.toLowerCase() ||
-              member.id === currentUser.id;
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {displayedMembers.map(member => {
+                  const isSelf = (member.email && currentUser.email && member.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                    member.id === currentUser.id;
             return (
               <div
                 key={member.id}
@@ -391,7 +395,10 @@ export const FamilyHubModule: React.FC = () => {
             );
           })}
         </div>
-      </div>
+      </>
+    );
+  })()}
+</div>
 
       {/* Role & Permissions Matrix Guide */}
       <div className="p-6 rounded-3xl bg-white dark:bg-[#0D1220] border border-[#eee3c5] dark:border-white/10 shadow-card space-y-4">

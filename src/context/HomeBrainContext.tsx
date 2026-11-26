@@ -41,7 +41,8 @@ import {
   refreshSession,
   getAccessToken,
   handleOAuthCallback,
-  ensureValidUUID
+  ensureValidUUID,
+  dedupeMembers
 } from '../lib/supabase';
 import { formatIndiaDateTime, formatINR } from '../lib/display';
 import { SCREEN_META } from '../lib/navigation';
@@ -359,10 +360,11 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const demoSnapshot = demoEnabled ? getDemoFamilySnapshot() : null;
 
-    let nextMembers = mergeById<FamilyMember>(
-      cached.familyMembers || [],
-      mergeById<FamilyMember>(remote.familyMembers || [], demoSnapshot ? demoSnapshot.familyMembers : [])
-    );
+    let nextMembers = dedupeMembers([
+      ...(cached.familyMembers || []),
+      ...(remote.familyMembers || []),
+      ...(demoSnapshot ? demoSnapshot.familyMembers : [])
+    ]);
     let nextEvents = mergeById<FamilyEvent>(
       cached.events || [],
       mergeById<FamilyEvent>(remote.events || [], demoSnapshot ? demoSnapshot.events : [])
@@ -440,7 +442,11 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     // Ensure the current user is accurately represented in the household roster
-    const selfIdx = nextMembers.findIndex(m => m.email?.toLowerCase() === profile.email?.toLowerCase() || m.id === profile.id);
+    const selfIdx = nextMembers.findIndex(m => 
+      (profile.email && m.email?.toLowerCase() === profile.email.toLowerCase()) || 
+      m.id === profile.id ||
+      (m.name?.toLowerCase() === profile.name?.toLowerCase() && m.relation === profile.relation)
+    );
     const selfMember: FamilyMember = {
       id: ensureValidUUID(profile.id),
       name: profile.name || 'Self',
@@ -455,6 +461,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } else {
       nextMembers.unshift(selfMember);
     }
+    nextMembers = dedupeMembers(nextMembers);
 
     try {
       localStorage.setItem(`homebrain_family_cache_${familyId}`, JSON.stringify({
@@ -585,7 +592,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setEvents(prev => mergeById(remote.events, prev));
         }
         if (remote.familyMembers && remote.familyMembers.length > 0) {
-          setFamilyMembers(prev => mergeById(remote.familyMembers, prev));
+          setFamilyMembers(prev => dedupeMembers([...remote.familyMembers, ...prev]));
         }
         if (remote.emergencySessions && remote.emergencySessions.length > 0) {
           setEmergencySessions(remote.emergencySessions);

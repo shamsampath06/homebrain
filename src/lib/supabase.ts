@@ -152,6 +152,33 @@ export const mergeById = <T extends { id: string }>(primary: T[] = [], secondary
   return result;
 };
 
+export const dedupeMembers = (members: FamilyMember[] = []): FamilyMember[] => {
+  const seenEmails = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenNameRel = new Set<string>();
+  const result: FamilyMember[] = [];
+
+  for (const m of members) {
+    if (!m) continue;
+    const emailKey = m.email ? m.email.trim().toLowerCase() : '';
+    const idKey = m.id ? String(m.id).trim() : '';
+    const nameRelKey = (m.name && m.relation)
+      ? `${m.name.trim().toLowerCase()}_${m.relation.trim().toLowerCase()}`
+      : '';
+
+    if (emailKey && seenEmails.has(emailKey)) continue;
+    if (idKey && seenIds.has(idKey)) continue;
+    if (nameRelKey && seenNameRel.has(nameRelKey)) continue;
+
+    if (emailKey) seenEmails.add(emailKey);
+    if (idKey) seenIds.add(idKey);
+    if (nameRelKey) seenNameRel.add(nameRelKey);
+    result.push(m);
+  }
+
+  return result;
+};
+
 export const ensureValidUUID = (id?: string | null): string => {
   if (!id) {
     return '00000000-0000-4000-8000-000000000001';
@@ -948,9 +975,11 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
       console.warn('Backend /api/family/hub fetch notice:', e);
     }
 
-    const mergedMembers = hubMembers.length > 0
-      ? mergeById<FamilyMember>(familyMembers || [], hubMembers)
-      : (familyMembers || []);
+    let mergedMembers: FamilyMember[] = dedupeMembers(
+      hubMembers.length > 0
+        ? [...hubMembers, ...(familyMembers || [])]
+        : (familyMembers || [])
+    );
 
     let syncGroceries = groceries || [];
     let syncExpenses = expenses || [];
@@ -958,7 +987,7 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
     let syncEvents = events || [];
     let syncReminders = reminders || [];
 
-    if (syncGroceries.length === 0 || syncExpenses.length === 0 || syncEvents.length === 0) {
+    if (syncGroceries.length === 0 || syncExpenses.length === 0 || syncEvents.length === 0 || mergedMembers.length <= 1) {
       try {
         const syncRes = await fetch('/api/family/sync', {
           method: 'POST',
@@ -973,6 +1002,18 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
         });
         if (syncRes.ok) {
           const syncData = await syncRes.json();
+          if (syncData.members && Array.isArray(syncData.members)) {
+            const syncMemberList: FamilyMember[] = syncData.members.map((m: any) => ({
+              id: m.id || m.userId || ensureValidUUID(m.email),
+              name: m.name || 'Family Member',
+              relation: m.relation || 'Member',
+              role: m.role || 'Member',
+              avatar: m.avatar || '👨‍💼',
+              phone: m.phone || '',
+              email: m.email || ''
+            }));
+            mergedMembers = dedupeMembers([...mergedMembers, ...syncMemberList]);
+          }
           if (syncData.groceries && syncData.groceries.length > 0 && syncGroceries.length === 0) {
             syncGroceries = syncData.groceries;
           }
@@ -994,7 +1035,7 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
 
     return {
       user: profile,
-      familyMembers: mergedMembers,
+      familyMembers: dedupeMembers(mergedMembers),
       events: syncEvents,
       reminders: syncReminders,
       documents: documents || [],
