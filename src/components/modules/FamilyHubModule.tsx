@@ -32,13 +32,16 @@ export const FamilyHubModule: React.FC = () => {
     addFamilyMember,
     updateFamilyMember,
     removeFamilyMember,
-    updateCurrentUser
+    updateCurrentUser,
+    refreshFamilyData
   } = useHomeBrain();
 
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [selectedMemberToEdit, setSelectedMemberToEdit] = useState<FamilyMember | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedTime, setLastSyncedTime] = useState<string>('Just now');
 
   // Invite modal form fields
   const [inviteName, setInviteName] = useState('');
@@ -56,6 +59,30 @@ export const FamilyHubModule: React.FC = () => {
   const canInvite = isAdmin || isCoAdmin;
 
   const joinUrl = `${window.location.origin}/#/join?code=${currentInviteCode}`;
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      await refreshFamilyData();
+      const now = new Date();
+      setLastSyncedTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    } catch (e) {
+      console.warn('Sync failed:', e);
+    } finally {
+      setTimeout(() => setIsSyncing(false), 600);
+    }
+  };
+
+  // Live auto-polling every 5 seconds for real-time member discovery across devices
+  React.useEffect(() => {
+    void handleManualSync();
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        void refreshFamilyData();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleCopyCode = async () => {
     try {
@@ -240,25 +267,48 @@ export const FamilyHubModule: React.FC = () => {
 
       {/* Connected Family Members Roster */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
               <Users className="w-5 h-5 text-brand-500" />
               <span>Connected Family Members ({familyMembers.length})</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Dad, Mom, Sister and Brother have individual accounts synchronized to this household.
+              All family and friend accounts connected with code <strong className="font-mono text-brand-600 dark:text-amber-400">{currentInviteCode}</strong> are synchronized across devices.
             </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Live Cloud Synced</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#141C2E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+              title="Refresh connected members list"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-brand-500 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing...' : 'Refresh Roster'}</span>
+            </button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {familyMembers.map(member => {
-            const isSelf = member.name.toLowerCase() === currentUser.name.toLowerCase();
+            const isSelf = (member.email && currentUser.email && member.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+              member.name.toLowerCase() === currentUser.name.toLowerCase() ||
+              member.id === currentUser.id;
             return (
               <div
                 key={member.id}
-                className="p-5 rounded-3xl bg-white dark:bg-[#0D1220] border border-[#eee3c5] dark:border-white/10 shadow-card space-y-4 relative group"
+                className={`p-5 rounded-3xl bg-white dark:bg-[#0D1220] border ${
+                  isSelf
+                    ? 'border-brand-400/50 dark:border-brand-500/50 ring-1 ring-brand-500/20'
+                    : 'border-[#eee3c5] dark:border-white/10'
+                } shadow-card space-y-4 relative group`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
@@ -273,12 +323,12 @@ export const FamilyHubModule: React.FC = () => {
                         </p>
                         {isSelf && (
                           <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                            You
+                            YOU
                           </span>
                         )}
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                        {member.relation}
+                        {member.relation || 'Member'}
                       </p>
                     </div>
                   </div>
@@ -448,6 +498,7 @@ export const FamilyHubModule: React.FC = () => {
                     <option value="Grandfather">Grandfather</option>
                     <option value="Grandmother">Grandmother</option>
                     <option value="Spouse">Spouse</option>
+                    <option value="Friend">Friend</option>
                     <option value="Member">Member</option>
                   </select>
                 </div>

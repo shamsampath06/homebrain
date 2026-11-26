@@ -140,25 +140,41 @@ const request = async <T>(
   return camelize(json) as T;
 };
 
+export const mergeById = <T extends { id: string }>(primary: T[] = [], secondary: T[] = []): T[] => {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of [...primary, ...secondary]) {
+    if (item && item.id && !seen.has(item.id)) {
+      seen.add(item.id);
+      result.push(item);
+    }
+  }
+  return result;
+};
+
 export const ensureValidUUID = (id?: string | null): string => {
   if (!id) {
-    return '00000000-0000-4000-8000-000000000000'.replace(/0/g, () => Math.floor(Math.random() * 16).toString(16));
+    return '00000000-0000-4000-8000-000000000001';
   }
   const str = String(id).trim();
+  if (str === 'demo-family-kumar' || str === 'HB-849201' || str === 'demo-family-id') {
+    return '00000000-0000-4000-8000-000000000001';
+  }
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidRegex.test(str)) {
-    return str;
+    return str.toLowerCase();
   }
   const match = str.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
   if (match) {
-    return match[1];
+    return match[1].toLowerCase();
   }
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    try {
-      return crypto.randomUUID();
-    } catch { }
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
   }
-  return '11111111-2222-4333-8444-555555555555'.replace(/[0-9]/g, () => Math.floor(Math.random() * 16).toString(16));
+  const hex = Math.abs(hash).toString(16).padStart(8, '0');
+  return `${hex.slice(0, 8)}-0000-4000-8000-${hex.repeat(2).slice(0, 12)}`;
 };
 
 const familyFilter = (familyId: string) => {
@@ -905,18 +921,89 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
       readOptional<EmergencyNotification>('emergency_notifications', familyId),
       readOptional<FamilyMemory>('family_memories', familyId)
     ]);
+
+    // Backend API failover & real-time roster augmentation
+    let hubMembers: FamilyMember[] = [];
+    try {
+      const hubRes = await fetch('/api/family/hub', {
+        headers: {
+          Authorization: `Bearer ${getAccessToken()}`
+        }
+      });
+      if (hubRes.ok) {
+        const hubData = await hubRes.json();
+        if (hubData?.members && Array.isArray(hubData.members)) {
+          hubMembers = hubData.members.map((m: any) => ({
+            id: m.id || m.userId || ensureValidUUID(m.email),
+            name: m.name || 'Family Member',
+            relation: m.relation || 'Member',
+            role: m.role || 'Member',
+            avatar: m.avatar || '👨‍💼',
+            phone: m.phone || '',
+            email: m.email || ''
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Backend /api/family/hub fetch notice:', e);
+    }
+
+    const mergedMembers = hubMembers.length > 0
+      ? mergeById<FamilyMember>(familyMembers || [], hubMembers)
+      : (familyMembers || []);
+
+    let syncGroceries = groceries || [];
+    let syncExpenses = expenses || [];
+    let syncBills = bills || [];
+    let syncEvents = events || [];
+    let syncReminders = reminders || [];
+
+    if (syncGroceries.length === 0 || syncExpenses.length === 0 || syncEvents.length === 0) {
+      try {
+        const syncRes = await fetch('/api/family/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${getAccessToken()}`
+          },
+          body: JSON.stringify({
+            familyId,
+            inviteCode: profile.inviteCode
+          })
+        });
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          if (syncData.groceries && syncData.groceries.length > 0 && syncGroceries.length === 0) {
+            syncGroceries = syncData.groceries;
+          }
+          if (syncData.expenses && syncData.expenses.length > 0 && syncExpenses.length === 0) {
+            syncExpenses = syncData.expenses;
+          }
+          if (syncData.events && syncData.events.length > 0 && syncEvents.length === 0) {
+            syncEvents = syncData.events;
+          }
+          if (syncData.reminders && syncData.reminders.length > 0 && syncReminders.length === 0) {
+            syncReminders = syncData.reminders;
+          }
+          if (syncData.bills && syncData.bills.length > 0 && syncBills.length === 0) {
+            syncBills = syncData.bills;
+          }
+        }
+      } catch { }
+    }
+
     return {
       user: profile,
-      familyMembers: familyMembers || [],
-      events: events || [],
-      reminders: reminders || [],
+      familyMembers: mergedMembers,
+      events: syncEvents,
+      reminders: syncReminders,
       documents: documents || [],
-      groceries: groceries || [],
+      groceries: syncGroceries,
       groceryHistory: groceryHistory || [],
       medicines: medicines || [],
       medicineLogs: medicineLogs || [],
-      expenses: expenses || [],
-      bills: bills || [],
+      expenses: syncExpenses,
+      bills: syncBills,
       knowledgeList: knowledgeList || [],
       knowledgeFiles: knowledgeFiles || [],
       emergencyContacts: emergencyContacts || [],

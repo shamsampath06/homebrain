@@ -437,20 +437,31 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       nextEmergencyLogs = nextEmergencyLogs.filter(l => !l.id.startsWith('00000000-0000-4000-8000-000000000'));
       nextMemories = nextMemories.filter(m => !isDemoItem(m) && !m.id.startsWith('mem-place-'));
 
-      if (nextMembers.length === 0) {
-        nextMembers = [
-          {
-            id: ensureValidUUID(profile.id),
-            name: profile.name || 'Admin',
-            role: profile.role || 'Admin',
-            relation: 'Self',
-            avatar: profile.avatar || '👨‍💼',
-            phone: '',
-            email: profile.email
-          }
-        ];
-      }
     }
+
+    // Ensure the current user is accurately represented in the household roster
+    const selfIdx = nextMembers.findIndex(m => m.email?.toLowerCase() === profile.email?.toLowerCase() || m.id === profile.id);
+    const selfMember: FamilyMember = {
+      id: ensureValidUUID(profile.id),
+      name: profile.name || 'Self',
+      role: profile.role || 'Member',
+      relation: profile.relation || 'Self',
+      avatar: profile.avatar || '👨‍💼',
+      phone: (profile as any).phone || '',
+      email: profile.email
+    };
+    if (selfIdx >= 0) {
+      nextMembers[selfIdx] = { ...nextMembers[selfIdx], ...selfMember };
+    } else {
+      nextMembers.unshift(selfMember);
+    }
+
+    try {
+      localStorage.setItem(`homebrain_family_cache_${familyId}`, JSON.stringify({
+        ...cached,
+        familyMembers: nextMembers
+      }));
+    } catch { }
 
     setFamilyMembers(nextMembers);
     setEvents(nextEvents);

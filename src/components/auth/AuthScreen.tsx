@@ -337,6 +337,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <option value="Grandfather">Grandfather / Elder</option>
                 <option value="Grandmother">Grandmother / Elder</option>
                 <option value="Spouse">Spouse / Partner</option>
+                <option value="Friend">Friend</option>
                 <option value="Member">Family Member</option>
               </select>
             </div>

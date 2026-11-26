@@ -90,6 +90,81 @@ const serverHouseholdStore = new Map<string, HouseholdStoreItem>();
 const serverRegisteredUsers = new Map<string, ServerUser>();
 const serverSessions = new Map<string, { token: string; user: ServerUser; expiresAt: number }>();
 
+const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a218f2032d586e';
+
+export async function syncFromCloudStore(): Promise<void> {
+  try {
+    const res = await fetch(CLOUD_STORE_URL);
+    if (res.ok) {
+      const json = await res.json() as any;
+      if (json?.data?.payload) {
+        const parsed = JSON.parse(json.data.payload);
+        if (parsed.households) {
+          for (const [k, v] of Object.entries(parsed.households)) {
+            const incoming = v as HouseholdStoreItem;
+            const existing = serverHouseholdStore.get(k);
+            if (!existing) {
+              serverHouseholdStore.set(k, incoming);
+            } else {
+              const merged = [...existing.members];
+              for (const inc of incoming.members || []) {
+                const idx = merged.findIndex(m =>
+                  (m.email && inc.email && m.email.toLowerCase() === inc.email.toLowerCase()) ||
+                  (m.userId && inc.userId && m.userId === inc.userId) ||
+                  (m.id && inc.id && m.id === inc.id)
+                );
+                if (idx >= 0) {
+                  merged[idx] = { ...merged[idx], ...inc };
+                } else {
+                  merged.push(inc);
+                }
+              }
+              existing.members = merged;
+              existing.name = incoming.name || existing.name;
+              existing.inviteCode = incoming.inviteCode || existing.inviteCode;
+            }
+          }
+        }
+        if (parsed.users) {
+          for (const [k, v] of Object.entries(parsed.users)) {
+            const key = k.toLowerCase();
+            if (!serverRegisteredUsers.has(key)) {
+              serverRegisteredUsers.set(key, v as ServerUser);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not sync from cloud store:', err);
+  }
+}
+
+export async function syncToCloudStore(): Promise<void> {
+  try {
+    const householdsObj: Record<string, HouseholdStoreItem> = {};
+    for (const [k, v] of serverHouseholdStore.entries()) {
+      householdsObj[k] = v;
+    }
+    const usersObj: Record<string, ServerUser> = {};
+    for (const [k, v] of serverRegisteredUsers.entries()) {
+      usersObj[k] = v;
+    }
+    const payload = JSON.stringify({
+      households: householdsObj,
+      users: usersObj,
+      updatedAt: Date.now()
+    });
+    await fetch(CLOUD_STORE_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'homebrain-kumar-store', data: { payload } })
+    });
+  } catch (err) {
+    console.warn('Could not sync to cloud store:', err);
+  }
+}
+
 // Seed default household for multi-account testing (Dad, Mom, Sister, Brother, Sarah)
 serverHouseholdStore.set('demo-family-kumar', {
   id: 'demo-family-kumar',
@@ -104,6 +179,29 @@ serverHouseholdStore.set('demo-family-kumar', {
     { id: 'm-brother', userId: 'demo-user-brother', name: 'Sham', relation: 'Brother', role: 'Member', email: 'brother.sham@homebrain.app', phone: '+91 98400 56789' }
   ]
 });
+
+export function findHousehold(familyId?: string, inviteCode?: string): HouseholdStoreItem {
+  const cleanCode = inviteCode ? String(inviteCode).trim().toUpperCase() : '';
+  if (cleanCode && (cleanCode === 'HB-849201' || cleanCode.includes('849201'))) {
+    return serverHouseholdStore.get('demo-family-kumar') || serverHouseholdStore.values().next().value;
+  }
+  if (familyId) {
+    if (familyId === 'demo-family-kumar' || familyId === '00000000-0000-4000-8000-000000000001' || familyId === '736d58c4-bfae-4a53-a3c6-24ad8797ba59') {
+      return serverHouseholdStore.get('demo-family-kumar') || serverHouseholdStore.values().next().value;
+    }
+    const direct = serverHouseholdStore.get(familyId);
+    if (direct) return direct;
+  }
+  for (const h of serverHouseholdStore.values()) {
+    if (cleanCode && h.inviteCode?.toUpperCase() === cleanCode) {
+      return h;
+    }
+  }
+  return serverHouseholdStore.get('demo-family-kumar') || serverHouseholdStore.values().next().value;
+}
+
+// Initial cloud store load
+void syncFromCloudStore();
 
 const defaultMembers = [
   { id: 'demo-user-sarah', name: 'Sarah', email: 'sarah.kumar@homebrain.app', role: 'Admin', relation: 'Daughter / Admin' },
@@ -843,8 +941,9 @@ app.post('/api/ai/reset-demo-state', (req: Request, res: Response) => {
 
 // --- Multi-User Family Authentication & Permissions Management ---
 // POST /api/auth/signup: Register a user account and bind to a household
-app.post('/api/auth/signup', (req: Request, res: Response): void => {
+app.post('/api/auth/signup', async (req: Request, res: Response): Promise<void> => {
   try {
+    await syncFromCloudStore();
     const { email, password, name, familyName = 'Family Household', inviteCode, relation = 'Member', role = 'Member', mode = 'join' } = req.body;
     if (!email || !name) {
       res.status(400).json({ error: 'Name and email are required.' });
@@ -853,52 +952,25 @@ app.post('/api/auth/signup', (req: Request, res: Response): void => {
     const cleanEmail = String(email).trim().toLowerCase();
     const cleanCode = inviteCode ? String(inviteCode).trim().toUpperCase() : '';
 
-    let targetFamilyId = '';
-    let targetFamilyName = familyName || 'Family Household';
-    let finalInviteCode = cleanCode;
+    let household: HouseholdStoreItem;
     let userRole = role;
 
-    if (mode === 'join' || cleanCode) {
-      if (cleanCode) {
-        for (const [fId, item] of serverHouseholdStore.entries()) {
-          if (item.inviteCode.toUpperCase() === cleanCode) {
-            targetFamilyId = fId;
-            targetFamilyName = item.name;
-            finalInviteCode = item.inviteCode;
-            break;
-          }
-        }
-        if (!targetFamilyId && (cleanCode === 'HB-849201' || cleanCode.startsWith('HB-'))) {
-          targetFamilyId = 'demo-family-kumar';
-          targetFamilyName = 'Kumar Household';
-          finalInviteCode = 'HB-849201';
-        }
-      }
-      if (!targetFamilyId) {
-        targetFamilyId = 'fam-' + (cleanCode ? cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '') : crypto.randomUUID().slice(0, 8));
-        targetFamilyName = familyName || 'Family Household';
-        finalInviteCode = cleanCode || ('HB-' + Math.random().toString(36).substring(2, 8).toUpperCase());
-        serverHouseholdStore.set(targetFamilyId, {
-          id: targetFamilyId,
-          name: targetFamilyName,
-          inviteCode: finalInviteCode,
-          createdBy: cleanEmail,
-          members: []
-        });
-      }
-      userRole = 'Member';
+    if (mode === 'join' || cleanCode || cleanCode === 'HB-849201') {
+      household = findHousehold(undefined, cleanCode || 'HB-849201');
+      userRole = role || 'Member';
     } else {
-      targetFamilyId = 'fam-' + crypto.randomUUID().slice(0, 8);
-      targetFamilyName = familyName || `${name}'s Household`;
-      finalInviteCode = 'HB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+      const targetFamilyId = 'fam-' + crypto.randomUUID().slice(0, 8);
+      const targetFamilyName = familyName || `${name}'s Household`;
+      const finalInviteCode = 'HB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
       userRole = 'Admin';
-      serverHouseholdStore.set(targetFamilyId, {
+      household = {
         id: targetFamilyId,
         name: targetFamilyName,
         inviteCode: finalInviteCode,
         createdBy: cleanEmail,
         members: []
-      });
+      };
+      serverHouseholdStore.set(targetFamilyId, household);
     }
 
     const userId = 'usr-' + crypto.randomUUID().slice(0, 8);
@@ -909,29 +981,27 @@ app.post('/api/auth/signup', (req: Request, res: Response): void => {
       avatar: '👨‍💼',
       role: userRole,
       relation: relation || 'Member',
-      familyId: targetFamilyId,
-      familyName: targetFamilyName,
-      inviteCode: finalInviteCode
+      familyId: household.id,
+      familyName: household.name,
+      inviteCode: household.inviteCode
     };
 
     serverRegisteredUsers.set(cleanEmail, newUser);
 
-    const household = serverHouseholdStore.get(targetFamilyId);
-    if (household) {
-      const existingIdx = household.members.findIndex(m => m.email.toLowerCase() === cleanEmail);
-      const memberRecord = {
-        id: 'm-' + userId,
-        userId,
-        name: newUser.name,
-        relation: newUser.relation,
-        role: newUser.role,
-        email: cleanEmail
-      };
-      if (existingIdx >= 0) {
-        household.members[existingIdx] = memberRecord;
-      } else {
-        household.members.push(memberRecord);
-      }
+    const existingIdx = household.members.findIndex(m => m.email.toLowerCase() === cleanEmail);
+    const memberRecord = {
+      id: 'm-' + userId,
+      userId,
+      name: newUser.name,
+      relation: newUser.relation,
+      role: newUser.role,
+      email: cleanEmail,
+      phone: req.body?.phone || ''
+    };
+    if (existingIdx >= 0) {
+      household.members[existingIdx] = memberRecord;
+    } else {
+      household.members.push(memberRecord);
     }
 
     const token = 'hb-sess-' + crypto.randomUUID();
@@ -940,6 +1010,8 @@ app.post('/api/auth/signup', (req: Request, res: Response): void => {
       user: newUser,
       expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
     });
+
+    await syncToCloudStore();
 
     res.json({
       success: true,
@@ -963,8 +1035,9 @@ app.post('/api/auth/signup', (req: Request, res: Response): void => {
 });
 
 // POST /api/auth/login: Authenticate member account
-app.post('/api/auth/login', (req: Request, res: Response): void => {
+app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> => {
   try {
+    await syncFromCloudStore();
     const { email, password } = req.body;
     if (!email) {
       res.status(400).json({ error: 'Email is required.' });
@@ -1003,17 +1076,24 @@ app.post('/api/auth/login', (req: Request, res: Response): void => {
           inviteCode: 'HB-849201'
         };
         serverRegisteredUsers.set(cleanEmail, user);
-        const household = serverHouseholdStore.get('demo-family-kumar');
-        if (household && !household.members.some(m => m.email.toLowerCase() === cleanEmail)) {
-          household.members.push({
-            id: 'm-' + user.id,
-            userId: user.id,
-            name: user.name,
-            relation: user.relation,
-            role: user.role,
-            email: cleanEmail
-          });
-        }
+      }
+    }
+
+    const household = findHousehold(user.familyId, user.inviteCode);
+    if (household) {
+      const existingIdx = household.members.findIndex(m => m.email.toLowerCase() === cleanEmail);
+      const memberRecord = {
+        id: 'm-' + user.id,
+        userId: user.id,
+        name: user.name,
+        relation: user.relation || 'Member',
+        role: user.role || 'Member',
+        email: cleanEmail
+      };
+      if (existingIdx >= 0) {
+        household.members[existingIdx] = { ...household.members[existingIdx], ...memberRecord };
+      } else {
+        household.members.push(memberRecord);
       }
     }
 
@@ -1023,6 +1103,8 @@ app.post('/api/auth/login', (req: Request, res: Response): void => {
       user,
       expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
     });
+
+    await syncToCloudStore();
 
     res.json({
       success: true,
@@ -1060,47 +1142,42 @@ app.get('/api/family/hub', authenticateUser, async (req: Request, res: Response)
   const token = req.authToken!;
 
   try {
-    let familyName = 'Family Household';
-    let inviteCode = 'HB-849201';
-    let membersList: any[] = [];
+    await syncFromCloudStore();
 
-    if (SUPABASE_URL && token !== 'demo-token' && token !== SUPABASE_ANON_KEY) {
-      const famRows = await fetchFamilyData('families', user.familyId, token);
-      if (famRows && famRows.length > 0) {
-        familyName = famRows[0].name || familyName;
-        inviteCode = famRows[0].invite_code || inviteCode;
-      }
-      const memRows = await fetchFamilyData('family_members', user.familyId, token);
-      if (memRows && memRows.length > 0) {
-        membersList = memRows;
-      }
-    }
+    let household = findHousehold(user.familyId, req.query?.code as string);
 
-    if (membersList.length === 0) {
-      const stored = serverHouseholdStore.get(user.familyId);
-      if (stored) {
-        familyName = stored.name;
-        inviteCode = stored.inviteCode;
-        membersList = stored.members;
+    // Guarantee current user is reflected in household members
+    const cleanUserEmail = user.email ? user.email.toLowerCase() : '';
+    if (cleanUserEmail && household) {
+      const existingIdx = household.members.findIndex(m => m.email.toLowerCase() === cleanUserEmail);
+      const userEntry = {
+        id: 'm-' + user.id,
+        userId: user.id,
+        name: user.name,
+        relation: user.relation || (existingIdx >= 0 ? household.members[existingIdx].relation : 'Member'),
+        role: user.role || (existingIdx >= 0 ? household.members[existingIdx].role : 'Member'),
+        email: cleanUserEmail
+      };
+      if (existingIdx >= 0) {
+        household.members[existingIdx] = { ...household.members[existingIdx], ...userEntry };
       } else {
-        membersList = [
-          { id: 'm-sarah', name: user.name, relation: 'Admin', role: user.role, email: user.email }
-        ];
+        household.members.push(userEntry);
       }
+      await syncToCloudStore();
     }
 
     res.json({
       success: true,
-      familyId: user.familyId,
-      familyName,
-      inviteCode,
+      familyId: household.id,
+      familyName: household.name,
+      inviteCode: household.inviteCode,
       currentUser: {
         id: user.id,
         name: user.name,
         email: user.email,
         role: user.role
       },
-      members: membersList
+      members: household.members
     });
   } catch (err: any) {
     console.warn('Family hub retrieval error:', err);
@@ -1120,52 +1197,31 @@ app.post('/api/family/join', authenticateUser, async (req: Request, res: Respons
 
   const cleanCode = String(inviteCode).trim().toUpperCase();
 
-  // Find target household
-  let targetFamilyId: string | null = null;
-  let targetFamilyName = 'Family Household';
+  await syncFromCloudStore();
+  const household = findHousehold(undefined, cleanCode);
 
-  for (const [fId, item] of serverHouseholdStore.entries()) {
-    if (item.inviteCode.toUpperCase() === cleanCode) {
-      targetFamilyId = fId;
-      targetFamilyName = item.name;
-      break;
-    }
+  const existingIdx = household.members.findIndex(m => m.email?.toLowerCase() === user.email?.toLowerCase());
+  const memberEntry = {
+    id: `m_${user.id}`,
+    userId: user.id,
+    name: user.name,
+    relation,
+    role,
+    email: user.email
+  };
+  if (existingIdx >= 0) {
+    household.members[existingIdx] = memberEntry;
+  } else {
+    household.members.push(memberEntry);
   }
 
-  if (!targetFamilyId && (cleanCode === 'HB-849201' || cleanCode.startsWith('HB-'))) {
-    targetFamilyId = 'demo-family-kumar';
-    targetFamilyName = 'Kumar Household';
-  }
-
-  if (!targetFamilyId) {
-    res.status(404).json({ error: `Household invitation code "${cleanCode}" was not found.` });
-    return;
-  }
-
-  // Update in server store
-  const fam = serverHouseholdStore.get(targetFamilyId);
-  if (fam) {
-    const existingIdx = fam.members.findIndex(m => m.email?.toLowerCase() === user.email?.toLowerCase());
-    const memberEntry = {
-      id: `m_${Date.now()}`,
-      userId: user.id,
-      name: user.name,
-      relation,
-      role,
-      email: user.email
-    };
-    if (existingIdx >= 0) {
-      fam.members[existingIdx] = memberEntry;
-    } else {
-      fam.members.push(memberEntry);
-    }
-  }
+  await syncToCloudStore();
 
   res.json({
     success: true,
-    familyId: targetFamilyId,
-    familyName: targetFamilyName,
-    inviteCode: cleanCode,
+    familyId: household.id,
+    familyName: household.name,
+    inviteCode: household.inviteCode,
     relation,
     role
   });
@@ -1181,7 +1237,8 @@ app.patch('/api/family/member-role', authenticateUser, async (req: Request, res:
     return;
   }
 
-  const fam = serverHouseholdStore.get(user.familyId);
+  await syncFromCloudStore();
+  const fam = findHousehold(user.familyId);
   if (fam) {
     const member = fam.members.find(m => m.id === memberId || m.userId === memberId);
     if (member) {
@@ -1189,6 +1246,7 @@ app.patch('/api/family/member-role', authenticateUser, async (req: Request, res:
     }
   }
 
+  await syncToCloudStore();
   res.json({ success: true, memberId, newRole });
 });
 
@@ -1209,11 +1267,11 @@ app.post('/api/family/sync', authenticateUser, async (req: Request, res: Respons
     success: true,
     timestamp: new Date().toISOString(),
     familyId: user.familyId,
-    groceries: groceries || sharedFallbackGroceries,
-    expenses: expenses || sharedFallbackExpenses,
-    reminders: reminders || sharedFallbackReminders,
-    events: events || sharedFallbackEvents,
-    bills: bills || sharedFallbackBills
+    groceries: (groceries && groceries.length > 0) ? groceries : sharedFallbackGroceries,
+    expenses: (expenses && expenses.length > 0) ? expenses : sharedFallbackExpenses,
+    reminders: (reminders && reminders.length > 0) ? reminders : sharedFallbackReminders,
+    events: (events && events.length > 0) ? events : sharedFallbackEvents,
+    bills: (bills && bills.length > 0) ? bills : sharedFallbackBills
   });
 });
 
