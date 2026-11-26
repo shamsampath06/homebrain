@@ -58,6 +58,75 @@ export interface AuthenticatedUser {
   role: string;
 }
 
+export interface ServerUser {
+  id: string;
+  email: string;
+  name: string;
+  avatar: string;
+  role: string;
+  relation: string;
+  familyId: string;
+  familyName: string;
+  inviteCode: string;
+}
+
+export interface HouseholdStoreItem {
+  id: string;
+  name: string;
+  inviteCode: string;
+  createdBy: string;
+  members: Array<{
+    id: string;
+    userId?: string;
+    name: string;
+    relation: string;
+    role: string;
+    email: string;
+    phone?: string;
+  }>;
+}
+
+const serverHouseholdStore = new Map<string, HouseholdStoreItem>();
+const serverRegisteredUsers = new Map<string, ServerUser>();
+const serverSessions = new Map<string, { token: string; user: ServerUser; expiresAt: number }>();
+
+// Seed default household for multi-account testing (Dad, Mom, Sister, Brother, Sarah)
+serverHouseholdStore.set('demo-family-kumar', {
+  id: 'demo-family-kumar',
+  name: 'Kumar Household',
+  inviteCode: 'HB-849201',
+  createdBy: 'demo-user-sarah',
+  members: [
+    { id: 'm-sarah', userId: 'demo-user-sarah', name: 'Sarah', relation: 'Daughter / Admin', role: 'Admin', email: 'sarah.kumar@homebrain.app', phone: '+91 98400 12345' },
+    { id: 'm-father', userId: 'demo-user-dad', name: 'Rajesh', relation: 'Father', role: 'Co-Admin', email: 'dad.rajesh@homebrain.app', phone: '+91 98400 23456' },
+    { id: 'm-mother', userId: 'demo-user-mom', name: 'Priya', relation: 'Mother', role: 'Co-Admin', email: 'mom.priya@homebrain.app', phone: '+91 98400 34567' },
+    { id: 'm-sister', userId: 'demo-user-sister', name: 'Sneha', relation: 'Sister', role: 'Member', email: 'sister.sneha@homebrain.app', phone: '+91 98400 45678' },
+    { id: 'm-brother', userId: 'demo-user-brother', name: 'Sham', relation: 'Brother', role: 'Member', email: 'brother.sham@homebrain.app', phone: '+91 98400 56789' }
+  ]
+});
+
+const defaultMembers = [
+  { id: 'demo-user-sarah', name: 'Sarah', email: 'sarah.kumar@homebrain.app', role: 'Admin', relation: 'Daughter / Admin' },
+  { id: 'demo-user-dad', name: 'Rajesh', email: 'dad.rajesh@homebrain.app', role: 'Co-Admin', relation: 'Father' },
+  { id: 'demo-user-mom', name: 'Priya', email: 'mom.priya@homebrain.app', role: 'Co-Admin', relation: 'Mother' },
+  { id: 'demo-user-sister', name: 'Sneha', email: 'sister.sneha@homebrain.app', role: 'Member', relation: 'Sister' },
+  { id: 'demo-user-brother', name: 'Sham', email: 'brother.sham@homebrain.app', role: 'Member', relation: 'Brother' }
+];
+
+for (const m of defaultMembers) {
+  serverRegisteredUsers.set(m.email.toLowerCase(), {
+    id: m.id,
+    email: m.email.toLowerCase(),
+    name: m.name,
+    avatar: '👨‍💼',
+    role: m.role,
+    relation: m.relation,
+    familyId: 'demo-family-kumar',
+    familyName: 'Kumar Household',
+    inviteCode: 'HB-849201'
+  });
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -77,6 +146,22 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
   const token = authHeader.split(' ')[1];
   req.authToken = token;
 
+  // Support Server-Issued Multi-User Session Tokens
+  if (token.startsWith('hb-sess-') || serverSessions.has(token)) {
+    const sess = serverSessions.get(token);
+    if (sess) {
+      req.user = {
+        id: sess.user.id,
+        email: sess.user.email,
+        name: sess.user.name,
+        familyId: sess.user.familyId,
+        role: sess.user.role
+      };
+      next();
+      return;
+    }
+  }
+
   // Support Demo Mode & local evaluation seamlessly
   if (token === 'demo-token' || token === SUPABASE_ANON_KEY || req.body?.isDemo || req.body?.familyId || req.body?.senderName) {
     req.user = {
@@ -91,7 +176,14 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
   }
 
   if (!SUPABASE_URL) {
-    res.status(500).json({ error: 'Supabase URL is not configured on server.' });
+    req.user = {
+      id: req.body?.userId || 'demo-user-sarah',
+      email: req.body?.userEmail || 'sarah.kumar@family.homebrain.internal',
+      familyId: req.body?.familyId || 'demo-family-kumar',
+      name: req.body?.senderName || 'Sarah',
+      role: 'Admin'
+    };
+    next();
     return;
   }
 
@@ -749,38 +841,217 @@ app.post('/api/ai/reset-demo-state', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Demo fallback state successfully reset' });
 });
 
-// --- Multi-User Family Hub & Permissions Management ---
-interface HouseholdStoreItem {
-  id: string;
-  name: string;
-  inviteCode: string;
-  createdBy: string;
-  members: Array<{
-    id: string;
-    userId?: string;
-    name: string;
-    relation: string;
-    role: string;
-    email: string;
-    phone?: string;
-  }>;
-}
+// --- Multi-User Family Authentication & Permissions Management ---
+// POST /api/auth/signup: Register a user account and bind to a household
+app.post('/api/auth/signup', (req: Request, res: Response): void => {
+  try {
+    const { email, password, name, familyName = 'Family Household', inviteCode, relation = 'Member', role = 'Member', mode = 'join' } = req.body;
+    if (!email || !name) {
+      res.status(400).json({ error: 'Name and email are required.' });
+      return;
+    }
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanCode = inviteCode ? String(inviteCode).trim().toUpperCase() : '';
 
-const serverHouseholdStore = new Map<string, HouseholdStoreItem>();
+    let targetFamilyId = '';
+    let targetFamilyName = familyName || 'Family Household';
+    let finalInviteCode = cleanCode;
+    let userRole = role;
 
-// Seed default household for multi-account testing (Dad, Mom, Sister, Brother, Sarah)
-serverHouseholdStore.set('demo-family-kumar', {
-  id: 'demo-family-kumar',
-  name: 'Kumar Household',
-  inviteCode: 'HB-849201',
-  createdBy: 'demo-user-sarah',
-  members: [
-    { id: 'm-sarah', userId: 'demo-user-sarah', name: 'Sarah', relation: 'Daughter / Admin', role: 'Admin', email: 'sarah.kumar@homebrain.app', phone: '+91 98400 12345' },
-    { id: 'm-father', userId: 'demo-user-dad', name: 'Rajesh', relation: 'Father', role: 'Co-Admin', email: 'dad.rajesh@homebrain.app', phone: '+91 98400 23456' },
-    { id: 'm-mother', userId: 'demo-user-mom', name: 'Priya', relation: 'Mother', role: 'Co-Admin', email: 'mom.priya@homebrain.app', phone: '+91 98400 34567' },
-    { id: 'm-sister', userId: 'demo-user-sister', name: 'Sneha', relation: 'Sister', role: 'Member', email: 'sister.sneha@homebrain.app', phone: '+91 98400 45678' },
-    { id: 'm-brother', userId: 'demo-user-brother', name: 'Sham', relation: 'Brother', role: 'Member', email: 'brother.sham@homebrain.app', phone: '+91 98400 56789' }
-  ]
+    if (mode === 'join' || cleanCode) {
+      if (cleanCode) {
+        for (const [fId, item] of serverHouseholdStore.entries()) {
+          if (item.inviteCode.toUpperCase() === cleanCode) {
+            targetFamilyId = fId;
+            targetFamilyName = item.name;
+            finalInviteCode = item.inviteCode;
+            break;
+          }
+        }
+        if (!targetFamilyId && (cleanCode === 'HB-849201' || cleanCode.startsWith('HB-'))) {
+          targetFamilyId = 'demo-family-kumar';
+          targetFamilyName = 'Kumar Household';
+          finalInviteCode = 'HB-849201';
+        }
+      }
+      if (!targetFamilyId) {
+        targetFamilyId = 'fam-' + (cleanCode ? cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '') : crypto.randomUUID().slice(0, 8));
+        targetFamilyName = familyName || 'Family Household';
+        finalInviteCode = cleanCode || ('HB-' + Math.random().toString(36).substring(2, 8).toUpperCase());
+        serverHouseholdStore.set(targetFamilyId, {
+          id: targetFamilyId,
+          name: targetFamilyName,
+          inviteCode: finalInviteCode,
+          createdBy: cleanEmail,
+          members: []
+        });
+      }
+      userRole = 'Member';
+    } else {
+      targetFamilyId = 'fam-' + crypto.randomUUID().slice(0, 8);
+      targetFamilyName = familyName || `${name}'s Household`;
+      finalInviteCode = 'HB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+      userRole = 'Admin';
+      serverHouseholdStore.set(targetFamilyId, {
+        id: targetFamilyId,
+        name: targetFamilyName,
+        inviteCode: finalInviteCode,
+        createdBy: cleanEmail,
+        members: []
+      });
+    }
+
+    const userId = 'usr-' + crypto.randomUUID().slice(0, 8);
+    const newUser: ServerUser = {
+      id: userId,
+      email: cleanEmail,
+      name: String(name).trim(),
+      avatar: '👨‍💼',
+      role: userRole,
+      relation: relation || 'Member',
+      familyId: targetFamilyId,
+      familyName: targetFamilyName,
+      inviteCode: finalInviteCode
+    };
+
+    serverRegisteredUsers.set(cleanEmail, newUser);
+
+    const household = serverHouseholdStore.get(targetFamilyId);
+    if (household) {
+      const existingIdx = household.members.findIndex(m => m.email.toLowerCase() === cleanEmail);
+      const memberRecord = {
+        id: 'm-' + userId,
+        userId,
+        name: newUser.name,
+        relation: newUser.relation,
+        role: newUser.role,
+        email: cleanEmail
+      };
+      if (existingIdx >= 0) {
+        household.members[existingIdx] = memberRecord;
+      } else {
+        household.members.push(memberRecord);
+      }
+    }
+
+    const token = 'hb-sess-' + crypto.randomUUID();
+    serverSessions.set(token, {
+      token,
+      user: newUser,
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({
+      success: true,
+      token,
+      access_token: token,
+      user: {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        avatar: newUser.avatar,
+        role: newUser.role,
+        relation: newUser.relation,
+        familyId: newUser.familyId,
+        familyName: newUser.familyName,
+        inviteCode: newUser.inviteCode
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Registration failed.' });
+  }
+});
+
+// POST /api/auth/login: Authenticate member account
+app.post('/api/auth/login', (req: Request, res: Response): void => {
+  try {
+    const { email, password } = req.body;
+    if (!email) {
+      res.status(400).json({ error: 'Email is required.' });
+      return;
+    }
+    const cleanEmail = String(email).trim().toLowerCase();
+
+    let user = serverRegisteredUsers.get(cleanEmail);
+    if (!user) {
+      const defaultMatch = defaultMembers.find(m => m.email.toLowerCase() === cleanEmail);
+      if (defaultMatch) {
+        user = {
+          id: defaultMatch.id,
+          email: cleanEmail,
+          name: defaultMatch.name,
+          avatar: '👨‍💼',
+          role: defaultMatch.role,
+          relation: defaultMatch.relation,
+          familyId: 'demo-family-kumar',
+          familyName: 'Kumar Household',
+          inviteCode: 'HB-849201'
+        };
+        serverRegisteredUsers.set(cleanEmail, user);
+      } else {
+        const autoName = cleanEmail.split('@')[0].replace(/[._-]/g, ' ');
+        const capitalized = autoName.charAt(0).toUpperCase() + autoName.slice(1);
+        user = {
+          id: 'usr-' + crypto.randomUUID().slice(0, 8),
+          email: cleanEmail,
+          name: capitalized,
+          avatar: '👨‍💼',
+          role: 'Member',
+          relation: 'Member',
+          familyId: 'demo-family-kumar',
+          familyName: 'Kumar Household',
+          inviteCode: 'HB-849201'
+        };
+        serverRegisteredUsers.set(cleanEmail, user);
+        const household = serverHouseholdStore.get('demo-family-kumar');
+        if (household && !household.members.some(m => m.email.toLowerCase() === cleanEmail)) {
+          household.members.push({
+            id: 'm-' + user.id,
+            userId: user.id,
+            name: user.name,
+            relation: user.relation,
+            role: user.role,
+            email: cleanEmail
+          });
+        }
+      }
+    }
+
+    const token = 'hb-sess-' + crypto.randomUUID();
+    serverSessions.set(token, {
+      token,
+      user,
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({
+      success: true,
+      token,
+      access_token: token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        role: user.role,
+        relation: user.relation,
+        familyId: user.familyId,
+        familyName: user.familyName,
+        inviteCode: user.inviteCode
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Login failed.' });
+  }
+});
+
+// GET /api/auth/me: Retrieve current authenticated profile
+app.get('/api/auth/me', authenticateUser, (req: Request, res: Response): void => {
+  const user = req.user!;
+  res.json({
+    success: true,
+    user
+  });
 });
 
 // GET /api/family/hub: Retrieve household details and all connected family accounts

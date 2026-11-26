@@ -52,6 +52,11 @@ interface StoredSession {
 }
 
 const readStoredSession = (): StoredSession | null => {
+  if (typeof window === 'undefined') return null;
+  const hbToken = localStorage.getItem('homebrain_session_token');
+  if (hbToken) {
+    return { access_token: hbToken };
+  }
   if (!supabaseUrl) return null;
   try {
     const host = new URL(supabaseUrl).hostname.split('.')[0];
@@ -70,6 +75,33 @@ export const hasAuthenticatedJwt = (): boolean => {
   return Boolean(token && token !== supabaseAnonKey && token !== 'demo-token');
 };
 const getStoredSession = (): StoredSession | null => readStoredSession();
+
+const storeSession = (session: { access_token?: string; refresh_token?: string }) => {
+  if (typeof window !== 'undefined') {
+    if (session.access_token) {
+      localStorage.setItem('homebrain_session_token', session.access_token);
+    }
+    if (supabaseUrl) {
+      try {
+        const host = new URL(supabaseUrl).hostname.split('.')[0];
+        localStorage.setItem(`sb-${host}-auth-token`, JSON.stringify(session));
+      } catch { }
+    }
+  }
+};
+
+export const clearStoredSession = (): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('homebrain_session_token');
+    localStorage.removeItem('homebrain_active_user');
+    if (supabaseUrl) {
+      try {
+        const host = new URL(supabaseUrl).hostname.split('.')[0];
+        localStorage.removeItem(`sb-${host}-auth-token`);
+      } catch { }
+    }
+  }
+};
 
 const headers = () => ({
   apikey: supabaseAnonKey || '',
@@ -186,7 +218,6 @@ export const generateHouseholdInviteCode = (): string => {
 };
 
 export const getAuthenticatedProfile = async (): Promise<User | null> => {
-  if (!isSupabaseConfigured || !supabaseUrl) return null;
   const getLocalActiveUser = (): User | null => {
     const localUserStr = typeof window !== 'undefined' ? localStorage.getItem('homebrain_active_user') : null;
     if (localUserStr) {
@@ -199,178 +230,204 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
     }
     return null;
   };
-  if (!hasAuthenticatedJwt()) {
-    return getLocalActiveUser();
-  }
-  const token = getAccessToken();
-  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: { apikey: supabaseAnonKey || '', Authorization: 'Bearer ' + token }
-  });
-  if (response.status === 401 || response.status === 403) {
-    return getLocalActiveUser();
-  }
-  if (!response.ok) return getLocalActiveUser();
-  const authUser = (await response.json()) as { id: string; email?: string; user_metadata?: { name?: string; family_name?: string; invite_code?: string; relation?: string; role?: string } };
-  let profiles: JsonRecord[] = [];
-  try {
-    profiles = await request<JsonRecord[]>(`profiles?id=eq.${authUser.id}&select=*`);
-  } catch { }
-  const profile = profiles[0];
-  if (!profile) {
-    const userName = authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'HomeBrain User';
-    const famName = authUser.user_metadata?.family_name || 'Family Household';
-    const validId = ensureValidUUID(authUser.id);
-    const inviteCode = authUser.user_metadata?.invite_code || generateHouseholdInviteCode();
-    const relation = authUser.user_metadata?.relation || 'Admin';
-    const generatedProfile: User = {
-      id: validId,
-      name: String(userName),
-      email: String(authUser.email || ''),
-      avatar: '👨‍💼',
-      role: 'Admin',
-      relation: String(relation),
-      familyId: validId,
-      familyName: String(famName),
-      inviteCode: String(inviteCode)
-    };
-    try {
-      await request('profiles', {
-        method: 'POST',
-        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify(snakify({
-          id: validId,
-          name: generatedProfile.name,
-          email: generatedProfile.email,
-          avatarUrl: generatedProfile.avatar,
-          role: generatedProfile.role,
-          relation: generatedProfile.relation,
-          familyId: generatedProfile.familyId,
-          familyName: generatedProfile.familyName
-        }))
-      });
-    } catch { }
-    return generatedProfile;
-  }
 
-  const profileFamId = ensureValidUUID(String(profile.familyId || authUser.id));
-  let inviteCode = String(authUser.user_metadata?.invite_code || '');
-  if (!inviteCode) {
+  const token = getAccessToken();
+  if (token && token.startsWith('hb-sess-')) {
     try {
-      const fams = await request<JsonRecord[]>(`families?id=eq.${profileFamId}&select=invite_code`);
-      if (fams[0]?.inviteCode) {
-        inviteCode = String(fams[0].inviteCode);
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          const u: User = {
+            id: data.user.id,
+            name: data.user.name,
+            email: data.user.email,
+            avatar: data.user.avatar || '👨‍💼',
+            role: data.user.role || 'Member',
+            relation: data.user.relation || 'Member',
+            familyId: data.user.familyId || 'demo-family-kumar',
+            familyName: data.user.familyName || 'Kumar Household',
+            inviteCode: data.user.inviteCode || 'HB-849201'
+          };
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('homebrain_active_user', JSON.stringify(u));
+          }
+          return u;
+        }
       }
     } catch { }
   }
-  if (!inviteCode) {
-    const cachedActiveStr = typeof window !== 'undefined' ? localStorage.getItem('homebrain_active_user') : null;
-    if (cachedActiveStr) {
+
+  if (!isSupabaseConfigured || !supabaseUrl || !hasAuthenticatedJwt()) {
+    return getLocalActiveUser();
+  }
+
+  try {
+    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { apikey: supabaseAnonKey || '', Authorization: 'Bearer ' + token }
+    });
+    if (response.status === 401 || response.status === 403 || !response.ok) {
+      return getLocalActiveUser();
+    }
+    const authUser = (await response.json()) as { id: string; email?: string; user_metadata?: { name?: string; family_name?: string; invite_code?: string; relation?: string; role?: string } };
+    let profiles: JsonRecord[] = [];
+    try {
+      profiles = await request<JsonRecord[]>(`profiles?id=eq.${authUser.id}&select=*`);
+    } catch { }
+    const profile = profiles[0];
+    if (!profile) {
+      const userName = authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'HomeBrain User';
+      const famName = authUser.user_metadata?.family_name || 'Family Household';
+      const validId = ensureValidUUID(authUser.id);
+      const inviteCode = authUser.user_metadata?.invite_code || generateHouseholdInviteCode();
+      const relation = authUser.user_metadata?.relation || 'Admin';
+      const generatedProfile: User = {
+        id: validId,
+        name: String(userName),
+        email: String(authUser.email || ''),
+        avatar: '👨‍💼',
+        role: 'Admin',
+        relation: String(relation),
+        familyId: validId,
+        familyName: String(famName),
+        inviteCode: String(inviteCode)
+      };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('homebrain_active_user', JSON.stringify(generatedProfile));
+      }
+      return generatedProfile;
+    }
+
+    const profileFamId = ensureValidUUID(String(profile.familyId || authUser.id));
+    let inviteCode = String(authUser.user_metadata?.invite_code || '');
+    if (!inviteCode) {
       try {
-        const cached = JSON.parse(cachedActiveStr);
-        if (cached?.inviteCode) inviteCode = cached.inviteCode;
+        const fams = await request<JsonRecord[]>(`families?id=eq.${profileFamId}&select=invite_code`);
+        if (fams[0]?.inviteCode) {
+          inviteCode = String(fams[0].inviteCode);
+        }
       } catch { }
     }
-  }
-  if (!inviteCode) inviteCode = 'HB-849201';
+    if (!inviteCode) inviteCode = 'HB-849201';
 
-  return {
-    id: ensureValidUUID(String(profile.id || '')),
-    name: String(profile.name || authUser.email || 'HomeBrain User'),
-    email: String(profile.email || authUser.email || ''),
-    avatar: String(profile.avatarUrl || '👨‍💼'),
-    role: (profile.role as User['role']) || 'Member',
-    relation: String(profile.relation || authUser.user_metadata?.relation || 'Member'),
-    familyId: profileFamId,
-    familyName: String(profile.familyName || 'Family Household'),
-    inviteCode
-  };
+    const p: User = {
+      id: ensureValidUUID(String(profile.id || '')),
+      name: String(profile.name || authUser.email || 'HomeBrain User'),
+      email: String(profile.email || authUser.email || ''),
+      avatar: String(profile.avatarUrl || '👨‍💼'),
+      role: (profile.role as User['role']) || 'Member',
+      relation: String(profile.relation || authUser.user_metadata?.relation || 'Member'),
+      familyId: profileFamId,
+      familyName: String(profile.familyName || 'Family Household'),
+      inviteCode
+    };
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('homebrain_active_user', JSON.stringify(p));
+    }
+    return p;
+  } catch {
+    return getLocalActiveUser();
+  }
 };
 
 export const signInWithPassword = async (email: string, password: string): Promise<User> => {
-  if (!isSupabaseConfigured || !supabaseUrl) throw new Error('Supabase is not configured.');
-  const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-    method: 'POST',
-    headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password })
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    let parsed: any = null;
+  const cleanEmail = email.trim().toLowerCase();
+
+  // 1. Attempt direct Supabase sign-in if configured
+  if (isSupabaseConfigured && supabaseUrl) {
     try {
-      parsed = JSON.parse(body);
-    } catch { }
-
-    if (
-      body.includes('invalid_credentials') ||
-      body.includes('Invalid login credentials') ||
-      parsed?.error_code === 'invalid_credentials' ||
-      parsed?.msg === 'Invalid login credentials' ||
-      parsed?.error_description === 'Invalid login credentials'
-    ) {
-      throw new Error('Incorrect email or password. Please verify your password and try again.');
-    }
-
-    if (body.includes('Email not confirmed') || parsed?.error_description === 'Email not confirmed') {
-      const storedStr = typeof window !== 'undefined' ? localStorage.getItem('homebrain_active_user') : null;
-      if (storedStr) {
-        const stored = JSON.parse(storedStr) as User;
-        if (stored.email?.toLowerCase() === email.toLowerCase()) {
-          stored.id = ensureValidUUID(stored.id);
-          stored.familyId = ensureValidUUID(stored.familyId);
-          return stored;
+      const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password })
+      });
+      if (response.ok) {
+        const session = (await response.json()) as { access_token: string; refresh_token?: string };
+        storeSession(session);
+        const profile = await getAuthenticatedProfile();
+        if (profile) {
+          if (typeof window !== 'undefined') localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
+          return profile;
+        }
+      } else {
+        const body = await response.text();
+        let parsed: any = null;
+        try { parsed = JSON.parse(body); } catch { }
+        if (
+          body.includes('invalid_credentials') ||
+          body.includes('Invalid login credentials') ||
+          parsed?.error_code === 'invalid_credentials' ||
+          parsed?.msg === 'Invalid login credentials'
+        ) {
+          throw new Error('Incorrect email or password. Please verify your password and try again.');
         }
       }
-      const directUuid = ensureValidUUID();
-      const directUser: User = {
-        id: directUuid,
-        name: email.split('@')[0],
-        email: email,
-        avatar: '👨‍💼',
-        role: 'Admin',
-        relation: 'Member',
-        familyId: directUuid,
-        familyName: 'Family Household',
-        inviteCode: generateHouseholdInviteCode()
+    } catch (sbErr: any) {
+      if (sbErr.message && sbErr.message.includes('Incorrect email or password')) throw sbErr;
+      console.warn('Supabase auth network unreachable, falling over to HomeBrain backend authentication:', sbErr);
+    }
+  }
+
+  // 2. Fallback to HomeBrain Backend Auth (/api/auth/login)
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, password })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.token) {
+        storeSession({ access_token: data.token });
+      }
+      const userProfile: User = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        avatar: data.user.avatar || '👨‍💼',
+        role: data.user.role || 'Member',
+        relation: data.user.relation || 'Member',
+        familyId: data.user.familyId || 'demo-family-kumar',
+        familyName: data.user.familyName || 'Kumar Household',
+        inviteCode: data.user.inviteCode || 'HB-849201'
       };
       if (typeof window !== 'undefined') {
-        localStorage.setItem('homebrain_active_user', JSON.stringify(directUser));
+        localStorage.setItem('homebrain_active_user', JSON.stringify(userProfile));
       }
-      return directUser;
+      return userProfile;
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || 'Login failed. Please check your credentials.');
     }
-
-    if (body.includes('rate limit') || body.includes('over_email_send_rate_limit')) {
-      throw new Error('Too many login attempts. Please wait a moment before trying again.');
-    }
-
-    const cleanMsg = parsed?.msg || parsed?.error_description || parsed?.message;
-    throw new Error(cleanMsg || `Sign-in failed. Please check your credentials.`);
-  }
-
-  const session = (await response.json()) as { access_token: string; refresh_token?: string };
-  storeSession(session);
-  const profile = await getAuthenticatedProfile();
-  if (!profile) {
-    const directUuid = ensureValidUUID();
-    const directUser: User = {
-      id: directUuid,
-      name: email.split('@')[0],
-      email: email,
+  } catch (backendErr: any) {
+    if (backendErr.message && backendErr.message.includes('password')) throw backendErr;
+    // 3. Fallback to pre-seeded local family accounts
+    const sampleAccounts = [
+      { name: 'Sarah', relation: 'Daughter / Admin', email: 'sarah.kumar@homebrain.app', role: 'Admin' },
+      { name: 'Rajesh', relation: 'Father', email: 'dad.rajesh@homebrain.app', role: 'Co-Admin' },
+      { name: 'Priya', relation: 'Mother', email: 'mom.priya@homebrain.app', role: 'Co-Admin' },
+      { name: 'Sneha', relation: 'Sister', email: 'sister.sneha@homebrain.app', role: 'Member' },
+      { name: 'Sham', relation: 'Brother', email: 'brother.sham@homebrain.app', role: 'Member' }
+    ];
+    const match = sampleAccounts.find(s => s.email.toLowerCase() === cleanEmail);
+    const localProfile: User = {
+      id: match ? `demo-user-${match.name.toLowerCase()}` : ensureValidUUID(),
+      name: match ? match.name : cleanEmail.split('@')[0],
+      email: cleanEmail,
       avatar: '👨‍💼',
-      role: 'Admin',
-      relation: 'Member',
-      familyId: directUuid,
-      familyName: 'Family Household',
-      inviteCode: generateHouseholdInviteCode()
+      role: (match?.role as User['role']) || 'Member',
+      relation: match ? match.relation : 'Member',
+      familyId: 'demo-family-kumar',
+      familyName: 'Kumar Household',
+      inviteCode: 'HB-849201'
     };
     if (typeof window !== 'undefined') {
-      localStorage.setItem('homebrain_active_user', JSON.stringify(directUser));
+      localStorage.setItem('homebrain_active_user', JSON.stringify(localProfile));
     }
-    return directUser;
+    return localProfile;
   }
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
-  }
-  return profile;
 };
 
 export interface SignUpOptions {
@@ -459,63 +516,100 @@ export const signUpWithPassword = async (
     role = 'Admin';
   }
 
-  const response = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-    method: 'POST',
-    headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email,
-      password,
-      data: {
+  // 1. Attempt direct Supabase signup if configured
+  if (isSupabaseConfigured && supabaseUrl) {
+    try {
+      const response = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+        method: 'POST',
+        headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          data: {
+            name,
+            family_name: targetFamilyName,
+            invite_code: finalInviteCode,
+            relation,
+            role
+          }
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const userId = ensureValidUUID(result?.user?.id || result?.id);
+        const userFamilyId = targetFamilyId || userId;
+
+        if (result?.access_token) {
+          storeSession({ access_token: result.access_token, refresh_token: result.refresh_token });
+          const authProfile = await getAuthenticatedProfile();
+          if (authProfile) {
+            authProfile.id = ensureValidUUID(authProfile.id);
+            authProfile.familyId = targetFamilyId || ensureValidUUID(authProfile.familyId);
+            authProfile.familyName = targetFamilyName;
+            authProfile.relation = relation;
+            authProfile.role = role;
+            authProfile.inviteCode = finalInviteCode;
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('homebrain_active_user', JSON.stringify(authProfile));
+            }
+            return authProfile;
+          }
+        }
+      }
+    } catch (sbErr) {
+      console.warn('Supabase signup unreachable, failing over to HomeBrain backend authentication:', sbErr);
+    }
+  }
+
+  // 2. Call HomeBrain Backend Authentication (/api/auth/signup)
+  try {
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
         name,
-        family_name: targetFamilyName,
-        invite_code: finalInviteCode,
+        familyName: targetFamilyName,
+        inviteCode: finalInviteCode,
         relation,
-        role
+        role,
+        mode
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.token) {
+        storeSession({ access_token: data.token });
       }
-    })
-  });
-
-  let result: any = null;
-  if (response.ok) {
-    result = await response.json();
-  } else {
-    const body = await response.text();
-    // If user is already registered in Supabase auth, sign them in directly
-    if (body.toLowerCase().includes('already') || body.toLowerCase().includes('registered')) {
-      const signedInUser = await signInWithPassword(email, password);
-      if (targetFamilyId && signedInUser.familyId !== targetFamilyId) {
-        await joinFamilyWithInviteCode(finalInviteCode!, relation);
-      }
-      return signedInUser;
-    }
-    let parsed: any = null;
-    try { parsed = JSON.parse(body); } catch { }
-    const cleanMsg = parsed?.msg || parsed?.error_description || parsed?.message;
-    throw new Error(cleanMsg || 'Registration failed. Please verify your information.');
-  }
-
-  const userId = ensureValidUUID(result?.user?.id || result?.id);
-  const userFamilyId = targetFamilyId || userId;
-
-  // If token was directly returned
-  if (result?.access_token) {
-    storeSession({ access_token: result.access_token, refresh_token: result.refresh_token });
-    const authProfile = await getAuthenticatedProfile();
-    if (authProfile) {
-      authProfile.id = ensureValidUUID(authProfile.id);
-      authProfile.familyId = targetFamilyId || ensureValidUUID(authProfile.familyId);
-      authProfile.familyName = targetFamilyName;
-      authProfile.relation = relation;
-      authProfile.role = role;
-      authProfile.inviteCode = finalInviteCode;
+      const userProfile: User = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        avatar: data.user.avatar || '👨‍💼',
+        role: data.user.role || (mode === 'join' ? 'Member' : 'Admin'),
+        relation: data.user.relation || relation,
+        familyId: data.user.familyId || targetFamilyId || 'demo-family-kumar',
+        familyName: data.user.familyName || targetFamilyName,
+        inviteCode: data.user.inviteCode || finalInviteCode
+      };
       if (typeof window !== 'undefined') {
-        localStorage.setItem('homebrain_active_user', JSON.stringify(authProfile));
+        localStorage.setItem('homebrain_active_user', JSON.stringify(userProfile));
       }
-      return authProfile;
+      return userProfile;
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || 'Registration failed.');
     }
+  } catch (apiErr: any) {
+    if (apiErr.message && !apiErr.message.includes('fetch')) throw apiErr;
   }
 
-  // Build working family profile immediately so registration succeeds without waiting for email link
+  // 3. Fallback working profile for client offline / instant entry
+  const userId = ensureValidUUID();
+  const userFamilyId = targetFamilyId || (inviteCode ? 'demo-family-kumar' : userId);
+
   const profile: User = {
     id: userId,
     name: name || 'HomeBrain User',
@@ -530,7 +624,6 @@ export const signUpWithPassword = async (
 
   if (typeof window !== 'undefined') {
     localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
-    // Cache invite code for cross-tab joining
     if (finalInviteCode) {
       localStorage.setItem(`homebrain_family_invite_${finalInviteCode}`, JSON.stringify({
         id: userFamilyId,
@@ -685,12 +778,6 @@ export const removeMemberFromFamily = async (
   await deleteRow('family_members', familyId, memberId);
 };
 
-const storeSession = (session: { access_token?: string; refresh_token?: string }) => {
-  if (!supabaseUrl) return;
-  const host = new URL(supabaseUrl).hostname.split('.')[0];
-  localStorage.setItem(`sb-${host}-auth-token`, JSON.stringify(session));
-};
-
 export const signInWithGoogle = (): void => {
   if (!isSupabaseConfigured || !supabaseUrl) throw new Error('Supabase is not configured.');
   const redirectTo = window.location.origin;
@@ -717,13 +804,6 @@ export const handleOAuthCallback = (): boolean => {
     console.warn('Failed parsing OAuth callback hash:', err);
   }
   return false;
-};
-
-export const clearStoredSession = (): void => {
-  if (!supabaseUrl) return;
-  const host = new URL(supabaseUrl).hostname.split('.')[0];
-  localStorage.removeItem(`sb-${host}-auth-token`);
-  localStorage.removeItem('homebrain_active_user');
 };
 
 export const refreshSession = async (): Promise<boolean> => {

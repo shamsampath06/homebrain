@@ -78,7 +78,7 @@ const AppContent: React.FC = () => {
     }
   }, [activeTab, activeSubScreen, selectedItemId]);
 
-  if ((isSupabaseConfigured && !isAuthenticated) || activeSubScreen === 'auth' || activeSubScreen === 'login') {
+  if (!isAuthenticated || activeSubScreen === 'auth' || activeSubScreen === 'login') {
     return (
       <AuthScreen
         onSignedIn={async (email, password) => {
