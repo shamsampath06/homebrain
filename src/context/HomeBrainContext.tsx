@@ -591,6 +591,18 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (remote.events && remote.events.length > 0) {
           setEvents(prev => mergeById(remote.events, prev));
         }
+        if (remote.bills && remote.bills.length > 0) {
+          setBills(prev => mergeById(remote.bills, prev));
+        }
+        if (remote.documents && remote.documents.length > 0) {
+          setDocuments(prev => mergeById(remote.documents, prev));
+        }
+        if (remote.memories && remote.memories.length > 0) {
+          setMemories(prev => mergeById(remote.memories, prev));
+        }
+        if (remote.medicines && remote.medicines.length > 0) {
+          setMedicines(prev => mergeById(remote.medicines, prev));
+        }
         if (remote.familyMembers && remote.familyMembers.length > 0) {
           setFamilyMembers(prev => dedupeMembers([...remote.familyMembers, ...prev]));
         }
@@ -603,7 +615,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } catch {
         // Silent background sync error handler
       }
-    }, 7000);
+    }, 4000);
 
     return () => {
       isMounted = false;
@@ -781,11 +793,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       createdByName: doc.createdByName || currentUser.name
     };
     setDocuments(prev => [newDoc, ...prev]);
-    if (isSupabaseConfigured) {
-      await persist(async () => {
-        await insertRow('documents', currentUser.familyId, newDoc);
-      });
-    }
+    void persist(() => insertRow('documents', currentUser.familyId, newDoc).then(() => undefined));
   };
 
   const updateDocument = (id: string, updated: Partial<DocumentItem>) => {
@@ -1414,11 +1422,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const addMemory = async (mem: Omit<FamilyMemory, 'id'>): Promise<void> => {
     const newMem: FamilyMemory = { ...mem, id: crypto.randomUUID() };
     setMemories(prev => [newMem, ...prev]);
-    if (isSupabaseConfigured) {
-      await persist(async () => {
-        await insertRow('family_memories', currentUser.familyId, newMem);
-      });
-    }
+    void persist(() => insertRow('family_memories', currentUser.familyId, newMem).then(() => undefined));
   };
 
   const updateMemory = async (id: string, updated: Partial<FamilyMemory>): Promise<void> => {

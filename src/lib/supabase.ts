@@ -986,62 +986,72 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
     let syncBills = bills || [];
     let syncEvents = events || [];
     let syncReminders = reminders || [];
+    let syncDocuments = documents || [];
+    let syncMemories = memories || [];
+    let syncMedicines = medicines || [];
 
-    if (syncGroceries.length === 0 || syncExpenses.length === 0 || syncEvents.length === 0 || mergedMembers.length <= 1) {
-      try {
-        const syncRes = await fetch('/api/family/sync', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${getAccessToken()}`
-          },
-          body: JSON.stringify({
-            familyId,
-            inviteCode: profile.inviteCode
-          })
-        });
-        if (syncRes.ok) {
-          const syncData = await syncRes.json();
-          if (syncData.members && Array.isArray(syncData.members)) {
-            const syncMemberList: FamilyMember[] = syncData.members.map((m: any) => ({
-              id: m.id || m.userId || ensureValidUUID(m.email),
-              name: m.name || 'Family Member',
-              relation: m.relation || 'Member',
-              role: m.role || 'Member',
-              avatar: m.avatar || '👨‍💼',
-              phone: m.phone || '',
-              email: m.email || ''
-            }));
-            mergedMembers = dedupeMembers([...mergedMembers, ...syncMemberList]);
-          }
-          if (syncData.groceries && syncData.groceries.length > 0 && syncGroceries.length === 0) {
-            syncGroceries = syncData.groceries;
-          }
-          if (syncData.expenses && syncData.expenses.length > 0 && syncExpenses.length === 0) {
-            syncExpenses = syncData.expenses;
-          }
-          if (syncData.events && syncData.events.length > 0 && syncEvents.length === 0) {
-            syncEvents = syncData.events;
-          }
-          if (syncData.reminders && syncData.reminders.length > 0 && syncReminders.length === 0) {
-            syncReminders = syncData.reminders;
-          }
-          if (syncData.bills && syncData.bills.length > 0 && syncBills.length === 0) {
-            syncBills = syncData.bills;
-          }
+    try {
+      const syncRes = await fetch('/api/family/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getAccessToken()}`
+        },
+        body: JSON.stringify({
+          familyId,
+          inviteCode: profile.inviteCode
+        })
+      });
+      if (syncRes.ok) {
+        const syncData = await syncRes.json();
+        if (syncData.members && Array.isArray(syncData.members)) {
+          const syncMemberList: FamilyMember[] = syncData.members.map((m: any) => ({
+            id: m.id || m.userId || ensureValidUUID(m.email),
+            name: m.name || 'Family Member',
+            relation: m.relation || 'Member',
+            role: m.role || 'Member',
+            avatar: m.avatar || '👨‍💼',
+            phone: m.phone || '',
+            email: m.email || ''
+          }));
+          mergedMembers = dedupeMembers([...mergedMembers, ...syncMemberList]);
         }
-      } catch { }
-    }
+        if (syncData.groceries && Array.isArray(syncData.groceries)) {
+          syncGroceries = mergeById(syncData.groceries, syncGroceries);
+        }
+        if (syncData.expenses && Array.isArray(syncData.expenses)) {
+          syncExpenses = mergeById(syncData.expenses, syncExpenses);
+        }
+        if (syncData.events && Array.isArray(syncData.events)) {
+          syncEvents = mergeById(syncData.events, syncEvents);
+        }
+        if (syncData.reminders && Array.isArray(syncData.reminders)) {
+          syncReminders = mergeById(syncData.reminders, syncReminders);
+        }
+        if (syncData.bills && Array.isArray(syncData.bills)) {
+          syncBills = mergeById(syncData.bills, syncBills);
+        }
+        if (syncData.documents && Array.isArray(syncData.documents)) {
+          syncDocuments = mergeById(syncData.documents, syncDocuments);
+        }
+        if (syncData.memories && Array.isArray(syncData.memories)) {
+          syncMemories = mergeById(syncData.memories, syncMemories);
+        }
+        if (syncData.medicines && Array.isArray(syncData.medicines)) {
+          syncMedicines = mergeById(syncData.medicines, syncMedicines);
+        }
+      }
+    } catch { }
 
     return {
       user: profile,
       familyMembers: dedupeMembers(mergedMembers),
       events: syncEvents,
       reminders: syncReminders,
-      documents: documents || [],
+      documents: syncDocuments,
       groceries: syncGroceries,
       groceryHistory: groceryHistory || [],
-      medicines: medicines || [],
+      medicines: syncMedicines,
       medicineLogs: medicineLogs || [],
       expenses: syncExpenses,
       bills: syncBills,
@@ -1051,7 +1061,7 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
       emergencyLogs: emergencyLogs || [],
       emergencySessions: emergencySessions || [],
       emergencyNotifications: emergencyNotifications || [],
-      memories: memories || []
+      memories: syncMemories
     };
   } catch (err) {
     console.warn('[loadFamilyData notice]:', err);
@@ -1173,10 +1183,28 @@ export const insertRow = async <T extends object>(
   const cleanFamilyId = ensureValidUUID(familyId);
   const val = { ...(value as JsonRecord) };
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (val.id && typeof val.id === 'string' && !uuidRegex.test(val.id)) {
+  if (!val.id) {
+    val.id = crypto.randomUUID();
+  } else if (typeof val.id === 'string' && !uuidRegex.test(val.id)) {
     val.id = ensureValidUUID(val.id);
   }
   const localFallbackRow = { id: (val.id as string) || ensureValidUUID(), ...val } as unknown as T;
+
+  // Immediately persist to backend API for multi-device sync
+  try {
+    const token = getAccessToken();
+    if (token) {
+      void fetch('/api/family/item', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ table, item: val, familyId: cleanFamilyId })
+      });
+    }
+  } catch { }
+
   if (!hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
     return localFallbackRow;
   }
@@ -1197,11 +1225,27 @@ export const updateRow = async (
   id: string,
   value: object
 ): Promise<void> => {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!id || !uuidRegex.test(id)) {
-    return;
-  }
+  if (!id) return;
   const cleanFamilyId = ensureValidUUID(familyId);
+
+  // Immediately persist to backend API for multi-device sync
+  try {
+    const token = getAccessToken();
+    if (token) {
+      void fetch('/api/family/item', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ table, item: { ...value, id }, familyId: cleanFamilyId })
+      });
+    }
+  } catch { }
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(id)) return;
+
   if (!hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
     return;
   }
@@ -1220,11 +1264,27 @@ export const updateRow = async (
 };
 
 export const deleteRow = async (table: string, familyId: string, id: string): Promise<void> => {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!id || !uuidRegex.test(id)) {
-    return;
-  }
+  if (!id) return;
   const cleanFamilyId = ensureValidUUID(familyId);
+
+  // Immediately persist to backend API for multi-device sync
+  try {
+    const token = getAccessToken();
+    if (token) {
+      void fetch('/api/family/item', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ table, id, familyId: cleanFamilyId })
+      });
+    }
+  } catch { }
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(id)) return;
+
   if (!hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
     return;
   }

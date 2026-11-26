@@ -4192,7 +4192,17 @@ async function syncFromCloudStore() {
             const incoming = v;
             const existing = serverHouseholdStore.get(k);
             if (!existing) {
-              serverHouseholdStore.set(k, incoming);
+              serverHouseholdStore.set(k, {
+                ...incoming,
+                events: incoming.events || [],
+                groceries: incoming.groceries || [],
+                expenses: incoming.expenses || [],
+                bills: incoming.bills || [],
+                reminders: incoming.reminders || [],
+                documents: incoming.documents || [],
+                memories: incoming.memories || [],
+                medicines: incoming.medicines || []
+              });
             } else {
               const merged = [...existing.members];
               for (const inc of incoming.members || []) {
@@ -4208,6 +4218,14 @@ async function syncFromCloudStore() {
               existing.members = merged;
               existing.name = incoming.name || existing.name;
               existing.inviteCode = incoming.inviteCode || existing.inviteCode;
+              existing.events = incoming.events || existing.events || [];
+              existing.groceries = incoming.groceries || existing.groceries || [];
+              existing.expenses = incoming.expenses || existing.expenses || [];
+              existing.bills = incoming.bills || existing.bills || [];
+              existing.reminders = incoming.reminders || existing.reminders || [];
+              existing.documents = incoming.documents || existing.documents || [];
+              existing.memories = incoming.memories || existing.memories || [];
+              existing.medicines = incoming.medicines || existing.medicines || [];
             }
           }
         }
@@ -4253,16 +4271,19 @@ serverHouseholdStore.set("demo-family-kumar", {
   id: "demo-family-kumar",
   name: "Kumar Household",
   inviteCode: "HB-849201",
-  createdBy: "demo-user-sarah",
+  createdBy: "usr-sampth",
   members: [
-    { id: "m-sarah", userId: "demo-user-sarah", name: "Sarah", relation: "Daughter / Admin", role: "Admin", email: "sarah.kumar@homebrain.app", phone: "+91 98400 12345" },
-    { id: "m-father", userId: "demo-user-dad", name: "Rajesh", relation: "Father", role: "Co-Admin", email: "dad.rajesh@homebrain.app", phone: "+91 98400 23456" },
-    { id: "m-mother", userId: "demo-user-mom", name: "Priya", relation: "Mother", role: "Co-Admin", email: "mom.priya@homebrain.app", phone: "+91 98400 34567" },
-    { id: "m-sister", userId: "demo-user-sister", name: "Sneha", relation: "Sister", role: "Member", email: "sister.sneha@homebrain.app", phone: "+91 98400 45678" },
-    { id: "m-brother", userId: "demo-user-brother", name: "Sham", relation: "Brother", role: "Member", email: "brother.sham@homebrain.app", phone: "+91 98400 56789" },
     { id: "m-shamsampath", userId: "usr-shamsampath", name: "Shamsampth06", relation: "Brother", role: "Member", email: "shamsampth06@gmail.com" },
     { id: "m-sampth", userId: "usr-sampth", name: "sampth", relation: "Father", role: "Admin", email: "sham.s.2023.aids@ritchennai.edu.in" }
-  ]
+  ],
+  events: [],
+  groceries: [],
+  expenses: [],
+  bills: [],
+  reminders: [],
+  documents: [],
+  memories: [],
+  medicines: []
 });
 function findHousehold(familyId, inviteCode) {
   const cleanCode = inviteCode ? String(inviteCode).trim().toUpperCase() : "";
@@ -4285,11 +4306,6 @@ function findHousehold(familyId, inviteCode) {
 }
 void syncFromCloudStore();
 var defaultMembers = [
-  { id: "demo-user-sarah", name: "Sarah", email: "sarah.kumar@homebrain.app", role: "Admin", relation: "Daughter / Admin" },
-  { id: "demo-user-dad", name: "Rajesh", email: "dad.rajesh@homebrain.app", role: "Co-Admin", relation: "Father" },
-  { id: "demo-user-mom", name: "Priya", email: "mom.priya@homebrain.app", role: "Co-Admin", relation: "Mother" },
-  { id: "demo-user-sister", name: "Sneha", email: "sister.sneha@homebrain.app", role: "Member", relation: "Sister" },
-  { id: "demo-user-brother", name: "Sham", email: "brother.sham@homebrain.app", role: "Member", relation: "Brother" },
   { id: "usr-shamsampath", name: "Shamsampth06", email: "shamsampth06@gmail.com", role: "Member", relation: "Brother" },
   { id: "usr-sampth", name: "sampth", email: "sham.s.2023.aids@ritchennai.edu.in", role: "Admin", relation: "Father" }
 ];
@@ -5271,29 +5287,92 @@ app.patch("/api/family/member-role", authenticateUser, async (req, res) => {
   await syncToCloudStore();
   res.json({ success: true, memberId, newRole });
 });
+var normalizeTableName = (table) => {
+  const t = String(table || "").toLowerCase().trim();
+  if (t === "family_memories" || t === "memories") return "memories";
+  if (t === "family_documents" || t === "documents") return "documents";
+  if (t === "family_members" || t === "members") return "members";
+  if (t === "grocery" || t === "groceries") return "groceries";
+  if (t === "expense" || t === "expenses") return "expenses";
+  if (t === "bill" || t === "bills") return "bills";
+  if (t === "event" || t === "events") return "events";
+  if (t === "reminder" || t === "reminders") return "reminders";
+  if (t === "medicine" || t === "medicines") return "medicines";
+  return t;
+};
+app.post("/api/family/item", authenticateUser, async (req, res) => {
+  const user = req.user;
+  const { table, item, familyId } = req.body;
+  if (!table || !item) {
+    res.status(400).json({ error: "Table and valid item are required." });
+    return;
+  }
+  await syncFromCloudStore();
+  const household = findHousehold(familyId || user.familyId);
+  if (!household) {
+    res.status(404).json({ error: "Household not found." });
+    return;
+  }
+  const normTable = normalizeTableName(table);
+  if (!household[normTable]) {
+    household[normTable] = [];
+  }
+  const targetArray = household[normTable];
+  const existingIdx = targetArray.findIndex((x) => x.id === item.id);
+  if (existingIdx >= 0) {
+    targetArray[existingIdx] = { ...targetArray[existingIdx], ...item };
+  } else {
+    targetArray.unshift(item);
+  }
+  await syncToCloudStore();
+  res.json({ success: true, item });
+});
+app.delete("/api/family/item", authenticateUser, async (req, res) => {
+  const user = req.user;
+  const { table, id, familyId } = req.body;
+  if (!table || !id) {
+    res.status(400).json({ error: "Table and item id are required." });
+    return;
+  }
+  await syncFromCloudStore();
+  const household = findHousehold(familyId || user.familyId);
+  if (!household) {
+    res.status(404).json({ error: "Household not found." });
+    return;
+  }
+  const normTable = normalizeTableName(table);
+  const targetArray = household[normTable];
+  if (targetArray) {
+    const idx = targetArray.findIndex((x) => x.id === id);
+    if (idx >= 0) {
+      targetArray.splice(idx, 1);
+    }
+  }
+  await syncToCloudStore();
+  res.json({ success: true, id });
+});
 app.post("/api/family/sync", authenticateUser, async (req, res) => {
   const user = req.user;
-  const token = req.authToken;
-  const [events, reminders, groceries, expenses, bills] = await Promise.all([
-    fetchFamilyData("events", user.familyId, token, "order=date.asc,time.asc&limit=100"),
-    fetchFamilyData("reminders", user.familyId, token, "order=date_time.asc&limit=100"),
-    fetchFamilyData("groceries", user.familyId, token, "limit=100"),
-    fetchFamilyData("expenses", user.familyId, token, "order=date.desc&limit=100"),
-    fetchFamilyData("bills", user.familyId, token, "order=due_date.asc&limit=100")
-  ]);
-  const household = findHousehold(user.familyId);
+  const familyId = req.body?.familyId || user.familyId;
+  await syncFromCloudStore();
+  const household = findHousehold(familyId, req.body?.inviteCode);
   const cleanMembers = dedupeServerMembers(household?.members || []);
   res.json({
     success: true,
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    familyId: user.familyId,
+    familyId: household.id,
+    familyName: household.name,
+    inviteCode: household.inviteCode,
     members: cleanMembers,
     familyMembers: cleanMembers,
-    groceries: groceries && groceries.length > 0 ? groceries : sharedFallbackGroceries,
-    expenses: expenses && expenses.length > 0 ? expenses : sharedFallbackExpenses,
-    reminders: reminders && reminders.length > 0 ? reminders : sharedFallbackReminders,
-    events: events && events.length > 0 ? events : sharedFallbackEvents,
-    bills: bills && bills.length > 0 ? bills : sharedFallbackBills
+    groceries: household.groceries || [],
+    expenses: household.expenses || [],
+    reminders: household.reminders || [],
+    events: household.events || [],
+    bills: household.bills || [],
+    documents: household.documents || [],
+    memories: household.memories || [],
+    medicines: household.medicines || []
   });
 });
 app.post("/api/ai/query", authenticateUser, async (req, res) => {

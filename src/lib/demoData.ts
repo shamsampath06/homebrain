@@ -103,7 +103,7 @@ export const isDemoMember = (m: FamilyMember): boolean => {
 
 export const isDemoEnabledForFamily = (familyId?: string): boolean => {
   if (!familyId) return false;
-  if (familyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar' || familyId === '00000000-0000-4000-8000-000000000001') {
+  if (familyId === '00000000-0000-4000-8000-000000000000') {
     try {
       if (typeof window !== 'undefined' && localStorage.getItem(`homebrain_demo_enabled_${familyId}`) === 'false') {
         return false;

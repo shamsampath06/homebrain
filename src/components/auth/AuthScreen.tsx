@@ -156,20 +156,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
-  // Demo accounts representing separate members of the same household
-  const sampleAccounts = [
-    { name: 'Sarah', relation: 'Daughter / Admin', email: 'sarah.kumar@homebrain.app', role: 'Admin', icon: '👩‍💼' },
-    { name: 'Dad (Rajesh)', relation: 'Father', email: 'dad.rajesh@homebrain.app', role: 'Co-Admin', icon: '👨' },
-    { name: 'Mom (Priya)', relation: 'Mother', email: 'mom.priya@homebrain.app', role: 'Co-Admin', icon: '👩' },
-    { name: 'Sister (Sneha)', relation: 'Sister', email: 'sister.sneha@homebrain.app', role: 'Member', icon: '👧' },
-    { name: 'Brother (Sham)', relation: 'Brother', email: 'brother.sham@homebrain.app', role: 'Member', icon: '👦' }
-  ];
-
-  const handleSelectSampleAccount = (acc: typeof sampleAccounts[0]) => {
-    setEmail(acc.email);
-    setPassword('HomeBrain@2026');
-  };
-
   return (
     <main className="relative h-full h-[100dvh] max-h-[100dvh] w-full flex items-center justify-center bg-family-warm dark:bg-[#080B12] px-4 py-6 sm:py-10 overflow-y-auto text-slate-900 dark:text-slate-100 font-sans selection:bg-brand-500 selection:text-white">
       {/* Ambient Spatial Glowing Light Spheres */}
@@ -367,25 +353,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           {/* Join Mode: Family Invitation Code */}
           {isRegistering && regMode === 'join' && (
             <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Family Invitation Code</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setInviteCode('HB-849201')}
-                  className="text-[11px] font-semibold text-brand-600 dark:text-cyan-400 hover:underline"
-                >
-                  Use Sample Code (HB-849201)
-                </button>
-              </div>
+              <label className="text-[11px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Family Invitation Code</span>
+              </label>
               <input
                 required
                 type="text"
                 value={inviteCode}
                 onChange={event => setInviteCode(event.target.value.toUpperCase())}
-                placeholder="e.g. HB-849201 or Household UUID"
+                placeholder="e.g. HB-849201 or Household Code"
                 className="w-full px-4 py-2.5 rounded-2xl bg-white dark:bg-[#141C2E] border-2 border-brand-300 dark:border-cyan-500/40 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/20 text-sm font-mono tracking-widest uppercase text-slate-900 dark:text-white placeholder-slate-400 transition-all font-bold outline-none"
               />
               <p className="text-[10px] text-cyan-800 dark:text-cyan-300 font-medium pt-0.5">
@@ -462,35 +439,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           </button>
         </form>
 
-        {/* Quick Family Member Logins for Cross-Device Testing */}
-        {!isRegistering && (
-          <div className="pt-2 border-t border-[#eadfbe] dark:border-white/5 space-y-2">
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">
-              Multi-Device Family Logins (1-Click Test)
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-              {sampleAccounts.map(acc => (
-                <button
-                  key={acc.name}
-                  type="button"
-                  onClick={() => handleSelectSampleAccount(acc)}
-                  className={`p-2 rounded-xl text-left border transition-all flex items-center gap-2 ${
-                    email === acc.email
-                      ? 'bg-brand-50 dark:bg-brand-900/40 border-brand-500 text-brand-900 dark:text-white ring-1 ring-brand-500'
-                      : 'bg-white/60 dark:bg-[#141C2E]/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-brand-400'
-                  }`}
-                >
-                  <span className="text-base shrink-0">{acc.icon}</span>
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-bold truncate leading-tight">{acc.name}</p>
-                    <p className="text-[9px] text-slate-400 truncate">{acc.relation}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Google OAuth Quick Sign-In */}
         {onGoogleSignIn && (
           <div className="space-y-2 pt-1">
@@ -518,20 +466,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 />
               </svg>
               <span>Continue with Google Account</span>
-            </button>
-          </div>
-        )}
-
-        {/* 1-Click Instant Demo Login */}
-        {onEnterDemo && (
-          <div className="pt-1 text-center">
-            <button
-              type="button"
-              onClick={onEnterDemo}
-              className="w-full py-2 px-3 rounded-2xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 border border-amber-300 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all hover:scale-[1.01]"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Explore Instant Demo / Agent Account</span>
             </button>
           </div>
         )}
