@@ -1,6 +1,6 @@
 // server/index.ts
 import express from "express";
-import { put, get, head, BlobPreconditionFailedError } from "@vercel/blob";
+import { put, list, del } from "@vercel/blob";
 import cors from "cors";
 import dotenv from "dotenv";
 import mammoth from "mammoth";
@@ -1632,11 +1632,11 @@ ${lines}
         }
       }
       const filtered = person ? medicines.filter((m) => (m.person_name || m.personName || "").toLowerCase() === person.toLowerCase()) : medicines;
-      const list = filtered.length > 0 ? filtered : medicines;
-      if (list.length > 0) {
-        const reply2 = `\u{1F48A} **Registered Medication Schedules (${list.length} active)**:
+      const list2 = filtered.length > 0 ? filtered : medicines;
+      if (list2.length > 0) {
+        const reply2 = `\u{1F48A} **Registered Medication Schedules (${list2.length} active)**:
 
-` + list.map((m) => `\u2022 **${(m.name || "").replace(/\[DEMO\]\s*/i, "")}** (${m.dosage}) for **${m.person_name || m.personName}** at **${m.timing}** [${m.frequency}]`).join("\n");
+` + list2.map((m) => `\u2022 **${(m.name || "").replace(/\[DEMO\]\s*/i, "")}** (${m.dosage}) for **${m.person_name || m.personName}** at **${m.timing}** [${m.frequency}]`).join("\n");
         return { reply: reply2, text: reply2, actionsExecuted, sources: ["Medicine Manager"], handled: true };
       }
       const reply = "No active medications are currently scheduled in Medicine Manager.";
@@ -2610,11 +2610,11 @@ There are **no calendar events scheduled for today**.
       }
       const todayIST = getKolkataDateString();
       const upcoming = events.filter((e) => e.date >= todayIST).sort((a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || ""));
-      const list = upcoming.length > 0 ? upcoming : events.slice().sort((a, b) => a.date.localeCompare(b.date));
-      if (list.length > 0) {
-        const reply = `\u{1F4C5} **Family Calendar Events (${list.length} scheduled)**:
+      const list2 = upcoming.length > 0 ? upcoming : events.slice().sort((a, b) => a.date.localeCompare(b.date));
+      if (list2.length > 0) {
+        const reply = `\u{1F4C5} **Family Calendar Events (${list2.length} scheduled)**:
 
-` + list.map((e) => `\u2022 **${e.date} at ${e.time || "10:00"}**: ${(e.title || "").replace(/\[DEMO\]\s*/g, "")} (${e.category || "General"}) - Members: ${eMembers(e).join(", ")}`).join("\n");
+` + list2.map((e) => `\u2022 **${e.date} at ${e.time || "10:00"}**: ${(e.title || "").replace(/\[DEMO\]\s*/g, "")} (${e.category || "General"}) - Members: ${eMembers(e).join(", ")}`).join("\n");
         return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
       }
     }
@@ -3587,9 +3587,9 @@ ${items}`;
     if (operation === "READ") {
       if (/expense/i.test(clean)) {
         const houseExp = expenses.filter((x) => /utilities|maintenance|groceries/i.test(x.category || ""));
-        const list = houseExp.length > 0 ? houseExp : expenses.slice(0, 6);
-        const total = list.reduce((s, x) => s + (Number(x.amount) || 0), 0);
-        const lines2 = list.slice(0, 6).map((x) => `\u2022 **\u20B9${Number(x.amount).toLocaleString("en-IN")}** \u2014 ${(x.title || "").replace(/^\[demo\]\s*/i, "")} (${x.category}, ${x.date})`).join("\n");
+        const list2 = houseExp.length > 0 ? houseExp : expenses.slice(0, 6);
+        const total = list2.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+        const lines2 = list2.slice(0, 6).map((x) => `\u2022 **\u20B9${Number(x.amount).toLocaleString("en-IN")}** \u2014 ${(x.title || "").replace(/^\[demo\]\s*/i, "")} (${x.category}, ${x.date})`).join("\n");
         const reply2 = `\u{1F3E0} **Household Expenses (Total: \u20B9${total.toLocaleString("en-IN")})**:
 
 ${lines2}`;
@@ -3742,9 +3742,9 @@ ${lines}`;
           if (!catMap[cat]) catMap[cat] = [];
           catMap[cat].push(d);
         }
-        const breakdown = Object.entries(catMap).map(([cat, list]) => {
-          const names = list.map((d) => (d.title || "Document").replace(/^\[demo\]\s*/i, "")).join(", ");
-          return `\u2022 **${cat}** (${list.length}): ${names}`;
+        const breakdown = Object.entries(catMap).map(([cat, list2]) => {
+          const names = list2.map((d) => (d.title || "Document").replace(/^\[demo\]\s*/i, "")).join(", ");
+          return `\u2022 **${cat}** (${list2.length}): ${names}`;
         }).join("\n");
         const reply = `\u{1F4C2} **Family Document Vault Overview (${documents.length} documents stored)**:
 
@@ -4551,7 +4551,6 @@ function cleanEventDate(dateStr) {
 var serverHouseholdStore = /* @__PURE__ */ new Map();
 var serverRegisteredUsers = /* @__PURE__ */ new Map();
 var serverSessions = /* @__PURE__ */ new Map();
-var BLOB_FILE_NAME = "homebrain-data.json";
 var BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || "vercel_blob_rw_ZOMgqCoRwpQVIkyH_q2zs6Nao3i2aSJSAmhHn4CYPyxFb8O";
 var blobCdnUrl = "https://zomgqcorwpqvikyh.public.blob.vercel-storage.com/homebrain-data.json";
 var lastLocalWrite = 0;
@@ -4624,41 +4623,42 @@ function mergeWithTombstones(local = [], incoming = []) {
   }
   return Array.from(map.values());
 }
+var STATE_PREFIX = "hb-state/";
 var SYNCED_TABLES = ["events", "groceries", "expenses", "bills", "medicines", "documents", "reminders", "memories", "knowledgeList"];
-var lastGetEtag = "";
-var lastStrongEtag = "";
+var lastSnapshotPathname = "";
 var cachedStoreData = null;
 var lastFreshReadAt = 0;
-var FRESH_READ_TTL_MS = 1e3;
+var FRESH_READ_TTL_MS = 800;
 var isDemoHouseholdKey = (k) => k === "demo-family-kumar" || k === "00000000-0000-4000-8000-000000000001";
-async function readCloudStoreFresh(force = false, needStrongEtag = false) {
-  if (!force && !needStrongEtag && cachedStoreData && Date.now() - lastFreshReadAt < FRESH_READ_TTL_MS) {
+async function listStateSnapshots() {
+  const res = await list({ prefix: STATE_PREFIX, token: BLOB_READ_WRITE_TOKEN });
+  return (res.blobs || []).sort((a, b) => b.pathname.localeCompare(a.pathname));
+}
+async function readCloudStoreFresh(force = false, _needStrongEtag = false) {
+  if (!force && cachedStoreData && Date.now() - lastFreshReadAt < FRESH_READ_TTL_MS) {
     return cachedStoreData;
   }
   try {
-    const getPromise = get(BLOB_FILE_NAME, {
-      access: "public",
-      useCache: false,
-      token: BLOB_READ_WRITE_TOKEN,
-      ...lastGetEtag && cachedStoreData ? { ifNoneMatch: lastGetEtag } : {}
-    });
-    const headPromise = needStrongEtag ? head(BLOB_FILE_NAME, { token: BLOB_READ_WRITE_TOKEN }).catch(() => null) : Promise.resolve(null);
-    const [result, headResult] = await Promise.all([getPromise, headPromise]);
-    if (headResult?.etag && !headResult.etag.startsWith("W/")) {
-      lastStrongEtag = headResult.etag;
-    }
-    if (!result) return cachedStoreData;
-    if (result.statusCode === 304) {
+    const snapshots = await listStateSnapshots();
+    if (snapshots.length > 0) {
+      const latest = snapshots[0];
+      if (latest.pathname === lastSnapshotPathname && cachedStoreData) {
+        lastFreshReadAt = Date.now();
+        return cachedStoreData;
+      }
+      const res = await fetch(latest.url, { cache: "no-store" });
+      if (!res.ok) return cachedStoreData;
+      cachedStoreData = await res.json();
+      lastSnapshotPathname = latest.pathname;
       lastFreshReadAt = Date.now();
       return cachedStoreData;
     }
-    const text = await new Response(result.stream).text();
-    cachedStoreData = JSON.parse(text);
-    lastGetEtag = result.blob.etag || "";
-    if (!needStrongEtag && result.blob.etag && !result.blob.etag.startsWith("W/")) {
-      lastStrongEtag = result.blob.etag;
+    const legacyRes = await fetch(blobCdnUrl + "?download=1", { cache: "no-store" });
+    if (legacyRes.ok) {
+      cachedStoreData = await legacyRes.json();
+      lastFreshReadAt = Date.now();
+      return cachedStoreData;
     }
-    lastFreshReadAt = Date.now();
     return cachedStoreData;
   } catch (err) {
     console.warn("Fresh cloud store read failed:", err);
@@ -4759,53 +4759,44 @@ function mergeRemoteWithLocal(remote, local) {
 async function syncToCloudStore() {
   lastLocalWrite = Date.now();
   let payloadCore = buildLocalPayload();
-  if (!lastStrongEtag || lastStrongEtag.startsWith("W/") || !cachedStoreData) {
-    const remote = await readCloudStoreFresh(true, true);
-    if (remote) {
-      payloadCore = mergeRemoteWithLocal(remote, payloadCore);
-      applyStoreData({ ...payloadCore, deletedItemIds: Array.from(deletedItemIds) });
+  try {
+    const existingSnapshots = await listStateSnapshots();
+    if (existingSnapshots.length > 0 && existingSnapshots[0].pathname !== lastSnapshotPathname) {
+      const latestRes = await fetch(existingSnapshots[0].url, { cache: "no-store" });
+      if (latestRes.ok) {
+        const remote = await latestRes.json();
+        payloadCore = mergeRemoteWithLocal(remote, payloadCore);
+        applyStoreData({ ...payloadCore, deletedItemIds: Array.from(deletedItemIds) });
+      }
     }
-  }
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const now = Date.now();
+    const rand = Math.random().toString(36).slice(2, 8);
+    const snapshotPath = `${STATE_PREFIX}v-${String(now).padStart(15, "0")}-${rand}.json`;
     const payload = {
       ...payloadCore,
       deletedItemIds: Array.from(deletedItemIds),
-      cleanVersion: 2026112801,
-      updatedAt: Date.now()
+      cleanVersion: 2026112802,
+      updatedAt: now
     };
-    try {
-      const hasStrongEtag = Boolean(lastStrongEtag && !lastStrongEtag.startsWith("W/"));
-      if (!hasStrongEtag && cachedStoreData) {
-        console.warn("Skipping cloud write because strong ETag could not be obtained.");
-        return false;
-      }
-      const blobResult = await put(BLOB_FILE_NAME, JSON.stringify(payload), {
-        access: "public",
-        addRandomSuffix: false,
-        contentType: "application/json",
-        cacheControlMaxAge: 60,
-        token: BLOB_READ_WRITE_TOKEN,
-        ...hasStrongEtag ? { ifMatch: lastStrongEtag } : { allowOverwrite: true }
+    const blobResult = await put(snapshotPath, JSON.stringify(payload), {
+      access: "public",
+      addRandomSuffix: false,
+      contentType: "application/json",
+      token: BLOB_READ_WRITE_TOKEN
+    });
+    lastSnapshotPathname = blobResult.pathname || snapshotPath;
+    cachedStoreData = payload;
+    lastFreshReadAt = Date.now();
+    const staleUrls = existingSnapshots.slice(2).map((b) => b.url);
+    if (staleUrls.length > 0) {
+      void del(staleUrls, { token: BLOB_READ_WRITE_TOKEN }).catch(() => {
       });
-      lastStrongEtag = blobResult.etag && !blobResult.etag.startsWith("W/") ? blobResult.etag : "";
-      lastGetEtag = "";
-      cachedStoreData = payload;
-      lastFreshReadAt = Date.now();
-      if (blobResult?.url) blobCdnUrl = blobResult.url;
-      return true;
-    } catch (err) {
-      if (err instanceof BlobPreconditionFailedError) {
-        const remote = await readCloudStoreFresh(true, true);
-        payloadCore = mergeRemoteWithLocal(remote, payloadCore);
-        applyStoreData({ ...payloadCore, deletedItemIds: Array.from(deletedItemIds) });
-        continue;
-      }
-      console.warn("Could not sync to cloud store:", err);
-      return false;
     }
+    return true;
+  } catch (err) {
+    console.warn("Could not sync to cloud store:", err);
+    return false;
   }
-  console.warn("Could not sync to cloud store: too many concurrent write conflicts.");
-  return false;
 }
 var PRIMARY_HOUSEHOLD_ID = "3a131e95-0000-4000-8000-3a131e953a13";
 var PRIMARY_INVITE_CODE = "HB-JBZKW5";
