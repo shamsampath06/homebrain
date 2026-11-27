@@ -100,6 +100,17 @@ const serverSessions = new Map<string, { token: string; user: ServerUser; expire
 
 const CLOUD_STORE_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a218f2032d586e';
 
+function mergeItemsById<T extends { id?: string }>(primary: T[] = [], incoming: T[] = []): T[] {
+  const map = new Map<string, T>();
+  for (const item of primary || []) {
+    if (item && item.id) map.set(item.id, item);
+  }
+  for (const item of incoming || []) {
+    if (item && item.id) map.set(item.id, item);
+  }
+  return Array.from(map.values());
+}
+
 export async function syncFromCloudStore(): Promise<void> {
   try {
     const res = await fetch(CLOUD_STORE_URL);
@@ -140,14 +151,14 @@ export async function syncFromCloudStore(): Promise<void> {
               existing.members = merged;
               existing.name = incoming.name || existing.name;
               existing.inviteCode = incoming.inviteCode || existing.inviteCode;
-              existing.events = incoming.events || existing.events || [];
-              existing.groceries = incoming.groceries || existing.groceries || [];
-              existing.expenses = incoming.expenses || existing.expenses || [];
-              existing.bills = incoming.bills || existing.bills || [];
-              existing.reminders = incoming.reminders || existing.reminders || [];
-              existing.documents = incoming.documents || existing.documents || [];
-              existing.memories = incoming.memories || existing.memories || [];
-              existing.medicines = incoming.medicines || existing.medicines || [];
+              existing.events = mergeItemsById(existing.events, incoming.events);
+              existing.groceries = mergeItemsById(existing.groceries, incoming.groceries);
+              existing.expenses = mergeItemsById(existing.expenses, incoming.expenses);
+              existing.bills = mergeItemsById(existing.bills, incoming.bills);
+              existing.reminders = mergeItemsById(existing.reminders, incoming.reminders);
+              existing.documents = mergeItemsById(existing.documents, incoming.documents);
+              existing.memories = mergeItemsById(existing.memories, incoming.memories);
+              existing.medicines = mergeItemsById(existing.medicines, incoming.medicines);
             }
           }
         }
