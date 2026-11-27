@@ -1983,9 +1983,18 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
       fetchFamilyData('family_memories', user.familyId, token, 'order=year.desc,date.desc&limit=30')
     ]);
 
+    const household = findHousehold(user.familyId, user.inviteCode);
+    const householdEvents = (household as any)?.events || [];
+    const mergedEvents = [...(householdEvents || [])];
+    (events || []).forEach((e: any) => {
+      if (!mergedEvents.some((me: any) => me.id === e.id)) {
+        mergedEvents.push(e);
+      }
+    });
+
     const rawEvents = isExplicitNonDemo
-      ? (Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : (events || []))
-      : ((events && events.length > 0) ? events : sharedFallbackEvents);
+      ? (Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : mergedEvents)
+      : (mergedEvents.length > 0 ? mergedEvents : sharedFallbackEvents);
 
     // Enforce privacy: never expose another member's private events to the AI chatbot
     const effectiveEvents = rawEvents.filter((e: any) =>

@@ -69,6 +69,21 @@ async function loginUser(u, householdId = FAMILY_ID, invite = INVITE_CODE, mode 
   return { token: res.data.token, user: res.data.user };
 }
 
+async function loginGoogleUser(u, mode = 'create', inviteCode = undefined) {
+  const res = await apiRequest('/api/auth/google', 'POST', {
+    email: u.email,
+    name: u.name,
+    inviteCode,
+    role: u.role,
+    relation: u.familyRole,
+    mode
+  });
+  if (res.status !== 200 || !res.data.token) {
+    throw new Error(`Google Login failed for ${u.name}: ${JSON.stringify(res.data)}`);
+  }
+  return { token: res.data.token, user: res.data.user };
+}
+
 let passed = 0;
 let failed = 0;
 
@@ -93,7 +108,7 @@ async function run() {
   const fatherAuth = await loginUser(FATHER);
   const sonAuth = await loginUser(SON);
   const sisterAuth = await loginUser(SISTER);
-  const strangerAuth = await loginUser(STRANGER, undefined, undefined, 'create');
+  const strangerAuth = await loginGoogleUser(STRANGER, 'create');
 
   assert(fatherAuth.token && fatherAuth.user.name === 'sham', 'Father (sham, Admin) authenticated successfully');
   assert(sonAuth.token && sonAuth.user.name === 'sha', 'Son (sha, Member) authenticated successfully');

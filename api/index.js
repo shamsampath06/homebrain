@@ -6202,7 +6202,15 @@ app.post("/api/ai/query", authenticateUser, async (req, res) => {
       fetchFamilyData("documents", user.familyId, token, "limit=40"),
       fetchFamilyData("family_memories", user.familyId, token, "order=year.desc,date.desc&limit=30")
     ]);
-    const rawEvents = isExplicitNonDemo ? Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : events || [] : events && events.length > 0 ? events : sharedFallbackEvents;
+    const household = findHousehold(user.familyId, user.inviteCode);
+    const householdEvents = household?.events || [];
+    const mergedEvents = [...householdEvents || []];
+    (events || []).forEach((e) => {
+      if (!mergedEvents.some((me) => me.id === e.id)) {
+        mergedEvents.push(e);
+      }
+    });
+    const rawEvents = isExplicitNonDemo ? Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : mergedEvents : mergedEvents.length > 0 ? mergedEvents : sharedFallbackEvents;
     const effectiveEvents = rawEvents.filter(
       (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
     );
