@@ -422,7 +422,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 type="text"
                 value={inviteCode}
                 onChange={event => setInviteCode(event.target.value.toUpperCase())}
-                placeholder="e.g. HB-849201 or Household Code"
+                placeholder="e.g. HB-JBZKW5 or Household Code"
                 className="w-full px-4 py-2.5 rounded-2xl bg-white dark:bg-[#141C2E] border-2 border-brand-300 dark:border-cyan-500/40 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/20 text-sm font-mono tracking-widest uppercase text-slate-900 dark:text-white placeholder-slate-400 transition-all font-bold outline-none"
               />
               <p className="text-[10px] text-cyan-800 dark:text-cyan-300 font-medium pt-0.5">
@@ -662,7 +662,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     required
                     value={googleInviteCode}
                     onChange={e => setGoogleInviteCode(e.target.value.toUpperCase())}
-                    placeholder="e.g. HB-849201"
+                    placeholder="e.g. HB-JBZKW5"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#141C2E] font-mono font-bold text-xs text-brand-700 dark:text-brand-400 uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>

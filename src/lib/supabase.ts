@@ -288,8 +288,15 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
     if (localUserStr) {
       try {
         const parsed = JSON.parse(localUserStr) as User;
-        if (!parsed.inviteCode) parsed.inviteCode = 'HB-JBZKW5';
-        if (!parsed.relation) parsed.relation = 'Member';
+        if (!parsed.inviteCode || parsed.inviteCode === 'HB-849201') parsed.inviteCode = 'HB-JBZKW5';
+        if (!parsed.familyName || parsed.familyName.includes('Kumar')) parsed.familyName = 'Family Household';
+        if (parsed.familyId === 'demo-family-kumar' || parsed.familyId === '00000000-0000-4000-8000-000000000001') {
+          parsed.familyId = '3a131e95-0000-4000-8000-3a131e953a13';
+        }
+        if (parsed.email?.toLowerCase().includes('harleysham') || parsed.name?.toLowerCase() === 'sham') {
+          parsed.relation = 'Father / Dad';
+          parsed.role = 'Admin';
+        }
         return parsed;
       } catch { }
     }
@@ -375,7 +382,7 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
         }
       } catch { }
     }
-    if (!inviteCode) inviteCode = 'HB-849201';
+    if (!inviteCode || inviteCode === 'HB-849201') inviteCode = 'HB-JBZKW5';
 
     const p: User = {
       id: ensureValidUUID(String(profile.id || '')),
@@ -419,9 +426,9 @@ export const signInWithPassword = async (email: string, password: string): Promi
         avatar: data.user.avatar || '👨‍💼',
         role: data.user.role || 'Member',
         relation: data.user.relation || 'Member',
-        familyId: data.user.familyId || 'demo-family-kumar',
-        familyName: data.user.familyName || 'Family Household',
-        inviteCode: data.user.inviteCode || 'HB-849201'
+        familyId: data.user.familyId || '3a131e95-0000-4000-8000-3a131e953a13',
+        familyName: (data.user.familyName && !data.user.familyName.includes('Kumar')) ? data.user.familyName : 'Family Household',
+        inviteCode: (data.user.inviteCode && data.user.inviteCode !== 'HB-849201') ? data.user.inviteCode : 'HB-JBZKW5'
       };
       if (typeof window !== 'undefined') {
         localStorage.setItem('homebrain_active_user', JSON.stringify(userProfile));

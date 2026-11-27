@@ -392,8 +392,8 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const demoSnapshot = demoEnabled ? getDemoFamilySnapshot() : null;
 
     let nextMembers = dedupeMembers([
-      ...(cached.familyMembers || []),
       ...(remote.familyMembers || []),
+      ...(cached.familyMembers || []),
       ...(demoSnapshot ? demoSnapshot.familyMembers : [])
     ]);
     let nextEvents = mergeById<FamilyEvent>(
