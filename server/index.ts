@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import https from 'https';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mammoth from 'mammoth';
@@ -114,68 +115,103 @@ function mergeItemsById<T extends { id?: string }>(primary: T[] = [], incoming: 
   return Array.from(map.values());
 }
 
+function cloudHttp(method: 'GET' | 'PUT', bodyData?: any): Promise<any> {
+  return new Promise((resolve) => {
+    try {
+      const bodyStr = bodyData ? JSON.stringify(bodyData) : '';
+      const req = https.request(CLOUD_STORE_URL, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {})
+        },
+        timeout: 8000
+      }, (res) => {
+        let d = '';
+        res.on('data', c => d += c);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(d));
+          } catch {
+            resolve(null);
+          }
+        });
+      });
+      req.on('error', (e) => {
+        console.warn('cloudHttp error:', e?.message || e);
+        resolve(null);
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(null);
+      });
+      if (bodyStr) req.write(bodyStr);
+      req.end();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 export async function syncFromCloudStore(): Promise<void> {
   try {
-    const res = await fetch(CLOUD_STORE_URL);
-    if (res.ok) {
-      const json = await res.json() as any;
-      if (json?.data?.payload) {
-        const parsed = JSON.parse(json.data.payload);
-        if (parsed.households) {
-          for (const [k, v] of Object.entries(parsed.households)) {
-            const incoming = v as HouseholdStoreItem;
-            const existing = serverHouseholdStore.get(k);
-            if (!existing) {
-              serverHouseholdStore.set(k, {
-                ...incoming,
-                events: incoming.events || [],
-                groceries: incoming.groceries || [],
-                expenses: incoming.expenses || [],
-                bills: incoming.bills || [],
-                reminders: incoming.reminders || [],
-                documents: incoming.documents || [],
-                memories: incoming.memories || [],
-                medicines: incoming.medicines || []
-              });
-            } else {
-              const merged = [...existing.members];
-              for (const inc of incoming.members || []) {
-                const idx = merged.findIndex(m =>
-                  (m.email && inc.email && m.email.toLowerCase() === inc.email.toLowerCase()) ||
-                  (m.userId && inc.userId && m.userId === inc.userId) ||
-                  (m.id && inc.id && m.id === inc.id)
-                );
-                if (idx >= 0) {
-                  merged[idx] = { ...merged[idx], ...inc };
-                } else {
-                  merged.push(inc);
-                }
+    const json = await cloudHttp('GET');
+    if (json?.data?.payload) {
+      const parsed = typeof json.data.payload === 'string' ? JSON.parse(json.data.payload) : json.data.payload;
+      if (parsed.households) {
+        for (const [k, v] of Object.entries(parsed.households)) {
+          const incoming = v as HouseholdStoreItem;
+          const existing = serverHouseholdStore.get(k);
+          if (!existing) {
+            serverHouseholdStore.set(k, {
+              ...incoming,
+              events: incoming.events || [],
+              groceries: incoming.groceries || [],
+              expenses: incoming.expenses || [],
+              bills: incoming.bills || [],
+              reminders: incoming.reminders || [],
+              documents: incoming.documents || [],
+              memories: incoming.memories || [],
+              medicines: incoming.medicines || []
+            });
+          } else {
+            const merged = [...existing.members];
+            for (const inc of incoming.members || []) {
+              const idx = merged.findIndex(m =>
+                (m.email && inc.email && m.email.toLowerCase() === inc.email.toLowerCase()) ||
+                (m.userId && inc.userId && m.userId === inc.userId) ||
+                (m.id && inc.id && m.id === inc.id)
+              );
+              if (idx >= 0) {
+                merged[idx] = { ...merged[idx], ...inc };
+              } else {
+                merged.push(inc);
               }
-              existing.members = merged;
-              existing.name = incoming.name || existing.name;
-              existing.inviteCode = incoming.inviteCode || existing.inviteCode;
-              existing.events = mergeItemsById(existing.events, incoming.events);
-              existing.groceries = mergeItemsById(existing.groceries, incoming.groceries);
-              existing.expenses = mergeItemsById(existing.expenses, incoming.expenses);
-              existing.bills = mergeItemsById(existing.bills, incoming.bills);
-              existing.reminders = mergeItemsById(existing.reminders, incoming.reminders);
-              existing.documents = mergeItemsById(existing.documents, incoming.documents);
-              existing.memories = mergeItemsById(existing.memories, incoming.memories);
-              existing.medicines = mergeItemsById(existing.medicines, incoming.medicines);
+            }
+            existing.members = merged;
+            existing.name = incoming.name || existing.name;
+            existing.inviteCode = incoming.inviteCode || existing.inviteCode;
+            existing.events = mergeItemsById(existing.events, incoming.events);
+            existing.groceries = mergeItemsById(existing.groceries, incoming.groceries);
+            existing.expenses = mergeItemsById(existing.expenses, incoming.expenses);
+            existing.bills = mergeItemsById(existing.bills, incoming.bills);
+            existing.reminders = mergeItemsById(existing.reminders, incoming.reminders);
+            existing.documents = mergeItemsById(existing.documents, incoming.documents);
+            existing.memories = mergeItemsById(existing.memories, incoming.memories);
+            existing.medicines = mergeItemsById(existing.medicines, incoming.medicines);
 
-              if (k === PRIMARY_HOUSEHOLD_ID || k === 'demo-family-kumar') {
-                serverHouseholdStore.set(PRIMARY_HOUSEHOLD_ID, existing);
-                serverHouseholdStore.set('demo-family-kumar', existing);
-              }
+            if (k === PRIMARY_HOUSEHOLD_ID || k === 'demo-family-kumar') {
+              serverHouseholdStore.set(PRIMARY_HOUSEHOLD_ID, existing);
+              serverHouseholdStore.set('demo-family-kumar', existing);
             }
           }
         }
-        if (parsed.users) {
-          for (const [k, v] of Object.entries(parsed.users)) {
-            const key = k.toLowerCase();
-            if (!serverRegisteredUsers.has(key)) {
-              serverRegisteredUsers.set(key, v as ServerUser);
-            }
+      }
+      if (parsed.users) {
+        for (const [k, v] of Object.entries(parsed.users)) {
+          const key = k.toLowerCase();
+          if (!serverRegisteredUsers.has(key)) {
+            serverRegisteredUsers.set(key, v as ServerUser);
           }
         }
       }
@@ -191,14 +227,11 @@ export async function syncToCloudStore(): Promise<void> {
     let remoteHouseholds: Record<string, HouseholdStoreItem> = {};
     let remoteUsers: Record<string, ServerUser> = {};
     try {
-      const res = await fetch(CLOUD_STORE_URL);
-      if (res.ok) {
-        const json = await res.json() as any;
-        if (json?.data?.payload) {
-          const parsed = JSON.parse(json.data.payload);
-          remoteHouseholds = parsed.households || {};
-          remoteUsers = parsed.users || {};
-        }
+      const json = await cloudHttp('GET');
+      if (json?.data?.payload) {
+        const parsed = typeof json.data.payload === 'string' ? JSON.parse(json.data.payload) : json.data.payload;
+        remoteHouseholds = parsed.households || {};
+        remoteUsers = parsed.users || {};
       }
     } catch { }
 
@@ -236,15 +269,7 @@ export async function syncToCloudStore(): Promise<void> {
       updatedAt: Date.now()
     });
 
-    const body = JSON.stringify({ name: 'homebrain-kumar-store', data: { payload } });
-    await fetch(CLOUD_STORE_URL, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': String(Buffer.byteLength(body))
-      },
-      body
-    });
+    await cloudHttp('PUT', { name: 'homebrain-kumar-store', data: { payload } });
   } catch (err) {
     console.warn('Could not sync to cloud store:', err);
   }
