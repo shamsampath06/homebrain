@@ -271,6 +271,59 @@ const emptyUser: User = {
   familyName: ''
 };
 
+const getInitialActiveUser = (): User => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('homebrain_active_user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        if (u && (u.email || u.id)) {
+          if (!u.inviteCode || u.inviteCode === 'HB-849201') u.inviteCode = 'HB-JBZKW5';
+          if (!u.familyName || u.familyName.includes('Kumar')) u.familyName = 'Family Household';
+          if (u.familyId === 'demo-family-kumar' || u.familyId === '00000000-0000-4000-8000-000000000001') {
+            u.familyId = '3a131e95-0000-4000-8000-3a131e953a13';
+          }
+          return u;
+        }
+      }
+    } catch { }
+  }
+  return emptyUser;
+};
+
+const getInitialAuthStatus = (): boolean => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('homebrain_active_user');
+      const token = localStorage.getItem('homebrain_session_token');
+      if (stored && (token || !isSupabaseConfigured)) {
+        const u = JSON.parse(stored);
+        if (u && (u.email || u.id)) return true;
+      }
+    } catch { }
+  }
+  return false;
+};
+
+const getInitialCachedData = <T,>(key: string): T[] => {
+  if (typeof window !== 'undefined') {
+    try {
+      const userStr = localStorage.getItem('homebrain_active_user');
+      let familyId = '3a131e95-0000-4000-8000-3a131e953a13';
+      if (userStr) {
+        const u = JSON.parse(userStr);
+        if (u && u.familyId) familyId = u.familyId;
+      }
+      const raw = localStorage.getItem(`homebrain_family_cache_${familyId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed[key])) return parsed[key];
+      }
+    } catch { }
+  }
+  return [];
+};
+
 export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Nav state
   const [activeTab, setActiveTab] = useState<MainTab>('dashboard');
@@ -301,7 +354,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // User & Theme
-  const [currentUser, setCurrentUser] = useState<User>(emptyUser);
+  const [currentUser, setCurrentUser] = useState<User>(getInitialActiveUser);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
       const stored = localStorage.getItem('homebrain_darkMode');
@@ -310,9 +363,9 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return true;
     }
   });
-  const [isDataLoading, setIsDataLoading] = useState(isSupabaseConfigured);
+  const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(getInitialAuthStatus);
   const authGeneration = useRef(0);
 
   const clearDataError = () => setDataError(null);
@@ -525,18 +578,15 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Check for OAuth callback from Google Sign-In
       handleOAuthCallback();
 
-      if (!isSupabaseConfigured) {
-        setIsDataLoading(false);
-        return;
-      }
       try {
         const profile = await getAuthenticatedProfile();
         if (profile) {
           profile.familyId = ensureValidUUID(profile.familyId);
           profile.id = ensureValidUUID(profile.id);
-          await hydrateAccountData(profile);
           setCurrentUser(profile);
           setIsAuthenticated(true);
+          // Hydrate cloud delta data in background without blocking initial UI
+          void hydrateAccountData(profile);
         } else {
           clearStoredSession();
           setIsAuthenticated(false);
@@ -784,7 +834,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Family Members
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(() => getInitialCachedData<FamilyMember>('familyMembers'));
 
   const addFamilyMember = (member: Omit<FamilyMember, 'id'>) => {
     const newMember: FamilyMember = { ...member, id: crypto.randomUUID() };
@@ -803,7 +853,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Events
-  const [events, setEvents] = useState<FamilyEvent[]>([]);
+  const [events, setEvents] = useState<FamilyEvent[]>(() => getInitialCachedData<FamilyEvent>('events'));
 
   const addEvent = (event: Omit<FamilyEvent, 'id'>) => {
     const newEvt: FamilyEvent = {
@@ -827,7 +877,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Reminders
-  const [reminders, setReminders] = useState<ReminderItem[]>([]);
+  const [reminders, setReminders] = useState<ReminderItem[]>(() => getInitialCachedData<ReminderItem>('reminders'));
 
   const addReminder = (rem: Omit<ReminderItem, 'id'>) => {
     const newRem: ReminderItem = {
@@ -857,7 +907,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Documents
-  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [documents, setDocuments] = useState<DocumentItem[]>(() => getInitialCachedData<DocumentItem>('documents'));
 
   const addDocument = async (doc: Omit<DocumentItem, 'id' | 'uploadDate'>): Promise<void> => {
     const sanitizeText = (txt?: string) => txt ? txt.replace(/\0|\\u0000|\u0000|[\x00]/g, '') : txt;
@@ -891,7 +941,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Groceries
-  const [groceries, setGroceries] = useState<GroceryItem[]>([]);
+  const [groceries, setGroceries] = useState<GroceryItem[]>(() => getInitialCachedData<GroceryItem>('groceries'));
   const [groceryHistory, setGroceryHistory] = useState<GroceryHistoryItem[]>([]);
 
   const addGroceryItem = (item: Omit<GroceryItem, 'id' | 'isPurchased'>) => {
@@ -941,7 +991,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Medicines
-  const [medicines, setMedicines] = useState<MedicineItem[]>([]);
+  const [medicines, setMedicines] = useState<MedicineItem[]>(() => getInitialCachedData<MedicineItem>('medicines'));
   const [medicineLogs, setMedicineLogs] = useState<MedicineLog[]>([]);
 
   const addMedicine = (med: Omit<MedicineItem, 'id'>) => {
@@ -980,8 +1030,8 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Expenses & Bills
-  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
-  const [bills, setBills] = useState<BillItem[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>(() => getInitialCachedData<ExpenseItem>('expenses'));
+  const [bills, setBills] = useState<BillItem[]>(() => getInitialCachedData<BillItem>('bills'));
 
   const addExpense = (exp: Omit<ExpenseItem, 'id'>) => {
     const newExp: ExpenseItem = {
@@ -1451,7 +1501,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Memories (clean by default; populated with demo albums only in Demo Mode or when loaded from Settings)
-  const [memories, setMemories] = useState<FamilyMemory[]>([]);
+  const [memories, setMemories] = useState<FamilyMemory[]>(() => getInitialCachedData<FamilyMemory>('memories'));
 
   // Persist per-account family state in localStorage so each account is isolated and survives reloads
   useEffect(() => {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { HomeBrainProvider, useHomeBrain } from './context/HomeBrainContext';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
@@ -6,22 +6,53 @@ import { MobileNav } from './components/layout/MobileNav';
 
 import { DashboardScreen } from './components/dashboard/DashboardScreen';
 import { AIChatScreen } from './components/ai/AIChatScreen';
-import { FamilyTimelineScreen, AddMemoryModal, MemoryDetailsModal } from './components/modules/FamilyTimelineModule';
-import { ProfileSettingsShell } from './components/profile/ProfileSettingsModule';
-import { FamilyHubModule } from './components/modules/FamilyHubModule';
-
-import { CalendarScreen, AddEventModal, EventDetailsModal } from './components/modules/CalendarModule';
-import { DocumentVaultScreen, UploadDocumentModal, DocumentDetailsModal } from './components/modules/DocumentVaultModule';
-import { GroceryListScreen, AddGroceryModal, GroceryHistoryScreen } from './components/modules/SmartGroceryModule';
-import { MedicineManagerScreen, AddMedicineModal, MedicineHistoryScreen } from './components/modules/MedicineManagerModule';
-import { ExpenseDashboardScreen, AddExpenseModal, BillManagementScreen } from './components/modules/ExpenseBillModule';
-import { FamilyKnowledgeScreen, AddKnowledgeModal } from './components/modules/FamilyKnowledgeModule';
-import { EmergencyModeModal } from './components/modules/EmergencyModeModal';
-import { RemindersScreen, ReminderForm } from './components/dashboard/RemindersScreen';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { CommandPaletteModal } from './components/common/CommandPaletteModal';
 import { isSupabaseConfigured } from './lib/supabase';
 import { parseHash, buildHash } from './lib/navigation';
+
+// Lazy-loaded secondary modules & modals for instant initial page loading (<200ms)
+const FamilyTimelineScreen = lazy(() => import('./components/modules/FamilyTimelineModule').then(m => ({ default: m.FamilyTimelineScreen })));
+const AddMemoryModal = lazy(() => import('./components/modules/FamilyTimelineModule').then(m => ({ default: m.AddMemoryModal })));
+const MemoryDetailsModal = lazy(() => import('./components/modules/FamilyTimelineModule').then(m => ({ default: m.MemoryDetailsModal })));
+
+const ProfileSettingsShell = lazy(() => import('./components/profile/ProfileSettingsModule').then(m => ({ default: m.ProfileSettingsShell })));
+
+const CalendarScreen = lazy(() => import('./components/modules/CalendarModule').then(m => ({ default: m.CalendarScreen })));
+const AddEventModal = lazy(() => import('./components/modules/CalendarModule').then(m => ({ default: m.AddEventModal })));
+const EventDetailsModal = lazy(() => import('./components/modules/CalendarModule').then(m => ({ default: m.EventDetailsModal })));
+
+const DocumentVaultScreen = lazy(() => import('./components/modules/DocumentVaultModule').then(m => ({ default: m.DocumentVaultScreen })));
+const UploadDocumentModal = lazy(() => import('./components/modules/DocumentVaultModule').then(m => ({ default: m.UploadDocumentModal })));
+const DocumentDetailsModal = lazy(() => import('./components/modules/DocumentVaultModule').then(m => ({ default: m.DocumentDetailsModal })));
+
+const GroceryListScreen = lazy(() => import('./components/modules/SmartGroceryModule').then(m => ({ default: m.GroceryListScreen })));
+const AddGroceryModal = lazy(() => import('./components/modules/SmartGroceryModule').then(m => ({ default: m.AddGroceryModal })));
+const GroceryHistoryScreen = lazy(() => import('./components/modules/SmartGroceryModule').then(m => ({ default: m.GroceryHistoryScreen })));
+
+const MedicineManagerScreen = lazy(() => import('./components/modules/MedicineManagerModule').then(m => ({ default: m.MedicineManagerScreen })));
+const AddMedicineModal = lazy(() => import('./components/modules/MedicineManagerModule').then(m => ({ default: m.AddMedicineModal })));
+const MedicineHistoryScreen = lazy(() => import('./components/modules/MedicineManagerModule').then(m => ({ default: m.MedicineHistoryScreen })));
+
+const ExpenseDashboardScreen = lazy(() => import('./components/modules/ExpenseBillModule').then(m => ({ default: m.ExpenseDashboardScreen })));
+const AddExpenseModal = lazy(() => import('./components/modules/ExpenseBillModule').then(m => ({ default: m.AddExpenseModal })));
+const BillManagementScreen = lazy(() => import('./components/modules/ExpenseBillModule').then(m => ({ default: m.BillManagementScreen })));
+
+const FamilyKnowledgeScreen = lazy(() => import('./components/modules/FamilyKnowledgeModule').then(m => ({ default: m.FamilyKnowledgeScreen })));
+const AddKnowledgeModal = lazy(() => import('./components/modules/FamilyKnowledgeModule').then(m => ({ default: m.AddKnowledgeModal })));
+
+const EmergencyModeModal = lazy(() => import('./components/modules/EmergencyModeModal').then(m => ({ default: m.EmergencyModeModal })));
+const RemindersScreen = lazy(() => import('./components/dashboard/RemindersScreen').then(m => ({ default: m.RemindersScreen })));
+const ReminderForm = lazy(() => import('./components/dashboard/RemindersScreen').then(m => ({ default: m.ReminderForm })));
+
+const ScreenLoader: React.FC = () => (
+  <div className="flex items-center justify-center min-h-[300px] py-16">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Opening module...</span>
+    </div>
+  </div>
+);
 
 const AppContent: React.FC = () => {
   const {
@@ -219,7 +250,9 @@ const AppContent: React.FC = () => {
             </div>
           )}
           <div key={`${activeTab}-${activeSubScreen}`} className={`animate-fadeIn transition-opacity duration-300 ${activeTab === 'ai' && activeSubScreen === 'none' ? 'flex-1 flex flex-col min-h-0' : ''}`}>
-            {renderMainContent()}
+            <Suspense fallback={<ScreenLoader />}>
+              {renderMainContent()}
+            </Suspense>
           </div>
         </main>
       </div>

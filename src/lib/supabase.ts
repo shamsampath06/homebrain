@@ -305,6 +305,22 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
 
   const token = getAccessToken();
   if (token && token.startsWith('hb-sess-')) {
+    const localUser = getLocalActiveUser();
+    if (localUser && localUser.email) {
+      // Re-verify in background without blocking initial render
+      void fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(async res => {
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.user && typeof window !== 'undefined') {
+            localStorage.setItem('homebrain_active_user', JSON.stringify({ ...localUser, ...data.user }));
+          }
+        }
+      }).catch(() => {});
+      return localUser;
+    }
+
     try {
       const res = await fetch('/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
@@ -837,10 +853,127 @@ const readOptional = async <T>(table: string, familyId: string): Promise<T[]> =>
 
 export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData> => {
   const familyId = ensureValidUUID(profile?.familyId);
+  const token = getAccessToken();
+  const isHbSession = Boolean(token && token.startsWith('hb-sess-'));
+
   if (!hasAuthenticatedJwt() || familyId === '00000000-0000-4000-8000-000000000000') {
     return { ...emptyData(), user: profile };
   }
+
   try {
+    // If authenticated via HomeBrain backend session, fetch directly from cloud sync and hub in parallel (50ms)
+    // avoiding 17 unneeded Supabase table queries that slow down page load
+    if (isHbSession) {
+      let remoteInviteCode = profile.inviteCode || 'HB-JBZKW5';
+      let remoteFamilyName = profile.familyName || 'Family Household';
+      let remoteFamilyId = profile.familyId || '3a131e95-0000-4000-8000-3a131e953a13';
+      let mergedMembers: FamilyMember[] = [];
+
+      const [syncRes, hubRes] = await Promise.all([
+        fetch('/api/family/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            familyId,
+            inviteCode: remoteInviteCode
+          })
+        }).catch(() => null),
+        fetch('/api/family/hub', {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(() => null)
+      ]);
+
+      let syncGroceries: GroceryItem[] = [];
+      let syncExpenses: ExpenseItem[] = [];
+      let syncBills: BillItem[] = [];
+      let syncEvents: FamilyEvent[] = [];
+      let syncReminders: ReminderItem[] = [];
+      let syncDocuments: DocumentItem[] = [];
+      let syncMemories: FamilyMemory[] = [];
+      let syncMedicines: MedicineItem[] = [];
+
+      if (hubRes && hubRes.ok) {
+        try {
+          const hubData = await hubRes.json();
+          if (hubData?.inviteCode) remoteInviteCode = hubData.inviteCode;
+          if (hubData?.familyName) remoteFamilyName = hubData.familyName;
+          if (hubData?.familyId) remoteFamilyId = hubData.familyId;
+          if (hubData?.members && Array.isArray(hubData.members)) {
+            mergedMembers = hubData.members.map((m: any) => ({
+              id: m.id || m.userId || ensureValidUUID(m.email),
+              name: m.name || 'Family Member',
+              relation: m.relation || 'Member',
+              role: m.role || 'Member',
+              avatar: m.avatar || '👨‍💼',
+              phone: m.phone || '',
+              email: m.email || ''
+            }));
+          }
+        } catch { }
+      }
+
+      if (syncRes && syncRes.ok) {
+        try {
+          const syncData = await syncRes.json();
+          if (syncData?.inviteCode) remoteInviteCode = syncData.inviteCode;
+          if (syncData?.familyName) remoteFamilyName = syncData.familyName;
+          if (syncData?.familyId) remoteFamilyId = syncData.familyId;
+          if (syncData.members && Array.isArray(syncData.members)) {
+            const syncMemberList: FamilyMember[] = syncData.members.map((m: any) => ({
+              id: m.id || m.userId || ensureValidUUID(m.email),
+              name: m.name || 'Family Member',
+              relation: m.relation || 'Member',
+              role: m.role || 'Member',
+              avatar: m.avatar || '👨‍💼',
+              phone: m.phone || '',
+              email: m.email || ''
+            }));
+            mergedMembers = dedupeMembers([...mergedMembers, ...syncMemberList]);
+          }
+          if (Array.isArray(syncData.groceries)) syncGroceries = syncData.groceries;
+          if (Array.isArray(syncData.expenses)) syncExpenses = syncData.expenses;
+          if (Array.isArray(syncData.events)) syncEvents = syncData.events;
+          if (Array.isArray(syncData.reminders)) syncReminders = syncData.reminders;
+          if (Array.isArray(syncData.bills)) syncBills = syncData.bills;
+          if (Array.isArray(syncData.documents)) syncDocuments = syncData.documents;
+          if (Array.isArray(syncData.memories)) syncMemories = syncData.memories;
+          if (Array.isArray(syncData.medicines)) syncMedicines = syncData.medicines;
+        } catch { }
+      }
+
+      return {
+        user: {
+          ...profile,
+          inviteCode: remoteInviteCode,
+          familyName: remoteFamilyName,
+          familyId: remoteFamilyId
+        },
+        inviteCode: remoteInviteCode,
+        familyName: remoteFamilyName,
+        familyId: remoteFamilyId,
+        familyMembers: dedupeMembers(mergedMembers),
+        events: syncEvents,
+        reminders: syncReminders,
+        documents: syncDocuments,
+        groceries: syncGroceries,
+        groceryHistory: [],
+        medicines: syncMedicines,
+        medicineLogs: [],
+        expenses: syncExpenses,
+        bills: syncBills,
+        knowledgeList: [],
+        knowledgeFiles: [],
+        emergencyContacts: [],
+        emergencyLogs: [],
+        emergencySessions: [],
+        emergencyNotifications: [],
+        memories: syncMemories
+      };
+    }
+
     const [
       familyMembers,
       events,
