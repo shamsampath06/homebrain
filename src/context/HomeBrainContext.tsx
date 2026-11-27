@@ -437,7 +437,13 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const hydrateAccountData = async (profile: User) => {
     const familyId = ensureValidUUID(profile.familyId);
     const demoEnabled = isDemoEnabledForFamily(familyId);
-    const remote = await loadFamilyData(profile);
+    let remote;
+    try {
+      remote = await loadFamilyData(profile);
+    } catch (err) {
+      console.warn('[hydrateAccountData] cloud sync deferred, keeping current view:', err);
+      return;
+    }
 
     if (remote.inviteCode || remote.familyName || remote.familyId) {
       setCurrentUser(prev => {
@@ -726,6 +732,27 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (remote.medicines) {
           setMedicines(remote.medicines);
         }
+        if (remote.knowledgeList) {
+          setKnowledgeList(remote.knowledgeList);
+        }
+        try {
+          const fid = ensureValidUUID(remote.familyId || currentUser.familyId);
+          const existingRaw = localStorage.getItem(`homebrain_family_cache_${fid}`);
+          const existingCache = existingRaw ? JSON.parse(existingRaw) : {};
+          localStorage.setItem(`homebrain_family_cache_${fid}`, JSON.stringify({
+            ...existingCache,
+            ...(remote.familyMembers && remote.familyMembers.length > 0 ? { familyMembers: dedupeMembers(remote.familyMembers) } : {}),
+            ...(remote.events ? { events: remote.events } : {}),
+            ...(remote.groceries ? { groceries: remote.groceries } : {}),
+            ...(remote.expenses ? { expenses: remote.expenses } : {}),
+            ...(remote.bills ? { bills: remote.bills } : {}),
+            ...(remote.medicines ? { medicines: remote.medicines } : {}),
+            ...(remote.documents ? { documents: remote.documents } : {}),
+            ...(remote.reminders ? { reminders: remote.reminders } : {}),
+            ...(remote.memories ? { memories: remote.memories } : {}),
+            ...(remote.knowledgeList ? { knowledgeList: remote.knowledgeList } : {})
+          }));
+        } catch { }
         if (remote.inviteCode && currentUser.inviteCode !== remote.inviteCode) {
           setCurrentUser(prev => {
             const up = {

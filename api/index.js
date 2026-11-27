@@ -1,6 +1,6 @@
 // server/index.ts
 import express from "express";
-import { put } from "@vercel/blob";
+import { put, get, head, BlobPreconditionFailedError } from "@vercel/blob";
 import cors from "cors";
 import dotenv from "dotenv";
 import mammoth from "mammoth";
@@ -4624,126 +4624,177 @@ function mergeWithTombstones(local = [], incoming = []) {
   }
   return Array.from(map.values());
 }
-async function syncFromCloudStore() {
+var SYNCED_TABLES = ["events", "groceries", "expenses", "bills", "medicines", "documents", "reminders", "memories", "knowledgeList"];
+var lastGetEtag = "";
+var lastStrongEtag = "";
+var cachedStoreData = null;
+var lastFreshReadAt = 0;
+var FRESH_READ_TTL_MS = 1e3;
+var isDemoHouseholdKey = (k) => k === "demo-family-kumar" || k === "00000000-0000-4000-8000-000000000001";
+async function readCloudStoreFresh(force = false, needStrongEtag = false) {
+  if (!force && !needStrongEtag && cachedStoreData && Date.now() - lastFreshReadAt < FRESH_READ_TTL_MS) {
+    return cachedStoreData;
+  }
   try {
-    const res = await fetch(blobCdnUrl + "?download=1", { cache: "no-store" });
-    if (!res.ok) return;
-    const storeData = await res.json();
-    if (storeData && Array.isArray(storeData.deletedItemIds)) {
-      for (const id of storeData.deletedItemIds) {
-        if (id && typeof id === "string") {
-          deletedItemIds.add(id);
-        }
-      }
+    const getPromise = get(BLOB_FILE_NAME, {
+      access: "public",
+      useCache: false,
+      token: BLOB_READ_WRITE_TOKEN,
+      ...lastGetEtag && cachedStoreData ? { ifNoneMatch: lastGetEtag } : {}
+    });
+    const headPromise = needStrongEtag ? head(BLOB_FILE_NAME, { token: BLOB_READ_WRITE_TOKEN }).catch(() => null) : Promise.resolve(null);
+    const [result, headResult] = await Promise.all([getPromise, headPromise]);
+    if (headResult?.etag && !headResult.etag.startsWith("W/")) {
+      lastStrongEtag = headResult.etag;
     }
-    if (storeData && storeData.households) {
-      for (const [k, v] of Object.entries(storeData.households)) {
-        if (k === "demo-family-kumar" || k === "00000000-0000-4000-8000-000000000001") {
-          continue;
-        }
-        const incoming = v;
-        const targetKey = k;
-        const existing = serverHouseholdStore.get(targetKey) || { ...primaryHousehold };
-        if (targetKey === PRIMARY_HOUSEHOLD_ID) {
-          existing.id = PRIMARY_HOUSEHOLD_ID;
-          existing.name = "Family Household";
-          existing.inviteCode = PRIMARY_INVITE_CODE;
-          existing.events = (incoming.events || []).filter((e) => e?.id && !deletedItemIds.has(e.id));
-          existing.groceries = (incoming.groceries || []).filter((g) => g?.id && !deletedItemIds.has(g.id));
-          existing.expenses = (incoming.expenses || []).filter((x) => x?.id && !deletedItemIds.has(x.id));
-          existing.bills = (incoming.bills || []).filter((b) => b?.id && !deletedItemIds.has(b.id));
-          existing.medicines = (incoming.medicines || []).filter((m) => m?.id && !deletedItemIds.has(m.id));
-          existing.documents = (incoming.documents || []).filter((d) => d?.id && !deletedItemIds.has(d.id));
-          existing.reminders = (incoming.reminders || []).filter((r) => r?.id && !deletedItemIds.has(r.id));
-          existing.memories = (incoming.memories || []).filter((m) => m?.id && !deletedItemIds.has(m.id));
-          const safeMembers = (incoming.members && incoming.members.length > 0 ? incoming.members : existing.members || []).filter(
-            (m) => !m.name?.toLowerCase().includes("stranger") && !m.email?.toLowerCase().includes("stranger")
-          );
-          existing.members = dedupeServerMembers(safeMembers);
-        } else {
-          existing.members = dedupeServerMembers([...existing.members || [], ...incoming.members || []]);
-          existing.groceries = mergeWithTombstones(existing.groceries, incoming.groceries);
-          existing.expenses = mergeWithTombstones(existing.expenses, incoming.expenses);
-          existing.events = mergeWithTombstones(existing.events, incoming.events);
-          existing.documents = mergeWithTombstones(existing.documents, incoming.documents);
-          existing.bills = mergeWithTombstones(existing.bills, incoming.bills);
-          existing.reminders = mergeWithTombstones(existing.reminders, incoming.reminders);
-          existing.memories = mergeWithTombstones(existing.memories, incoming.memories);
-          existing.medicines = mergeWithTombstones(existing.medicines, incoming.medicines);
-        }
-        if (targetKey !== PRIMARY_HOUSEHOLD_ID && incoming.name) existing.name = incoming.name;
-        if (targetKey !== PRIMARY_HOUSEHOLD_ID && incoming.inviteCode) existing.inviteCode = incoming.inviteCode;
-        serverHouseholdStore.set(targetKey, existing);
-      }
+    if (!result) return cachedStoreData;
+    if (result.statusCode === 304) {
+      lastFreshReadAt = Date.now();
+      return cachedStoreData;
     }
-    if (storeData && storeData.users) {
-      for (const [k, v] of Object.entries(storeData.users)) {
-        const key = k.toLowerCase();
-        if (key.includes("stranger")) continue;
-        if (!serverRegisteredUsers.has(key)) {
-          serverRegisteredUsers.set(key, v);
-        }
-      }
+    const text = await new Response(result.stream).text();
+    cachedStoreData = JSON.parse(text);
+    lastGetEtag = result.blob.etag || "";
+    if (!needStrongEtag && result.blob.etag && !result.blob.etag.startsWith("W/")) {
+      lastStrongEtag = result.blob.etag;
     }
+    lastFreshReadAt = Date.now();
+    return cachedStoreData;
   } catch (err) {
-    console.warn("Could not sync from cloud store:", err);
+    console.warn("Fresh cloud store read failed:", err);
+    return cachedStoreData;
   }
 }
+var filterLive = (arr) => (arr || []).filter((x) => x && x.id && !deletedItemIds.has(x.id));
+var withoutStrangers = (members) => (members || []).filter(
+  (m) => !String(m?.name || "").toLowerCase().includes("stranger") && !String(m?.email || "").toLowerCase().includes("stranger")
+);
+function applyStoreData(storeData) {
+  if (!storeData) return;
+  if (Array.isArray(storeData.deletedItemIds)) {
+    for (const id of storeData.deletedItemIds) {
+      if (id && typeof id === "string") deletedItemIds.add(id);
+    }
+  }
+  if (storeData.households) {
+    for (const [k, v] of Object.entries(storeData.households)) {
+      if (isDemoHouseholdKey(k)) continue;
+      const incoming = v;
+      const existing = serverHouseholdStore.get(k) || { ...primaryHousehold, id: k, members: [] };
+      for (const table of SYNCED_TABLES) {
+        existing[table] = filterLive(incoming[table]);
+      }
+      const incomingMembers = Array.isArray(incoming.members) && incoming.members.length > 0 ? incoming.members : existing.members || [];
+      existing.members = dedupeServerMembers(withoutStrangers(incomingMembers));
+      if (k === PRIMARY_HOUSEHOLD_ID) {
+        existing.id = PRIMARY_HOUSEHOLD_ID;
+        existing.name = "Family Household";
+        existing.inviteCode = PRIMARY_INVITE_CODE;
+      } else {
+        existing.id = k;
+        if (incoming.name) existing.name = incoming.name;
+        if (incoming.inviteCode) existing.inviteCode = incoming.inviteCode;
+        if (incoming.createdBy) existing.createdBy = incoming.createdBy;
+      }
+      serverHouseholdStore.set(k, existing);
+    }
+  }
+  if (storeData.users) {
+    for (const [k, v] of Object.entries(storeData.users)) {
+      const key = k.toLowerCase();
+      if (key.includes("stranger")) continue;
+      if (!serverRegisteredUsers.has(key)) serverRegisteredUsers.set(key, v);
+    }
+  }
+}
+async function syncFromCloudStore(force = false, needStrongEtag = false) {
+  const data = await readCloudStoreFresh(force, needStrongEtag);
+  if (data) applyStoreData(data);
+}
+function buildLocalPayload() {
+  const householdsObj = {};
+  for (const [k, localH] of serverHouseholdStore.entries()) {
+    if (isDemoHouseholdKey(k)) continue;
+    const h = {
+      ...localH,
+      id: k,
+      inviteCode: k === PRIMARY_HOUSEHOLD_ID ? PRIMARY_INVITE_CODE : localH.inviteCode,
+      name: k === PRIMARY_HOUSEHOLD_ID ? "Family Household" : localH.name,
+      members: dedupeServerMembers(withoutStrangers(localH.members || []))
+    };
+    for (const table of SYNCED_TABLES) h[table] = filterLive(localH[table]);
+    householdsObj[k] = h;
+  }
+  const usersObj = {};
+  for (const [k, v] of serverRegisteredUsers.entries()) {
+    if (k.includes("stranger")) continue;
+    usersObj[k.toLowerCase()] = v;
+  }
+  return { households: householdsObj, users: usersObj };
+}
+function mergeRemoteWithLocal(remote, local) {
+  const merged = { households: { ...remote?.households || {} }, users: { ...remote?.users || {}, ...local.users || {} } };
+  if (Array.isArray(remote?.deletedItemIds)) {
+    for (const id of remote.deletedItemIds) if (typeof id === "string") deletedItemIds.add(id);
+  }
+  for (const [k, localH] of Object.entries(local.households || {})) {
+    const remoteH = merged.households[k];
+    if (!remoteH) {
+      merged.households[k] = localH;
+      continue;
+    }
+    const out = { ...remoteH, ...localH };
+    for (const table of SYNCED_TABLES) {
+      out[table] = mergeWithTombstones(localH[table], remoteH[table]);
+    }
+    out.members = dedupeServerMembers(withoutStrangers([...localH.members || [], ...remoteH.members || []]));
+    merged.households[k] = out;
+  }
+  for (const [k, h] of Object.entries(merged.households)) {
+    for (const table of SYNCED_TABLES) h[table] = filterLive(h[table]);
+    merged.households[k] = h;
+  }
+  return merged;
+}
 async function syncToCloudStore() {
-  try {
-    lastLocalWrite = Date.now();
-    const householdsObj = {};
-    for (const [k, localH] of serverHouseholdStore.entries()) {
-      if (k === "demo-family-kumar") continue;
-      const cleanMembers = dedupeServerMembers(localH.members || []);
-      const cleanEvents = (localH.events || []).filter((e) => e?.id && !deletedItemIds.has(e.id));
-      const cleanGroceries = (localH.groceries || []).filter((g) => g?.id && !deletedItemIds.has(g.id));
-      const cleanExpenses = (localH.expenses || []).filter((x) => x?.id && !deletedItemIds.has(x.id));
-      const cleanBills = (localH.bills || []).filter((b) => b?.id && !deletedItemIds.has(b.id));
-      const cleanMedicines = (localH.medicines || []).filter((m) => m?.id && !deletedItemIds.has(m.id));
-      const cleanDocuments = (localH.documents || []).filter((d) => d?.id && !deletedItemIds.has(d.id));
-      const cleanReminders = (localH.reminders || []).filter((r) => r?.id && !deletedItemIds.has(r.id));
-      const cleanMemories = (localH.memories || []).filter((m) => m?.id && !deletedItemIds.has(m.id));
-      householdsObj[k] = {
-        ...localH,
-        id: k,
-        inviteCode: k === PRIMARY_HOUSEHOLD_ID ? PRIMARY_INVITE_CODE : localH.inviteCode,
-        name: k === PRIMARY_HOUSEHOLD_ID ? "Family Household" : localH.name,
-        members: cleanMembers,
-        events: cleanEvents,
-        groceries: cleanGroceries,
-        expenses: cleanExpenses,
-        bills: cleanBills,
-        medicines: cleanMedicines,
-        documents: cleanDocuments,
-        reminders: cleanReminders,
-        memories: cleanMemories
-      };
-    }
-    const usersObj = {};
-    for (const [k, v] of serverRegisteredUsers.entries()) {
-      if (k.includes("stranger")) continue;
-      usersObj[k.toLowerCase()] = v;
-    }
+  lastLocalWrite = Date.now();
+  let payloadCore = buildLocalPayload();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     const payload = {
-      households: householdsObj,
-      users: usersObj,
+      ...payloadCore,
       deletedItemIds: Array.from(deletedItemIds),
       cleanVersion: 2026112801,
       updatedAt: Date.now()
     };
-    const blobResult = await put(BLOB_FILE_NAME, JSON.stringify(payload), {
-      access: "public",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      token: BLOB_READ_WRITE_TOKEN
-    });
-    if (blobResult?.url) {
-      blobCdnUrl = blobResult.url;
+    try {
+      const useIfMatch = Boolean(lastStrongEtag && !lastStrongEtag.startsWith("W/"));
+      const blobResult = await put(BLOB_FILE_NAME, JSON.stringify(payload), {
+        access: "public",
+        addRandomSuffix: false,
+        contentType: "application/json",
+        cacheControlMaxAge: 60,
+        token: BLOB_READ_WRITE_TOKEN,
+        ...useIfMatch ? { ifMatch: lastStrongEtag } : { allowOverwrite: true }
+      });
+      lastStrongEtag = blobResult.etag && !blobResult.etag.startsWith("W/") ? blobResult.etag : "";
+      lastGetEtag = "";
+      cachedStoreData = payload;
+      lastFreshReadAt = Date.now();
+      if (blobResult?.url) blobCdnUrl = blobResult.url;
+      return true;
+    } catch (err) {
+      if (err instanceof BlobPreconditionFailedError) {
+        const remote = await readCloudStoreFresh(true, true);
+        payloadCore = mergeRemoteWithLocal(remote, payloadCore);
+        applyStoreData({ ...payloadCore, deletedItemIds: Array.from(deletedItemIds) });
+        continue;
+      }
+      console.warn("Could not sync to cloud store:", err);
+      return false;
     }
-  } catch (err) {
-    console.warn("Could not sync to cloud store:", err);
   }
+  console.warn("Could not sync to cloud store: too many concurrent write conflicts.");
+  return false;
 }
 var PRIMARY_HOUSEHOLD_ID = "3a131e95-0000-4000-8000-3a131e953a13";
 var PRIMARY_INVITE_CODE = "HB-JBZKW5";
@@ -5086,6 +5137,7 @@ var sanitizePayloadForPostgres = (payload) => {
   return payload;
 };
 var insertFamilyData = async (table, payload, token) => {
+  await syncFromCloudStore(true, true);
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const newId = payload.id && uuidRegex.test(payload.id) ? payload.id : crypto.randomUUID();
   const generated = sanitizePayloadForPostgres({ ...payload, id: newId });
@@ -5138,8 +5190,8 @@ var insertFamilyData = async (table, payload, token) => {
       sharedFallbackKnowledge.unshift(generated);
     }
   }
-  void syncToCloudStore();
-  if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY) return generated;
+  await syncToCloudStore();
+  if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY || token.startsWith("hb-sess-")) return generated;
   const url = `${SUPABASE_URL}/rest/v1/${table}`;
   let dbBody = sanitizePayloadForPostgres(toSnakeDbRecord(generated));
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -5176,6 +5228,7 @@ var insertFamilyData = async (table, payload, token) => {
   return generated;
 };
 var updateFamilyData = async (table, id, payload, token) => {
+  await syncFromCloudStore(true, true);
   const cleanPayload = sanitizePayloadForPostgres(payload);
   const normTable = normalizeTableName(table);
   const targetFamilyId = payload.family_id || payload.familyId || PRIMARY_HOUSEHOLD_ID;
@@ -5209,8 +5262,8 @@ var updateFamilyData = async (table, id, payload, token) => {
     const idx = sharedFallbackKnowledge.findIndex((k) => k.id === id);
     if (idx >= 0) sharedFallbackKnowledge[idx] = { ...sharedFallbackKnowledge[idx], ...cleanPayload };
   }
-  void syncToCloudStore();
-  if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY) return cleanPayload;
+  await syncToCloudStore();
+  if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY || token.startsWith("hb-sess-")) return cleanPayload;
   const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
   let dbBody = sanitizePayloadForPostgres(toSnakeDbRecord(cleanPayload));
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -5247,6 +5300,7 @@ var updateFamilyData = async (table, id, payload, token) => {
   return cleanPayload;
 };
 var deleteFamilyData = async (table, id, token) => {
+  await syncFromCloudStore(true, true);
   deletedItemIds.add(id);
   const normTable = normalizeTableName(table);
   for (const h of serverHouseholdStore.values()) {
@@ -5269,8 +5323,8 @@ var deleteFamilyData = async (table, id, token) => {
   else if (table === "reminders") removeInPlace(sharedFallbackReminders);
   else if (table === "medicines") removeInPlace(sharedFallbackMedicines);
   else if (table === "family_knowledge") removeInPlace(sharedFallbackKnowledge);
-  void syncToCloudStore();
-  if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY) return true;
+  await syncToCloudStore();
+  if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY || token.startsWith("hb-sess-")) return true;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
       method: "DELETE",
@@ -6080,6 +6134,7 @@ var normalizeTableName = (table) => {
   if (t === "event" || t === "events") return "events";
   if (t === "reminder" || t === "reminders") return "reminders";
   if (t === "medicine" || t === "medicines") return "medicines";
+  if (t === "family_knowledge" || t === "knowledgelist" || t === "knowledge") return "knowledgeList";
   return t;
 };
 app.post("/api/family/item", authenticateUser, async (req, res) => {
@@ -6092,7 +6147,7 @@ app.post("/api/family/item", authenticateUser, async (req, res) => {
     res.status(400).json({ error: "Table and valid item are required." });
     return;
   }
-  await syncFromCloudStore();
+  await syncFromCloudStore(true, true);
   const household = findHousehold(familyId || user.familyId);
   if (!household) {
     res.status(404).json({ error: "Household not found." });
@@ -6166,7 +6221,12 @@ app.post("/api/family/item", authenticateUser, async (req, res) => {
       targetArray.unshift(item);
     }
   }
-  await syncToCloudStore();
+  const savedItem = await syncToCloudStore();
+  if (!savedItem) {
+    res.status(503).json({ error: "Cloud storage is temporarily unavailable. The change was not saved, please try again." });
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store");
   res.json({ success: true, item });
 });
 app.delete("/api/family/item", authenticateUser, async (req, res) => {
@@ -6179,7 +6239,7 @@ app.delete("/api/family/item", authenticateUser, async (req, res) => {
     res.status(400).json({ error: "Table and item id are required." });
     return;
   }
-  await syncFromCloudStore();
+  await syncFromCloudStore(true, true);
   const household = findHousehold(familyId || user.familyId);
   if (!household) {
     res.status(404).json({ error: "Household not found." });
@@ -6209,18 +6269,24 @@ app.delete("/api/family/item", authenticateUser, async (req, res) => {
       targetArray.splice(idx, 1);
     }
   }
-  await syncToCloudStore();
+  const savedDelete = await syncToCloudStore();
+  if (!savedDelete) {
+    res.status(503).json({ error: "Cloud storage is temporarily unavailable. The item was not deleted, please try again." });
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store");
   res.json({ success: true, id });
 });
 app.post("/api/family/sync", authenticateUser, async (req, res) => {
   const user = req.user;
   const familyId = req.body?.familyId || user.familyId;
-  await syncFromCloudStore();
+  await syncFromCloudStore(true, false);
   const household = findHousehold(familyId, req.body?.inviteCode || user.inviteCode);
   const cleanMembers = dedupeServerMembers(household?.members || []);
   const userEvents = (household.events || []).filter(
     (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
   );
+  res.setHeader("Cache-Control", "no-store");
   res.json({
     success: true,
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -6236,7 +6302,8 @@ app.post("/api/family/sync", authenticateUser, async (req, res) => {
     bills: household.bills || [],
     documents: household.documents || [],
     memories: household.memories || [],
-    medicines: household.medicines || []
+    medicines: household.medicines || [],
+    knowledgeList: household.knowledgeList || []
   });
 });
 app.post("/api/ai/query", authenticateUser, async (req, res) => {

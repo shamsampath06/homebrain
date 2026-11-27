@@ -135,6 +135,11 @@ const request = async <T>(
   if (!isSupabaseConfigured || !supabaseUrl) {
     throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
+  // HomeBrain backend sessions are not Supabase JWTs: never hit Supabase with them
+  // (it only produces "Failed to fetch" / 401 noise). The backend API is the source of truth.
+  if (readStoredSession()?.access_token?.startsWith('hb-sess-')) {
+    throw new Error('(401) HomeBrain cloud session uses backend sync');
+  }
 
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...init,
@@ -894,6 +899,11 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
       let syncDocuments: DocumentItem[] = [];
       let syncMemories: FamilyMemory[] = [];
       let syncMedicines: MedicineItem[] = [];
+      let syncKnowledgeList: FamilyKnowledge[] = [];
+
+      if (!syncRes || !syncRes.ok) {
+        throw new Error(`Cloud sync temporarily unavailable (${syncRes?.status || 'network'})`);
+      }
 
       if (hubRes && hubRes.ok) {
         try {
@@ -941,7 +951,10 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
           if (Array.isArray(syncData.documents)) syncDocuments = syncData.documents;
           if (Array.isArray(syncData.memories)) syncMemories = syncData.memories;
           if (Array.isArray(syncData.medicines)) syncMedicines = syncData.medicines;
-        } catch { }
+          if (Array.isArray(syncData.knowledgeList)) syncKnowledgeList = syncData.knowledgeList;
+        } catch {
+          throw new Error('Invalid cloud sync payload');
+        }
       }
 
       return {
@@ -955,22 +968,22 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
         familyName: remoteFamilyName,
         familyId: remoteFamilyId,
         familyMembers: dedupeMembers(mergedMembers),
-        events: syncEvents,
-        reminders: syncReminders,
-        documents: syncDocuments,
-        groceries: syncGroceries,
+        events: reconcileWithPending('events', syncEvents),
+        reminders: reconcileWithPending('reminders', syncReminders),
+        documents: reconcileWithPending('documents', syncDocuments),
+        groceries: reconcileWithPending('groceries', syncGroceries),
         groceryHistory: [],
-        medicines: syncMedicines,
+        medicines: reconcileWithPending('medicines', syncMedicines),
         medicineLogs: [],
-        expenses: syncExpenses,
-        bills: syncBills,
-        knowledgeList: [],
+        expenses: reconcileWithPending('expenses', syncExpenses),
+        bills: reconcileWithPending('bills', syncBills),
+        knowledgeList: reconcileWithPending('knowledgeList', syncKnowledgeList),
         knowledgeFiles: [],
         emergencyContacts: [],
         emergencyLogs: [],
         emergencySessions: [],
         emergencyNotifications: [],
-        memories: syncMemories
+        memories: reconcileWithPending('memories', syncMemories)
       };
     }
 
@@ -1146,6 +1159,9 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
     };
   } catch (err) {
     console.warn('[loadFamilyData notice]:', err);
+    if (isHbSession) {
+      throw err;
+    }
     return { ...emptyData(), user: profile };
   }
 };
@@ -1256,6 +1272,127 @@ const isRlsOrAuthFallbackError = (error: unknown): boolean => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// Pending-mutation overlay
+// ---------------------------------------------------------------------------
+// Every add / edit / delete is recorded here the moment it starts. Background polling
+// results are reconciled against this overlay so a poll that was answered before the
+// server committed the change can never make a freshly added item "disappear" (or a
+// deleted item "come back") in front of the user. Entries are removed once the server
+// data reflects the change, or after a short grace period.
+type PendingMutation = {
+  kind: 'upsert' | 'delete';
+  table: string;
+  id: string;
+  item?: JsonRecord;
+  isInsert?: boolean;
+  startedAt: number;
+  ackedAt?: number;
+};
+const pendingMutations = new Map<string, PendingMutation>();
+const PENDING_ACK_GRACE_MS = 20000;
+const PENDING_MAX_AGE_MS = 90000;
+
+const normalizeSyncTable = (table: string): string => {
+  const t = String(table || '').toLowerCase().trim();
+  if (t === 'family_memories') return 'memories';
+  if (t === 'family_documents') return 'documents';
+  if (t === 'family_members') return 'members';
+  if (t === 'family_knowledge' || t === 'knowledgelist' || t === 'knowledge') return 'knowledgeList';
+  return t;
+};
+
+export const isHbSessionToken = (token?: string | null): boolean => Boolean(token && token.startsWith('hb-sess-'));
+
+const trackPendingMutation = (m: Omit<PendingMutation, 'startedAt'>): string => {
+  const table = normalizeSyncTable(m.table);
+  const key = `${table}:${m.id}`;
+  const previous = pendingMutations.get(key);
+  const mergedItem = m.kind === 'upsert' && previous?.kind === 'upsert' && !previous.ackedAt
+    ? { ...(previous.item || {}), ...(m.item || {}) }
+    : m.item;
+  pendingMutations.set(key, {
+    ...m,
+    table,
+    item: mergedItem,
+    isInsert: m.isInsert || (previous?.kind === 'upsert' && previous.isInsert && !previous.ackedAt),
+    startedAt: Date.now()
+  });
+  return key;
+};
+
+const sendToBackend = async (key: string, url: string, method: 'POST' | 'DELETE', body: JsonRecord, required: boolean): Promise<void> => {
+  const token = getAccessToken();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body)
+    });
+  } catch (error) {
+    pendingMutations.delete(key);
+    if (required) throw new Error('Could not reach HomeBrain cloud. Please check your connection and try again.');
+    return;
+  }
+  if (!response.ok) {
+    pendingMutations.delete(key);
+    if (required) {
+      let message = `Save failed (${response.status})`;
+      try {
+        const data = await response.json();
+        if (data?.error) message = String(data.error);
+      } catch { }
+      throw new Error(message);
+    }
+    return;
+  }
+  const entry = pendingMutations.get(key);
+  if (entry) entry.ackedAt = Date.now();
+};
+
+const isReflected = (remoteItem: JsonRecord, pendingItem: JsonRecord = {}): boolean => {
+  for (const [k, v] of Object.entries(pendingItem)) {
+    if (k === 'history' || k === 'rsvps' || k.startsWith('lastModified') || v === undefined) continue;
+    if (JSON.stringify(remoteItem[k]) !== JSON.stringify(v)) return false;
+  }
+  return true;
+};
+
+export const reconcileWithPending = <T extends { id: string }>(table: string, remote: T[]): T[] => {
+  const now = Date.now();
+  const normTable = normalizeSyncTable(table);
+  const result: T[] = [...(remote || [])];
+  for (const [key, p] of pendingMutations) {
+    if (p.table !== normTable) continue;
+    const expired = p.ackedAt ? now - p.ackedAt > PENDING_ACK_GRACE_MS : now - p.startedAt > PENDING_MAX_AGE_MS;
+    if (expired) {
+      pendingMutations.delete(key);
+      continue;
+    }
+    const idx = result.findIndex(r => r && r.id === p.id);
+    if (p.kind === 'delete') {
+      if (idx >= 0) {
+        result.splice(idx, 1);
+      } else if (p.ackedAt) {
+        pendingMutations.delete(key);
+      }
+      continue;
+    }
+    if (idx >= 0) {
+      const remoteItem = result[idx] as unknown as JsonRecord;
+      if (p.ackedAt && isReflected(remoteItem, p.item)) {
+        pendingMutations.delete(key);
+        continue;
+      }
+      result[idx] = { ...remoteItem, ...(p.item || {}) } as unknown as T;
+    } else if (p.isInsert && p.item) {
+      result.unshift(p.item as unknown as T);
+    }
+  }
+  return result;
+};
+
 export const insertRow = async <T extends object>(
   table: string,
   familyId: string,
@@ -1271,22 +1408,14 @@ export const insertRow = async <T extends object>(
   }
   const localFallbackRow = { id: (val.id as string) || ensureValidUUID(), ...val } as unknown as T;
 
-  // Immediately persist to backend API for multi-device sync
-  try {
-    const token = getAccessToken();
-    if (token) {
-      await fetch('/api/family/item', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ table, item: val, familyId: cleanFamilyId })
-      });
-    }
-  } catch { }
+  // Persist to the HomeBrain backend (single source of truth for multi-device sync)
+  const token = getAccessToken();
+  if (token) {
+    const key = trackPendingMutation({ kind: 'upsert', table, id: String(val.id), item: val, isInsert: true });
+    await sendToBackend(key, '/api/family/item', 'POST', { table, item: val, familyId: cleanFamilyId }, isHbSessionToken(token));
+  }
 
-  if (!hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
+  if (isHbSessionToken(token) || !hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
     return localFallbackRow;
   }
   try {
@@ -1309,25 +1438,16 @@ export const updateRow = async (
   if (!id) return;
   const cleanFamilyId = ensureValidUUID(familyId);
 
-  // Immediately persist to backend API for multi-device sync
-  try {
-    const token = getAccessToken();
-    if (token) {
-      await fetch('/api/family/item', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ table, item: { ...value, id }, familyId: cleanFamilyId })
-      });
-    }
-  } catch { }
+  const token = getAccessToken();
+  if (token) {
+    const key = trackPendingMutation({ kind: 'upsert', table, id, item: { ...value, id }, isInsert: false });
+    await sendToBackend(key, '/api/family/item', 'POST', { table, item: { ...value, id }, familyId: cleanFamilyId }, isHbSessionToken(token));
+  }
 
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!uuidRegex.test(id)) return;
 
-  if (!hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
+  if (isHbSessionToken(token) || !hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
     return;
   }
   try {
@@ -1348,25 +1468,22 @@ export const deleteRow = async (table: string, familyId: string, id: string): Pr
   if (!id) return;
   const cleanFamilyId = ensureValidUUID(familyId);
 
-  // Immediately persist to backend API for multi-device sync
-  try {
-    const token = getAccessToken();
-    if (token) {
-      await fetch(`/api/family/item?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}&familyId=${encodeURIComponent(cleanFamilyId)}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ table, id, familyId: cleanFamilyId })
-      });
-    }
-  } catch { }
+  const token = getAccessToken();
+  if (token) {
+    const key = trackPendingMutation({ kind: 'delete', table, id });
+    await sendToBackend(
+      key,
+      `/api/family/item?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}&familyId=${encodeURIComponent(cleanFamilyId)}`,
+      'DELETE',
+      { table, id, familyId: cleanFamilyId },
+      isHbSessionToken(token)
+    );
+  }
 
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!uuidRegex.test(id)) return;
 
-  if (!hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
+  if (isHbSessionToken(token) || !hasAuthenticatedJwt() || cleanFamilyId === '00000000-0000-4000-8000-000000000000' || familyId === 'demo-family-kumar') {
     return;
   }
   try {
