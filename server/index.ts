@@ -1652,7 +1652,7 @@ app.post('/api/family/item', authenticateUser, async (req: Request, res: Respons
   const user = req.user!;
   const body = req.body || {};
   const table = (body.table || req.query.table) as string;
-  const item = body.item;
+  const item = body.item || body.data;
   const familyId = (body.familyId || req.query.familyId) as string;
 
   if (!table || !item) {

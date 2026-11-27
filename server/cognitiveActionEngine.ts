@@ -1177,7 +1177,7 @@ export function classifyIntentAndExtractEntities(rawQuery: string): ClassifiedIn
     /\b(?:note|notes|knowledge|wi-?fi|wifi|password|passwords|router|curfew|screen\s*time|spare\s*key|house\s*key|family\s*doctor|pediatrician|emergency\s*contact|clinic\s*contact|hospital\s*contact|doctor\s*(?:sharma|phone|contact|number)|food\s*preferences?|dietary|diet\s*restriction|allergic|allergy|allergies|lactose|diabetic|blood\s*group|home\s*address|family\s*address|family\s*meeting|family\s*rules?|house\s*rules?)\b/i.test(clean) ||
     /^(?:remember\s+that|remember\s+this|save\s+a\s+note|add\s+a\s+note|save\s+this\s+information|add\s+knowledge|note\s+that|what\s+is\s+our\s+wi-?fi|where\s+is\s+the\s+spare|who\s+is\s+(?:our|the)\s+(?:family\s+)?doctor|what\s+are\s+(?:dad|father|mother|mom|sarah|sneha)'?s|who\s+is\s+allergic|when\s+is\s+the\s+family\s+meeting|what\s+is\s+our\s+emergency)\b/i.test(clean);
 
-  if (isKnowledgeOrNoteTopic && !BIRTHDAY_REGEX.test(clean)) {
+  if (isKnowledgeOrNoteTopic && !BIRTHDAY_REGEX.test(clean) && !/\b(?:suitable\s+time|find\s+a\s+time|recommend\s+a\s+time|schedule|when\s+is\s+everyone\s+free)\b/i.test(clean)) {
     module = 'notes';
 
     if (/^(?:delete|remove|forget|erase)\b/i.test(clean)) {
