@@ -397,44 +397,44 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ...(demoSnapshot ? demoSnapshot.familyMembers : [])
     ]);
     let nextEvents = mergeById<FamilyEvent>(
-      cached.events || [],
-      mergeById<FamilyEvent>(remote.events || [], demoSnapshot ? demoSnapshot.events : [])
+      remote.events || [],
+      mergeById<FamilyEvent>(cached.events || [], demoSnapshot ? demoSnapshot.events : [])
     );
     let nextReminders = mergeById<ReminderItem>(
-      cached.reminders || [],
-      mergeById<ReminderItem>(remote.reminders || [], demoSnapshot ? demoSnapshot.reminders : [])
+      remote.reminders || [],
+      mergeById<ReminderItem>(cached.reminders || [], demoSnapshot ? demoSnapshot.reminders : [])
     );
     let nextDocuments = mergeById<DocumentItem>(
-      cached.documents || [],
-      mergeById<DocumentItem>(remote.documents || [], demoSnapshot ? demoSnapshot.documents : [])
+      remote.documents || [],
+      mergeById<DocumentItem>(cached.documents || [], demoSnapshot ? demoSnapshot.documents : [])
     );
     let nextGroceries = mergeById<GroceryItem>(
-      cached.groceries || [],
-      mergeById<GroceryItem>(remote.groceries || [], demoSnapshot ? demoSnapshot.groceries : [])
+      remote.groceries || [],
+      mergeById<GroceryItem>(cached.groceries || [], demoSnapshot ? demoSnapshot.groceries : [])
     );
     let nextGroceryHistory = mergeById<GroceryHistoryItem>(
-      cached.groceryHistory || [],
-      mergeById<GroceryHistoryItem>(remote.groceryHistory || [], demoSnapshot ? demoSnapshot.groceryHistory : [])
+      remote.groceryHistory || [],
+      mergeById<GroceryHistoryItem>(cached.groceryHistory || [], demoSnapshot ? demoSnapshot.groceryHistory : [])
     );
     let nextMedicines = mergeById<MedicineItem>(
-      cached.medicines || [],
-      mergeById<MedicineItem>(remote.medicines || [], demoSnapshot ? demoSnapshot.medicines : [])
+      remote.medicines || [],
+      mergeById<MedicineItem>(cached.medicines || [], demoSnapshot ? demoSnapshot.medicines : [])
     );
     let nextMedicineLogs = mergeById<MedicineLog>(
-      cached.medicineLogs || [],
-      mergeById<MedicineLog>(remote.medicineLogs || [], demoSnapshot ? demoSnapshot.medicineLogs : [])
+      remote.medicineLogs || [],
+      mergeById<MedicineLog>(cached.medicineLogs || [], demoSnapshot ? demoSnapshot.medicineLogs : [])
     );
     let nextExpenses = mergeById<ExpenseItem>(
-      cached.expenses || [],
-      mergeById<ExpenseItem>(remote.expenses || [], demoSnapshot ? demoSnapshot.expenses : [])
+      remote.expenses || [],
+      mergeById<ExpenseItem>(cached.expenses || [], demoSnapshot ? demoSnapshot.expenses : [])
     );
     let nextBills = mergeById<BillItem>(
-      cached.bills || [],
-      mergeById<BillItem>(remote.bills || [], demoSnapshot ? demoSnapshot.bills : [])
+      remote.bills || [],
+      mergeById<BillItem>(cached.bills || [], demoSnapshot ? demoSnapshot.bills : [])
     );
     let nextKnowledgeList = mergeById<FamilyKnowledge>(
-      cached.knowledgeList || [],
-      mergeById<FamilyKnowledge>(remote.knowledgeList || [], demoSnapshot ? demoSnapshot.knowledgeList : [])
+      remote.knowledgeList || [],
+      mergeById<FamilyKnowledge>(cached.knowledgeList || [], demoSnapshot ? demoSnapshot.knowledgeList : [])
     );
     let nextKnowledgeFiles = mergeById<FamilyKnowledgeFile>(
       cached.knowledgeFiles || [],
@@ -624,36 +624,36 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     let isMounted = true;
-    const syncInterval = setInterval(async () => {
+    const runSync = async () => {
       if (typeof document !== 'undefined' && document.hidden) return;
 
       try {
         const remote = await loadFamilyData(currentUser);
         if (!isMounted || !remote) return;
 
-        if (remote.groceries && remote.groceries.length > 0) {
-          setGroceries(prev => mergeById(remote.groceries, prev));
+        if (remote.groceries) {
+          setGroceries(remote.groceries);
         }
-        if (remote.expenses && remote.expenses.length > 0) {
-          setExpenses(prev => mergeById(remote.expenses, prev));
+        if (remote.expenses) {
+          setExpenses(remote.expenses);
         }
-        if (remote.reminders && remote.reminders.length > 0) {
-          setReminders(prev => mergeById(remote.reminders, prev));
+        if (remote.reminders) {
+          setReminders(remote.reminders);
         }
-        if (remote.events && remote.events.length > 0) {
-          setEvents(prev => mergeById(remote.events, prev));
+        if (remote.events) {
+          setEvents(remote.events);
         }
-        if (remote.bills && remote.bills.length > 0) {
-          setBills(prev => mergeById(remote.bills, prev));
+        if (remote.bills) {
+          setBills(remote.bills);
         }
-        if (remote.documents && remote.documents.length > 0) {
-          setDocuments(prev => mergeById(remote.documents, prev));
+        if (remote.documents) {
+          setDocuments(remote.documents);
         }
-        if (remote.memories && remote.memories.length > 0) {
-          setMemories(prev => mergeById(remote.memories, prev));
+        if (remote.memories) {
+          setMemories(remote.memories);
         }
-        if (remote.medicines && remote.medicines.length > 0) {
-          setMedicines(prev => mergeById(remote.medicines, prev));
+        if (remote.medicines) {
+          setMedicines(remote.medicines);
         }
         if (remote.inviteCode && currentUser.inviteCode !== remote.inviteCode) {
           setCurrentUser(prev => {
@@ -668,7 +668,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
         }
         if (remote.familyMembers && remote.familyMembers.length > 0) {
-          setFamilyMembers(prev => dedupeMembers([...remote.familyMembers, ...prev]));
+          setFamilyMembers(dedupeMembers(remote.familyMembers));
         }
         if (remote.emergencySessions && remote.emergencySessions.length > 0) {
           setEmergencySessions(remote.emergencySessions);
@@ -679,11 +679,22 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } catch {
         // Silent background sync error handler
       }
-    }, 4000);
+    };
+
+    const syncInterval = setInterval(runSync, 6000);
+    const onFocusOrVisible = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        void runSync();
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
 
     return () => {
       isMounted = false;
       clearInterval(syncInterval);
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
     };
   }, [isAuthenticated, currentUser?.familyId]);
 

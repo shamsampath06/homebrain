@@ -957,28 +957,28 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
           mergedMembers = dedupeMembers([...mergedMembers, ...syncMemberList]);
         }
         if (syncData.groceries && Array.isArray(syncData.groceries)) {
-          syncGroceries = mergeById(syncData.groceries, syncGroceries);
+          syncGroceries = syncData.groceries;
         }
         if (syncData.expenses && Array.isArray(syncData.expenses)) {
-          syncExpenses = mergeById(syncData.expenses, syncExpenses);
+          syncExpenses = syncData.expenses;
         }
         if (syncData.events && Array.isArray(syncData.events)) {
-          syncEvents = mergeById(syncData.events, syncEvents);
+          syncEvents = syncData.events;
         }
         if (syncData.reminders && Array.isArray(syncData.reminders)) {
-          syncReminders = mergeById(syncData.reminders, syncReminders);
+          syncReminders = syncData.reminders;
         }
         if (syncData.bills && Array.isArray(syncData.bills)) {
-          syncBills = mergeById(syncData.bills, syncBills);
+          syncBills = syncData.bills;
         }
         if (syncData.documents && Array.isArray(syncData.documents)) {
-          syncDocuments = mergeById(syncData.documents, syncDocuments);
+          syncDocuments = syncData.documents;
         }
         if (syncData.memories && Array.isArray(syncData.memories)) {
-          syncMemories = mergeById(syncData.memories, syncMemories);
+          syncMemories = syncData.memories;
         }
         if (syncData.medicines && Array.isArray(syncData.medicines)) {
-          syncMedicines = mergeById(syncData.medicines, syncMedicines);
+          syncMedicines = syncData.medicines;
         }
       }
     } catch { }
@@ -1142,7 +1142,7 @@ export const insertRow = async <T extends object>(
   try {
     const token = getAccessToken();
     if (token) {
-      void fetch('/api/family/item', {
+      await fetch('/api/family/item', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1180,7 +1180,7 @@ export const updateRow = async (
   try {
     const token = getAccessToken();
     if (token) {
-      void fetch('/api/family/item', {
+      await fetch('/api/family/item', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1219,7 +1219,7 @@ export const deleteRow = async (table: string, familyId: string, id: string): Pr
   try {
     const token = getAccessToken();
     if (token) {
-      void fetch('/api/family/item', {
+      await fetch(`/api/family/item?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}&familyId=${encodeURIComponent(cleanFamilyId)}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
