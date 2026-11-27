@@ -1,6 +1,6 @@
 import React from 'react';
 import { useHomeBrain, MainTab } from '../../context/HomeBrainContext';
-import { LayoutDashboard, Bot, Clock, User, LayoutGrid } from 'lucide-react';
+import { LayoutDashboard, Bot, Clock, User, LayoutGrid, Calendar } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
   const { activeTab, setActiveTab, activeSubScreen, setActiveSubScreen, dashboardView, setDashboardView } = useHomeBrain();
@@ -39,6 +39,15 @@ export const MobileNav: React.FC = () => {
       icon: LayoutGrid,
       isActive: isModulesActive,
       onClick: handleModulesClick
+    },
+    {
+      id: 'calendar',
+      label: 'Calendar',
+      icon: Calendar,
+      isActive: activeSubScreen === 'calendar' || activeSubScreen === 'add-event' || activeSubScreen === 'edit-event' || activeSubScreen === 'event-details',
+      onClick: () => {
+        setActiveSubScreen('calendar');
+      }
     },
     {
       id: 'ai',

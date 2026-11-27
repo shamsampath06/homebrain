@@ -7,20 +7,20 @@ export const AIHouseholdInsights: React.FC = () => {
   const { medicines, medicineLogs, bills, expenses, groceries, documents, navigateToSubScreen } = useHomeBrain();
 
   // 1. Clinical Adherence
-  const totalMeds = medicines.length;
-  const takenMedsCount = medicineLogs.filter(l => l.status === 'Taken').length;
+  const totalMeds = (medicines || []).length;
+  const takenMedsCount = (medicineLogs || []).filter(l => l && l.status === 'Taken').length;
   const adherenceRate = totalMeds > 0 ? Math.min(100, Math.round((takenMedsCount / totalMeds) * 100)) : 100;
 
   // 2. Unpaid Bills
-  const unpaidBills = bills.filter(b => !b.isPaid);
-  const totalUnpaidAmount = unpaidBills.reduce((acc, b) => acc + b.amount, 0);
+  const unpaidBills = (bills || []).filter(b => b && !b.isPaid);
+  const totalUnpaidAmount = unpaidBills.reduce((acc, b) => acc + (Number(b?.amount) || 0), 0);
 
   // 3. Depleted Groceries
-  const pendingGroceries = groceries.filter(g => !g.isPurchased);
+  const pendingGroceries = (groceries || []).filter(g => g && !g.isPurchased);
 
   // 4. Expiring Documents
-  const expiringDocs = documents.filter(d => {
-    if (!d.expiryDate) return false;
+  const expiringDocs = (documents || []).filter(d => {
+    if (!d || !d.expiryDate) return false;
     const days = Math.ceil((new Date(d.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     return days <= 60;
   });

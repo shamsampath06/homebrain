@@ -295,8 +295,7 @@ const getInitialAuthStatus = (): boolean => {
   if (typeof window !== 'undefined') {
     try {
       const stored = localStorage.getItem('homebrain_active_user');
-      const token = localStorage.getItem('homebrain_session_token');
-      if (stored && (token || !isSupabaseConfigured)) {
+      if (stored) {
         const u = JSON.parse(stored);
         if (u && (u.email || u.id)) return true;
       }
@@ -883,35 +882,59 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       createdByRole: event.createdByRole || currentUser.role,
       createdAt: event.createdAt || nowIso
     };
-    setEvents(prev => [...prev, newEvt]);
+    setEvents(prev => {
+      const next = [newEvt, ...prev];
+      try {
+        localStorage.setItem('homebrain_events', JSON.stringify(next));
+        const rawCache = localStorage.getItem(`homebrain_family_cache_${currentUser.familyId}`);
+        if (rawCache) {
+          const parsed = JSON.parse(rawCache);
+          parsed.events = next;
+          localStorage.setItem(`homebrain_family_cache_${currentUser.familyId}`, JSON.stringify(parsed));
+        }
+      } catch {}
+      return next;
+    });
     void persist(() => insertRow('events', currentUser.familyId, newEvt).then(() => undefined));
   };
 
   const updateEvent = (id: string, updated: Partial<FamilyEvent>) => {
     const nowIso = new Date().toISOString();
-    setEvents(prev => prev.map(e => {
-      if (e.id === id) {
-        const history = updated.history || [
-          ...(e.history || []),
-          {
-            action: 'updated' as const,
-            byName: currentUser.name,
-            byRole: currentUser.role,
-            timestamp: nowIso,
-            details: `Updated event details`
-          }
-        ];
-        return {
-          ...e,
-          ...updated,
-          lastModifiedByName: currentUser.name,
-          lastModifiedByRole: currentUser.role,
-          lastModifiedAt: nowIso,
-          history
-        };
-      }
-      return e;
-    }));
+    setEvents(prev => {
+      const next = prev.map(e => {
+        if (e.id === id) {
+          const history = updated.history || [
+            ...(e.history || []),
+            {
+              action: 'updated' as const,
+              byName: currentUser.name,
+              byRole: currentUser.role,
+              timestamp: nowIso,
+              details: `Updated event details`
+            }
+          ];
+          return {
+            ...e,
+            ...updated,
+            lastModifiedByName: currentUser.name,
+            lastModifiedByRole: currentUser.role,
+            lastModifiedAt: nowIso,
+            history
+          };
+        }
+        return e;
+      });
+      try {
+        localStorage.setItem('homebrain_events', JSON.stringify(next));
+        const rawCache = localStorage.getItem(`homebrain_family_cache_${currentUser.familyId}`);
+        if (rawCache) {
+          const parsed = JSON.parse(rawCache);
+          parsed.events = next;
+          localStorage.setItem(`homebrain_family_cache_${currentUser.familyId}`, JSON.stringify(parsed));
+        }
+      } catch {}
+      return next;
+    });
     void persist(() => updateRow('events', currentUser.familyId, id, {
       ...updated,
       lastModifiedByName: currentUser.name,
@@ -934,7 +957,21 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return;
       }
     }
-    setEvents(prev => prev.filter(e => e.id !== id));
+    setEvents(prev => {
+      const next = prev.filter(e => e.id !== id);
+      try {
+        localStorage.setItem('homebrain_events', JSON.stringify(next));
+        const rawCache = localStorage.getItem(`homebrain_family_cache_${currentUser.familyId}`);
+        if (rawCache) {
+          const parsed = JSON.parse(rawCache);
+          if (parsed && Array.isArray(parsed.events)) {
+            parsed.events = parsed.events.filter((e: any) => e.id !== id);
+            localStorage.setItem(`homebrain_family_cache_${currentUser.familyId}`, JSON.stringify(parsed));
+          }
+        }
+      } catch {}
+      return next;
+    });
     void persist(() => deleteRow('events', currentUser.familyId, id));
   };
 
@@ -1699,7 +1736,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         // Synchronize React states immediately from live response across all 8 domains
         if (data.allEvents && Array.isArray(data.allEvents)) {
-          setEvents(data.allEvents.map((e: any) => ({
+          const freshEvents: FamilyEvent[] = data.allEvents.map((e: any) => ({
             id: e.id || crypto.randomUUID(),
             title: e.title || '',
             date: e.date || '',
@@ -1708,8 +1745,28 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             description: e.description || '',
             membersInvolved: e.membersInvolved || e.members_involved || [currentUser.name || 'Sarah'],
             reminder: e.reminder !== undefined ? Boolean(e.reminder) : true,
-            recurring: e.recurring || 'None'
-          })));
+            recurring: e.recurring || 'None',
+            priority: e.priority || 'Medium',
+            color: e.color,
+            isPersonal: Boolean(e.isPersonal),
+            assignedTo: e.assignedTo || e.membersInvolved || [],
+            status: e.status || 'confirmed',
+            rsvps: e.rsvps,
+            history: e.history,
+            createdByName: e.createdByName,
+            createdByRole: e.createdByRole,
+            userId: e.userId
+          }));
+          setEvents(freshEvents);
+          try {
+            localStorage.setItem('homebrain_events', JSON.stringify(freshEvents));
+            const rawCache = localStorage.getItem(`homebrain_family_cache_${currentUser.familyId}`);
+            if (rawCache) {
+              const parsed = JSON.parse(rawCache);
+              parsed.events = freshEvents;
+              localStorage.setItem(`homebrain_family_cache_${currentUser.familyId}`, JSON.stringify(parsed));
+            }
+          } catch {}
         }
 
         if (data.allExpenses && Array.isArray(data.allExpenses)) {

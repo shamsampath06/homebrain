@@ -4577,6 +4577,13 @@ async function syncFromCloudStore() {
     const storeData = await res.json();
     if (storeData && storeData.updatedAt && lastLocalWrite > 0 && storeData.updatedAt < lastLocalWrite) {
     }
+    if (storeData && Array.isArray(storeData.deletedItemIds)) {
+      for (const id of storeData.deletedItemIds) {
+        if (id && typeof id === "string") {
+          deletedItemIds.add(id);
+        }
+      }
+    }
     if (storeData && storeData.households) {
       for (const [k, v] of Object.entries(storeData.households)) {
         const incoming = v;
@@ -4629,6 +4636,7 @@ async function syncToCloudStore() {
     const payload = {
       households: householdsObj,
       users: usersObj,
+      deletedItemIds: Array.from(deletedItemIds),
       updatedAt: Date.now()
     };
     const blobResult = await put(BLOB_FILE_NAME, JSON.stringify(payload), {
@@ -4967,6 +4975,22 @@ var insertFamilyData = async (table, payload, token) => {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const newId = payload.id && uuidRegex.test(payload.id) ? payload.id : crypto.randomUUID();
   const generated = sanitizePayloadForPostgres({ ...payload, id: newId });
+  deletedItemIds.delete(generated.id);
+  const normTable = normalizeTableName(table);
+  const targetFamilyId = payload.family_id || payload.familyId || PRIMARY_HOUSEHOLD_ID;
+  const household = findHousehold(targetFamilyId);
+  if (household) {
+    if (!household[normTable]) {
+      household[normTable] = [];
+    }
+    const arr = household[normTable];
+    const idx = arr.findIndex((x) => x.id === generated.id);
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], ...generated };
+    } else {
+      arr.unshift(generated);
+    }
+  }
   if (table === "events") {
     if (!sharedFallbackEvents.some((e) => e.id === generated.id || e.title === generated.title && e.date === generated.date)) {
       sharedFallbackEvents.unshift(generated);
@@ -5000,6 +5024,7 @@ var insertFamilyData = async (table, payload, token) => {
       sharedFallbackKnowledge.unshift(generated);
     }
   }
+  void syncToCloudStore();
   if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY) return generated;
   const url = `${SUPABASE_URL}/rest/v1/${table}`;
   let dbBody = sanitizePayloadForPostgres(toSnakeDbRecord(generated));
@@ -5038,6 +5063,16 @@ var insertFamilyData = async (table, payload, token) => {
 };
 var updateFamilyData = async (table, id, payload, token) => {
   const cleanPayload = sanitizePayloadForPostgres(payload);
+  const normTable = normalizeTableName(table);
+  const targetFamilyId = payload.family_id || payload.familyId || PRIMARY_HOUSEHOLD_ID;
+  const household = findHousehold(targetFamilyId);
+  if (household && household[normTable]) {
+    const arr = household[normTable];
+    const idx = arr.findIndex((x) => x.id === id);
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], ...cleanPayload };
+    }
+  }
   if (table === "events") {
     const idx = sharedFallbackEvents.findIndex((e) => e.id === id);
     if (idx >= 0) sharedFallbackEvents[idx] = { ...sharedFallbackEvents[idx], ...cleanPayload };
@@ -5060,6 +5095,7 @@ var updateFamilyData = async (table, id, payload, token) => {
     const idx = sharedFallbackKnowledge.findIndex((k) => k.id === id);
     if (idx >= 0) sharedFallbackKnowledge[idx] = { ...sharedFallbackKnowledge[idx], ...cleanPayload };
   }
+  void syncToCloudStore();
   if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY) return cleanPayload;
   const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
   let dbBody = sanitizePayloadForPostgres(toSnakeDbRecord(cleanPayload));
@@ -5097,6 +5133,17 @@ var updateFamilyData = async (table, id, payload, token) => {
   return cleanPayload;
 };
 var deleteFamilyData = async (table, id, token) => {
+  deletedItemIds.add(id);
+  const normTable = normalizeTableName(table);
+  for (const h of serverHouseholdStore.values()) {
+    if (h[normTable]) {
+      const arr = h[normTable];
+      const idx = arr.findIndex((x) => x.id === id);
+      if (idx >= 0) {
+        arr.splice(idx, 1);
+      }
+    }
+  }
   const removeInPlace = (arr) => {
     const idx = arr.findIndex((item) => item.id === id);
     if (idx >= 0) arr.splice(idx, 1);
@@ -5108,6 +5155,7 @@ var deleteFamilyData = async (table, id, token) => {
   else if (table === "reminders") removeInPlace(sharedFallbackReminders);
   else if (table === "medicines") removeInPlace(sharedFallbackMedicines);
   else if (table === "family_knowledge") removeInPlace(sharedFallbackKnowledge);
+  void syncToCloudStore();
   if (!SUPABASE_URL || token === "demo-token" || token === SUPABASE_ANON_KEY) return true;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
@@ -6400,6 +6448,11 @@ ${familyContext}`;
         }
       );
       if (pendingResult.handled) {
+        await syncToCloudStore();
+        const updatedHousehold = findHousehold(user.familyId, user.inviteCode);
+        const liveHouseholdEvents = (updatedHousehold?.events || []).filter(
+          (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+        );
         const allActions = [...actionsExecuted, ...pendingResult.actionsExecuted];
         res.json({
           reply: pendingResult.reply,
@@ -6409,15 +6462,15 @@ ${familyContext}`;
           actions: allActions,
           actionsExecuted: allActions,
           processingTimeMs: Date.now() - startTime,
-          allEvents: effectiveEvents,
-          allExpenses: effectiveExpenses,
-          allGroceries: effectiveGroceries,
-          allBills: effectiveBills,
-          allReminders: effectiveReminders,
-          allMedicines: effectiveMedicines,
+          allEvents: liveHouseholdEvents.length > 0 ? liveHouseholdEvents : effectiveEvents,
+          allExpenses: updatedHousehold?.expenses || effectiveExpenses,
+          allGroceries: updatedHousehold?.groceries || effectiveGroceries,
+          allBills: updatedHousehold?.bills || effectiveBills,
+          allReminders: updatedHousehold?.reminders || effectiveReminders,
+          allMedicines: updatedHousehold?.medicines || effectiveMedicines,
           allMedicineLogs: effectiveMedicineLogs,
           allKnowledge: effectiveKnowledge,
-          allDocuments: effectiveDocuments
+          allDocuments: updatedHousehold?.documents || effectiveDocuments
         });
         return;
       }
@@ -6452,6 +6505,11 @@ ${familyContext}`;
         }
       );
       if (cognitiveResult.handled) {
+        await syncToCloudStore();
+        const updatedHousehold = findHousehold(user.familyId, user.inviteCode);
+        const liveHouseholdEvents = (updatedHousehold?.events || []).filter(
+          (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+        );
         const allActions = [...actionsExecuted, ...cognitiveResult.actionsExecuted];
         res.json({
           reply: cognitiveResult.reply,
@@ -6461,15 +6519,15 @@ ${familyContext}`;
           actions: allActions,
           actionsExecuted: allActions,
           processingTimeMs: Date.now() - startTime,
-          allEvents: effectiveEvents,
-          allExpenses: effectiveExpenses,
-          allGroceries: effectiveGroceries,
-          allBills: effectiveBills,
-          allReminders: effectiveReminders,
-          allMedicines: effectiveMedicines,
+          allEvents: liveHouseholdEvents.length > 0 ? liveHouseholdEvents : effectiveEvents,
+          allExpenses: updatedHousehold?.expenses || effectiveExpenses,
+          allGroceries: updatedHousehold?.groceries || effectiveGroceries,
+          allBills: updatedHousehold?.bills || effectiveBills,
+          allReminders: updatedHousehold?.reminders || effectiveReminders,
+          allMedicines: updatedHousehold?.medicines || effectiveMedicines,
           allMedicineLogs: effectiveMedicineLogs,
           allKnowledge: effectiveKnowledge,
-          allDocuments: effectiveDocuments
+          allDocuments: updatedHousehold?.documents || effectiveDocuments
         });
         return;
       }

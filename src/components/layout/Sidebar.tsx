@@ -1,6 +1,6 @@
 import React from 'react';
 import { useHomeBrain } from '../../context/HomeBrainContext';
-import { LayoutDashboard, Bot, Clock, User, ShieldAlert, ChevronRight, LogIn, LayoutGrid, Users } from 'lucide-react';
+import { LayoutDashboard, Bot, Clock, User, ShieldAlert, ChevronRight, LogIn, LayoutGrid, Users, Calendar } from 'lucide-react';
 import { InitialAvatar } from '../common/InitialAvatar';
 
 export const Sidebar: React.FC = () => {
@@ -47,6 +47,16 @@ export const Sidebar: React.FC = () => {
         setDashboardView('modules');
       },
       isActive: activeTab === 'dashboard' && activeSubScreen === 'none' && dashboardView === 'modules'
+    },
+    {
+      key: 'calendar',
+      label: 'Family Calendar',
+      icon: Calendar,
+      description: 'Schedules, RSVPs & AI',
+      onClick: () => {
+        setActiveSubScreen('calendar');
+      },
+      isActive: activeSubScreen === 'calendar' || activeSubScreen === 'add-event' || activeSubScreen === 'edit-event' || activeSubScreen === 'event-details'
     },
     {
       key: 'ai',

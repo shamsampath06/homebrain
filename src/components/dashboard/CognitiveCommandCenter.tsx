@@ -164,8 +164,8 @@ Standard Single-Doc RAG        & 78.4\\% & 14.1\\% & 0.741 & Unenforced \\\\
 
   // 4. Critical Allergies & Medical Warnings
   const criticalAllergies = useMemo(() => {
-    return knowledgeList.filter(
-      k => k.category === 'Allergies' || k.category === 'Emergency' || k.importance === 'Critical' || k.title.toLowerCase().includes('allerg')
+    return (knowledgeList || []).filter(
+      k => k && (k.category === 'Allergies' || k.category === 'Emergency' || k.importance === 'Critical' || (k.title && k.title.toLowerCase().includes('allerg')))
     );
   }, [knowledgeList]);
 

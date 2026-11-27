@@ -135,6 +135,14 @@ export async function syncFromCloudStore(): Promise<void> {
       // The fetched cloud blob is older than our local in-memory modifications; only merge new items without overwriting
     }
 
+    if (storeData && Array.isArray(storeData.deletedItemIds)) {
+      for (const id of storeData.deletedItemIds) {
+        if (id && typeof id === 'string') {
+          deletedItemIds.add(id);
+        }
+      }
+    }
+
     if (storeData && storeData.households) {
       for (const [k, v] of Object.entries(storeData.households)) {
         const incoming = v as HouseholdStoreItem;
@@ -197,6 +205,7 @@ export async function syncToCloudStore(): Promise<void> {
     const payload = {
       households: householdsObj,
       users: usersObj,
+      deletedItemIds: Array.from(deletedItemIds),
       updatedAt: Date.now()
     };
 
@@ -617,6 +626,23 @@ const insertFamilyData = async (table: string, payload: any, token: string): Pro
   const newId = (payload.id && uuidRegex.test(payload.id)) ? payload.id : crypto.randomUUID();
   const generated = sanitizePayloadForPostgres({ ...payload, id: newId });
 
+  deletedItemIds.delete(generated.id);
+  const normTable = normalizeTableName(table);
+  const targetFamilyId = payload.family_id || payload.familyId || PRIMARY_HOUSEHOLD_ID;
+  const household = findHousehold(targetFamilyId);
+  if (household) {
+    if (!(household as any)[normTable]) {
+      (household as any)[normTable] = [];
+    }
+    const arr = (household as any)[normTable] as any[];
+    const idx = arr.findIndex((x: any) => x.id === generated.id);
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], ...generated };
+    } else {
+      arr.unshift(generated);
+    }
+  }
+
   if (table === 'events') {
     if (!sharedFallbackEvents.some((e: any) => e.id === generated.id || (e.title === generated.title && e.date === generated.date))) {
       sharedFallbackEvents.unshift(generated);
@@ -650,6 +676,8 @@ const insertFamilyData = async (table: string, payload: any, token: string): Pro
       sharedFallbackKnowledge.unshift(generated);
     }
   }
+
+  void syncToCloudStore();
 
   if (!SUPABASE_URL || token === 'demo-token' || token === SUPABASE_ANON_KEY) return generated;
   const url = `${SUPABASE_URL}/rest/v1/${table}`;
@@ -691,6 +719,17 @@ const insertFamilyData = async (table: string, payload: any, token: string): Pro
 // Helper: Update row in Supabase REST
 const updateFamilyData = async (table: string, id: string, payload: any, token: string): Promise<any> => {
   const cleanPayload = sanitizePayloadForPostgres(payload);
+  const normTable = normalizeTableName(table);
+  const targetFamilyId = payload.family_id || payload.familyId || PRIMARY_HOUSEHOLD_ID;
+  const household = findHousehold(targetFamilyId);
+  if (household && (household as any)[normTable]) {
+    const arr = (household as any)[normTable] as any[];
+    const idx = arr.findIndex((x: any) => x.id === id);
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], ...cleanPayload };
+    }
+  }
+
   if (table === 'events') {
     const idx = sharedFallbackEvents.findIndex((e: any) => e.id === id);
     if (idx >= 0) sharedFallbackEvents[idx] = { ...sharedFallbackEvents[idx], ...cleanPayload };
@@ -713,6 +752,8 @@ const updateFamilyData = async (table: string, id: string, payload: any, token: 
     const idx = sharedFallbackKnowledge.findIndex((k: any) => k.id === id);
     if (idx >= 0) sharedFallbackKnowledge[idx] = { ...sharedFallbackKnowledge[idx], ...cleanPayload };
   }
+
+  void syncToCloudStore();
 
   if (!SUPABASE_URL || token === 'demo-token' || token === SUPABASE_ANON_KEY) return cleanPayload;
   const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
@@ -753,6 +794,18 @@ const updateFamilyData = async (table: string, id: string, payload: any, token: 
 
 // Helper: Delete row from Supabase REST
 const deleteFamilyData = async (table: string, id: string, token: string): Promise<boolean> => {
+  deletedItemIds.add(id);
+  const normTable = normalizeTableName(table);
+  for (const h of serverHouseholdStore.values()) {
+    if ((h as any)[normTable]) {
+      const arr = (h as any)[normTable] as any[];
+      const idx = arr.findIndex((x: any) => x.id === id);
+      if (idx >= 0) {
+        arr.splice(idx, 1);
+      }
+    }
+  }
+
   const removeInPlace = (arr: any[]) => {
     const idx = arr.findIndex((item: any) => item.id === id);
     if (idx >= 0) arr.splice(idx, 1);
@@ -764,6 +817,8 @@ const deleteFamilyData = async (table: string, id: string, token: string): Promi
   else if (table === 'reminders') removeInPlace(sharedFallbackReminders);
   else if (table === 'medicines') removeInPlace(sharedFallbackMedicines);
   else if (table === 'family_knowledge') removeInPlace(sharedFallbackKnowledge);
+
+  void syncToCloudStore();
 
   if (!SUPABASE_URL || token === 'demo-token' || token === SUPABASE_ANON_KEY) return true;
   try {
@@ -2198,6 +2253,11 @@ ${familyContext}`;
       );
 
       if (pendingResult.handled) {
+        await syncToCloudStore();
+        const updatedHousehold = findHousehold(user.familyId, user.inviteCode);
+        const liveHouseholdEvents = ((updatedHousehold as any)?.events || []).filter((e: any) =>
+          !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+        );
         const allActions = [...actionsExecuted, ...pendingResult.actionsExecuted];
         res.json({
           reply: pendingResult.reply,
@@ -2207,15 +2267,15 @@ ${familyContext}`;
           actions: allActions,
           actionsExecuted: allActions,
           processingTimeMs: Date.now() - startTime,
-          allEvents: effectiveEvents,
-          allExpenses: effectiveExpenses,
-          allGroceries: effectiveGroceries,
-          allBills: effectiveBills,
-          allReminders: effectiveReminders,
-          allMedicines: effectiveMedicines,
+          allEvents: liveHouseholdEvents.length > 0 ? liveHouseholdEvents : effectiveEvents,
+          allExpenses: updatedHousehold?.expenses || effectiveExpenses,
+          allGroceries: updatedHousehold?.groceries || effectiveGroceries,
+          allBills: updatedHousehold?.bills || effectiveBills,
+          allReminders: updatedHousehold?.reminders || effectiveReminders,
+          allMedicines: updatedHousehold?.medicines || effectiveMedicines,
           allMedicineLogs: effectiveMedicineLogs,
           allKnowledge: effectiveKnowledge,
-          allDocuments: effectiveDocuments
+          allDocuments: updatedHousehold?.documents || effectiveDocuments
         });
         return;
       }
@@ -2255,6 +2315,11 @@ ${familyContext}`;
       );
 
       if (cognitiveResult.handled) {
+        await syncToCloudStore();
+        const updatedHousehold = findHousehold(user.familyId, user.inviteCode);
+        const liveHouseholdEvents = ((updatedHousehold as any)?.events || []).filter((e: any) =>
+          !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+        );
         const allActions = [...actionsExecuted, ...cognitiveResult.actionsExecuted];
         res.json({
           reply: cognitiveResult.reply,
@@ -2264,15 +2329,15 @@ ${familyContext}`;
           actions: allActions,
           actionsExecuted: allActions,
           processingTimeMs: Date.now() - startTime,
-          allEvents: effectiveEvents,
-          allExpenses: effectiveExpenses,
-          allGroceries: effectiveGroceries,
-          allBills: effectiveBills,
-          allReminders: effectiveReminders,
-          allMedicines: effectiveMedicines,
+          allEvents: liveHouseholdEvents.length > 0 ? liveHouseholdEvents : effectiveEvents,
+          allExpenses: updatedHousehold?.expenses || effectiveExpenses,
+          allGroceries: updatedHousehold?.groceries || effectiveGroceries,
+          allBills: updatedHousehold?.bills || effectiveBills,
+          allReminders: updatedHousehold?.reminders || effectiveReminders,
+          allMedicines: updatedHousehold?.medicines || effectiveMedicines,
           allMedicineLogs: effectiveMedicineLogs,
           allKnowledge: effectiveKnowledge,
-          allDocuments: effectiveDocuments
+          allDocuments: updatedHousehold?.documents || effectiveDocuments
         });
         return;
       }
