@@ -4231,60 +4231,46 @@ function cloudHttp(method, bodyData) {
 async function syncFromCloudStore() {
   try {
     const json = await cloudHttp("GET");
-    if (json?.data?.payload) {
-      const parsed = typeof json.data.payload === "string" ? JSON.parse(json.data.payload) : json.data.payload;
-      if (parsed.households) {
-        for (const [k, v] of Object.entries(parsed.households)) {
-          const incoming = v;
-          const existing = serverHouseholdStore.get(k);
-          if (!existing) {
-            serverHouseholdStore.set(k, {
-              ...incoming,
-              events: incoming.events || [],
-              groceries: incoming.groceries || [],
-              expenses: incoming.expenses || [],
-              bills: incoming.bills || [],
-              reminders: incoming.reminders || [],
-              documents: incoming.documents || [],
-              memories: incoming.memories || [],
-              medicines: incoming.medicines || []
-            });
+    const storeData = json?.data?.households ? json.data : json?.data?.payload ? typeof json.data.payload === "string" ? JSON.parse(json.data.payload) : json.data.payload : null;
+    if (storeData && storeData.households) {
+      for (const [k, v] of Object.entries(storeData.households)) {
+        const incoming = v;
+        const targetKey = k === "demo-family-kumar" || k === "00000000-0000-4000-8000-000000000001" ? PRIMARY_HOUSEHOLD_ID : k;
+        const existing = serverHouseholdStore.get(targetKey) || primaryHousehold;
+        const merged = [...existing.members];
+        for (const inc of incoming.members || []) {
+          const idx = merged.findIndex(
+            (m) => m.email && inc.email && m.email.toLowerCase() === inc.email.toLowerCase() || m.userId && inc.userId && m.userId === inc.userId || m.id && inc.id && m.id === inc.id
+          );
+          if (idx >= 0) {
+            merged[idx] = { ...merged[idx], ...inc };
           } else {
-            const merged = [...existing.members];
-            for (const inc of incoming.members || []) {
-              const idx = merged.findIndex(
-                (m) => m.email && inc.email && m.email.toLowerCase() === inc.email.toLowerCase() || m.userId && inc.userId && m.userId === inc.userId || m.id && inc.id && m.id === inc.id
-              );
-              if (idx >= 0) {
-                merged[idx] = { ...merged[idx], ...inc };
-              } else {
-                merged.push(inc);
-              }
-            }
-            existing.members = merged;
-            existing.name = incoming.name || existing.name;
-            existing.inviteCode = incoming.inviteCode || existing.inviteCode;
-            existing.events = mergeItemsById(existing.events, incoming.events);
-            existing.groceries = mergeItemsById(existing.groceries, incoming.groceries);
-            existing.expenses = mergeItemsById(existing.expenses, incoming.expenses);
-            existing.bills = mergeItemsById(existing.bills, incoming.bills);
-            existing.reminders = mergeItemsById(existing.reminders, incoming.reminders);
-            existing.documents = mergeItemsById(existing.documents, incoming.documents);
-            existing.memories = mergeItemsById(existing.memories, incoming.memories);
-            existing.medicines = mergeItemsById(existing.medicines, incoming.medicines);
-            if (k === PRIMARY_HOUSEHOLD_ID || k === "demo-family-kumar") {
-              serverHouseholdStore.set(PRIMARY_HOUSEHOLD_ID, existing);
-              serverHouseholdStore.set("demo-family-kumar", existing);
-            }
+            merged.push(inc);
           }
         }
+        existing.members = dedupeServerMembers(merged);
+        if (targetKey !== PRIMARY_HOUSEHOLD_ID && incoming.name) {
+          existing.name = incoming.name;
+        }
+        if (targetKey !== PRIMARY_HOUSEHOLD_ID && incoming.inviteCode) {
+          existing.inviteCode = incoming.inviteCode;
+        }
+        existing.events = mergeItemsById(existing.events, incoming.events);
+        existing.groceries = mergeItemsById(existing.groceries, incoming.groceries);
+        existing.expenses = mergeItemsById(existing.expenses, incoming.expenses);
+        existing.bills = mergeItemsById(existing.bills, incoming.bills);
+        existing.reminders = mergeItemsById(existing.reminders, incoming.reminders);
+        existing.documents = mergeItemsById(existing.documents, incoming.documents);
+        existing.memories = mergeItemsById(existing.memories, incoming.memories);
+        existing.medicines = mergeItemsById(existing.medicines, incoming.medicines);
+        serverHouseholdStore.set(targetKey, existing);
       }
-      if (parsed.users) {
-        for (const [k, v] of Object.entries(parsed.users)) {
-          const key = k.toLowerCase();
-          if (!serverRegisteredUsers.has(key)) {
-            serverRegisteredUsers.set(key, v);
-          }
+    }
+    if (storeData && storeData.users) {
+      for (const [k, v] of Object.entries(storeData.users)) {
+        const key = k.toLowerCase();
+        if (!serverRegisteredUsers.has(key)) {
+          serverRegisteredUsers.set(key, v);
         }
       }
     }
@@ -4298,15 +4284,17 @@ async function syncToCloudStore() {
     let remoteUsers = {};
     try {
       const json = await cloudHttp("GET");
-      if (json?.data?.payload) {
-        const parsed = typeof json.data.payload === "string" ? JSON.parse(json.data.payload) : json.data.payload;
-        remoteHouseholds = parsed.households || {};
-        remoteUsers = parsed.users || {};
+      const storeData = json?.data?.households ? json.data : json?.data?.payload ? typeof json.data.payload === "string" ? JSON.parse(json.data.payload) : json.data.payload : null;
+      if (storeData) {
+        remoteHouseholds = storeData.households || {};
+        remoteUsers = storeData.users || {};
       }
     } catch {
     }
     const householdsObj = { ...remoteHouseholds };
+    delete householdsObj["demo-family-kumar"];
     for (const [k, localH] of serverHouseholdStore.entries()) {
+      if (k === "demo-family-kumar") continue;
       const remH = householdsObj[k];
       if (!remH) {
         householdsObj[k] = localH;
@@ -4314,6 +4302,9 @@ async function syncToCloudStore() {
         householdsObj[k] = {
           ...remH,
           ...localH,
+          id: k,
+          inviteCode: k === PRIMARY_HOUSEHOLD_ID ? PRIMARY_INVITE_CODE : localH.inviteCode || remH.inviteCode,
+          name: k === PRIMARY_HOUSEHOLD_ID ? "Family Household" : localH.name || remH.name,
           members: dedupeServerMembers([...localH.members || [], ...remH.members || []]),
           events: mergeItemsById(remH.events, localH.events),
           groceries: mergeItemsById(remH.groceries, localH.groceries),
@@ -4330,12 +4321,14 @@ async function syncToCloudStore() {
     for (const [k, v] of serverRegisteredUsers.entries()) {
       usersObj[k] = v;
     }
-    const payload = JSON.stringify({
-      households: householdsObj,
-      users: usersObj,
-      updatedAt: Date.now()
+    await cloudHttp("PUT", {
+      name: "homebrain-kumar-store",
+      data: {
+        households: householdsObj,
+        users: usersObj,
+        updatedAt: Date.now()
+      }
     });
-    await cloudHttp("PUT", { name: "homebrain-kumar-store", data: { payload } });
   } catch (err) {
     console.warn("Could not sync to cloud store:", err);
   }
