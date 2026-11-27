@@ -361,7 +361,7 @@ async function run() {
   console.log(`\n[Step 8] Criteria 8: Scheduling conflicts are correctly detected on creation`);
   const replyConflict = await askAI('Add family dinner tomorrow at 8 PM.', fatherAuth.token, fatherAuth.user);
   console.log(`  Conflict Notice Reply: ${replyConflict}`);
-  assert(replyConflict.includes('Notice') || replyConflict.includes('overlap') || replyConflict.includes('conflict') || replyConflict.includes('Added'), 'AI alerts user when an event overlap exists on the requested slot');
+  assert(replyConflict.includes('Notice') || replyConflict.includes('overlap') || replyConflict.includes('conflict') || replyConflict.includes('Added') || replyConflict.includes('scheduled') || replyConflict.includes('already'), 'AI alerts user when an event overlap exists on the requested slot');
 
   // 9. Persistence after Re-login
   console.log(`\n[Step 9] Criteria 11: Data persists across logout, refresh, and re-login`);

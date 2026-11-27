@@ -5760,6 +5760,18 @@ app.post("/api/auth/google", async (req, res) => {
         household = findHousehold(PRIMARY_HOUSEHOLD_ID, PRIMARY_INVITE_CODE);
       } else if (cleanCode) {
         household = findHousehold(void 0, cleanCode);
+      } else if (mode === "create" || !cleanCode) {
+        const targetFamilyId = "fam-" + crypto.randomUUID().slice(0, 8);
+        const targetFamilyName = `${cleanName}'s Household`;
+        const finalInviteCode = "HB-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+        household = {
+          id: targetFamilyId,
+          name: targetFamilyName,
+          inviteCode: finalInviteCode,
+          createdBy: cleanEmail,
+          members: []
+        };
+        serverHouseholdStore.set(targetFamilyId, household);
       } else {
         household = findHousehold(PRIMARY_HOUSEHOLD_ID, PRIMARY_INVITE_CODE);
       }
