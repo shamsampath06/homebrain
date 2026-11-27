@@ -4236,6 +4236,10 @@ async function syncFromCloudStore() {
               existing.documents = mergeItemsById(existing.documents, incoming.documents);
               existing.memories = mergeItemsById(existing.memories, incoming.memories);
               existing.medicines = mergeItemsById(existing.medicines, incoming.medicines);
+              if (k === PRIMARY_HOUSEHOLD_ID || k === "demo-family-kumar") {
+                serverHouseholdStore.set(PRIMARY_HOUSEHOLD_ID, existing);
+                serverHouseholdStore.set("demo-family-kumar", existing);
+              }
             }
           }
         }
@@ -4255,11 +4259,42 @@ async function syncFromCloudStore() {
 }
 async function syncToCloudStore() {
   try {
-    const householdsObj = {};
-    for (const [k, v] of serverHouseholdStore.entries()) {
-      householdsObj[k] = v;
+    let remoteHouseholds = {};
+    let remoteUsers = {};
+    try {
+      const res = await fetch(CLOUD_STORE_URL);
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data?.payload) {
+          const parsed = JSON.parse(json.data.payload);
+          remoteHouseholds = parsed.households || {};
+          remoteUsers = parsed.users || {};
+        }
+      }
+    } catch {
     }
-    const usersObj = {};
+    const householdsObj = { ...remoteHouseholds };
+    for (const [k, localH] of serverHouseholdStore.entries()) {
+      const remH = householdsObj[k];
+      if (!remH) {
+        householdsObj[k] = localH;
+      } else {
+        householdsObj[k] = {
+          ...remH,
+          ...localH,
+          members: dedupeServerMembers([...localH.members || [], ...remH.members || []]),
+          events: mergeItemsById(remH.events, localH.events),
+          groceries: mergeItemsById(remH.groceries, localH.groceries),
+          expenses: mergeItemsById(remH.expenses, localH.expenses),
+          bills: mergeItemsById(remH.bills, localH.bills),
+          reminders: mergeItemsById(remH.reminders, localH.reminders),
+          documents: mergeItemsById(remH.documents, localH.documents),
+          memories: mergeItemsById(remH.memories, localH.memories),
+          medicines: mergeItemsById(remH.medicines, localH.medicines)
+        };
+      }
+    }
+    const usersObj = { ...remoteUsers };
     for (const [k, v] of serverRegisteredUsers.entries()) {
       usersObj[k] = v;
     }
@@ -4268,10 +4303,14 @@ async function syncToCloudStore() {
       users: usersObj,
       updatedAt: Date.now()
     });
+    const body = JSON.stringify({ name: "homebrain-kumar-store", data: { payload } });
     await fetch(CLOUD_STORE_URL, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "homebrain-kumar-store", data: { payload } })
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(Buffer.byteLength(body))
+      },
+      body
     });
   } catch (err) {
     console.warn("Could not sync to cloud store:", err);
