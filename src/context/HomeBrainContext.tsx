@@ -513,15 +513,15 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       nextReminders = nextReminders.filter(r => !isDemoItem(r));
       nextDocuments = nextDocuments.filter(d => !isDemoItem(d));
       nextGroceries = nextGroceries.filter(g => !isDemoItem(g));
-      nextGroceryHistory = nextGroceryHistory.filter(h => !h.id.startsWith('00000000-0000-4000-8000-000000000'));
+      nextGroceryHistory = nextGroceryHistory.filter(h => h && !String(h.id || '').startsWith('00000000-0000-4000-8000-000000000'));
       nextMedicines = nextMedicines.filter(m => !isDemoItem(m));
-      nextMedicineLogs = nextMedicineLogs.filter(l => !l.id.startsWith('00000000-0000-4000-8000-000000000') && !l.medicineName?.includes('[DEMO]'));
+      nextMedicineLogs = nextMedicineLogs.filter(l => l && !String(l.id || '').startsWith('00000000-0000-4000-8000-000000000') && !String(l.medicineName || '').includes('[DEMO]'));
       nextExpenses = nextExpenses.filter(ex => !isDemoItem(ex));
       nextBills = nextBills.filter(b => !isDemoItem(b));
       nextKnowledgeList = nextKnowledgeList.filter(k => !isDemoItem(k));
       nextContacts = nextContacts.filter(c => !isDemoItem(c));
-      nextEmergencyLogs = nextEmergencyLogs.filter(l => !l.id.startsWith('00000000-0000-4000-8000-000000000'));
-      nextMemories = nextMemories.filter(m => !isDemoItem(m) && !m.id.startsWith('mem-place-'));
+      nextEmergencyLogs = nextEmergencyLogs.filter(l => l && !String(l.id || '').startsWith('00000000-0000-4000-8000-000000000'));
+      nextMemories = nextMemories.filter(m => m && !isDemoItem(m) && !String(m.id || '').startsWith('mem-place-'));
 
     }
 

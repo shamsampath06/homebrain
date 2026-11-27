@@ -44,7 +44,7 @@ export const DocumentVaultCard: React.FC = () => {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
-                      {doc.title.replace(/^\[demo\]\s*/i, '')}
+                      {String(doc.title || 'Untitled Document').replace(/^\[demo\]\s*/i, '')}
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                       {doc.category} • {doc.uploadDate || 'Recent'}

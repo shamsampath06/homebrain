@@ -33,12 +33,13 @@ export const HouseholdActivityFeed: React.FC = () => {
   }> = [];
 
   // Recent medicine doses
-  medicineLogs.slice(0, 3).forEach(log => {
+  (medicineLogs || []).slice(0, 3).forEach(log => {
+    if (!log) return;
     activities.push({
       id: `medlog-${log.id}`,
       type: 'medicine',
-      title: `${log.personName} logged ${log.medicineName}`,
-      subtitle: `Status: ${log.status || 'Taken'} • Logged by ${log.loggedBy || log.personName}`,
+      title: `${log.personName || 'Family'} logged ${log.medicineName || 'medicine'}`,
+      subtitle: `Status: ${log.status || 'Taken'} • Logged by ${log.loggedBy || log.personName || 'Family'}`,
       time: formatActivityTime(log.timestamp),
       icon: Pill,
       colorBadge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30',
@@ -47,12 +48,12 @@ export const HouseholdActivityFeed: React.FC = () => {
   });
 
   // User-added medicines
-  medicines.filter(m => !m.name.startsWith('[DEMO]')).slice(0, 2).forEach(med => {
+  (medicines || []).filter(m => m?.name && !String(m.name).startsWith('[DEMO]')).slice(0, 2).forEach(med => {
     activities.push({
       id: `med-${med.id}`,
       type: 'medicine',
-      title: `Scheduled ${med.name} (${med.dosage})`,
-      subtitle: `For ${med.personName} at ${med.timing} • ${med.frequency}`,
+      title: `Scheduled ${med.name} (${med.dosage || 'Regular'})`,
+      subtitle: `For ${med.personName || 'Family'} at ${med.timing || 'Scheduled'} • ${med.frequency || 'Daily'}`,
       time: 'Just now',
       icon: Pill,
       colorBadge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30',
@@ -61,11 +62,11 @@ export const HouseholdActivityFeed: React.FC = () => {
   });
 
   // User-added groceries
-  groceries.filter(g => !g.name.startsWith('[DEMO]')).slice(0, 3).forEach(g => {
+  (groceries || []).filter(g => g?.name && !String(g.name).startsWith('[DEMO]')).slice(0, 3).forEach(g => {
     activities.push({
       id: `groc-item-${g.id}`,
       type: 'grocery',
-      title: g.isPurchased ? `Purchased ${g.name}` : `Added ${g.name} (${g.quantity}) to Grocery List`,
+      title: g.isPurchased ? `Purchased ${g.name}` : `Added ${g.name} (${g.quantity || '1 unit'}) to Grocery List`,
       subtitle: `${g.category || 'Pantry'} • ${g.isPurchased ? `Bought by ${g.purchasedBy || 'Family'}` : 'Pending purchase'}`,
       time: g.purchasedAt ? formatActivityTime(g.purchasedAt) : 'Recent',
       icon: ShoppingCart,
@@ -75,12 +76,12 @@ export const HouseholdActivityFeed: React.FC = () => {
   });
 
   // User-added expenses
-  expenses.filter(x => !x.title.startsWith('[DEMO]')).slice(0, 2).forEach(x => {
+  (expenses || []).filter(x => x?.title && !String(x.title).startsWith('[DEMO]')).slice(0, 2).forEach(x => {
     activities.push({
       id: `exp-${x.id}`,
       type: 'document',
-      title: `Logged ₹${x.amount.toLocaleString('en-IN')} for ${x.title}`,
-      subtitle: `${x.category} • Paid by ${x.payer}`,
+      title: `Logged ₹${(Number(x.amount) || 0).toLocaleString('en-IN')} for ${x.title}`,
+      subtitle: `${x.category || 'Expense'} • Paid by ${x.payer || 'Family'}`,
       time: formatActivityTime(x.date),
       icon: FileText,
       colorBadge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30',
@@ -89,12 +90,12 @@ export const HouseholdActivityFeed: React.FC = () => {
   });
 
   // User-added reminders & notes
-  reminders.filter(r => !r.title.startsWith('[DEMO]')).slice(0, 2).forEach(r => {
+  (reminders || []).filter(r => r?.title && !String(r.title).startsWith('[DEMO]')).slice(0, 2).forEach(r => {
     activities.push({
       id: `rem-${r.id}`,
       type: 'event',
       title: `Reminder: ${r.title}`,
-      subtitle: `${r.priority} Priority • Assigned to ${r.assignedMemberName}`,
+      subtitle: `${r.priority || 'Normal'} Priority • Assigned to ${r.assignedMemberName || 'Family'}`,
       time: formatActivityTime(r.dateTime),
       icon: Calendar,
       colorBadge: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30',
@@ -102,12 +103,12 @@ export const HouseholdActivityFeed: React.FC = () => {
     });
   });
 
-  knowledgeList.filter(k => !k.title.startsWith('[DEMO]')).slice(0, 2).forEach(k => {
+  (knowledgeList || []).filter(k => k?.title && !String(k.title).startsWith('[DEMO]')).slice(0, 2).forEach(k => {
     activities.push({
       id: `know-${k.id}`,
       type: 'document',
       title: `Saved Note: ${k.title}`,
-      subtitle: `${k.category} • ${k.content}`,
+      subtitle: `${k.category || 'General'} • ${k.content || ''}`,
       time: 'Recent',
       icon: FileText,
       colorBadge: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30',
@@ -116,11 +117,12 @@ export const HouseholdActivityFeed: React.FC = () => {
   });
 
   // Recent grocery purchases
-  groceryHistory.slice(0, 3).forEach(g => {
+  (groceryHistory || []).slice(0, 3).forEach(g => {
+    if (!g) return;
     activities.push({
       id: `groc-${g.id}`,
       type: 'grocery',
-      title: `Purchased ${g.name}`,
+      title: `Purchased ${g.name || 'item'}`,
       subtitle: `${g.category || 'Pantry'} • Restocked by ${g.purchasedBy || 'Family'}`,
       time: formatActivityTime(g.purchasedAt),
       icon: ShoppingCart,
@@ -129,12 +131,13 @@ export const HouseholdActivityFeed: React.FC = () => {
   });
 
   // Recent documents
-  documents.slice(0, 2).forEach(d => {
+  (documents || []).slice(0, 2).forEach(d => {
+    if (!d) return;
     activities.push({
       id: `doc-${d.id}`,
       type: 'document',
-      title: `Indexed ${d.title}`,
-      subtitle: `${d.category} • Uploaded by ${d.uploaderName || 'Family'}`,
+      title: `Indexed ${d.title || 'Document'}`,
+      subtitle: `${d.category || 'General'} • Uploaded by ${d.uploaderName || 'Family'}`,
       time: formatActivityTime(d.uploadDate),
       icon: FileText,
       colorBadge: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30'
@@ -142,16 +145,17 @@ export const HouseholdActivityFeed: React.FC = () => {
   });
 
   // Upcoming events
-  events.slice(0, 2).forEach(e => {
+  (events || []).slice(0, 2).forEach(e => {
+    if (!e) return;
     activities.push({
       id: `evt-${e.id}`,
       type: 'event',
-      title: e.title,
-      subtitle: `${e.category} • ${e.time || 'All day'}`,
+      title: e.title || 'Event',
+      subtitle: `${e.category || 'General'} • ${e.time || 'All day'}`,
       time: formatActivityTime(e.date),
       icon: Calendar,
       colorBadge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30',
-      isUserCreated: !e.title.startsWith('[DEMO]')
+      isUserCreated: !String(e.title || '').startsWith('[DEMO]')
     });
   });
 

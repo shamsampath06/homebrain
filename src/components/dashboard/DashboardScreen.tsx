@@ -27,11 +27,11 @@ export const DashboardScreen: React.FC = () => {
   } = useHomeBrain();
 
   // Summary Metrics calculations
-  const totalSpend = expenses.reduce((acc, e) => acc + e.amount, 0);
-  const unpaidBills = bills.filter(b => !b.isPaid);
-  const pendingGroceries = groceries.filter(g => !g.isPurchased);
-  const expiringDocs = documents.filter(d => {
-    if (!d.expiryDate) return false;
+  const totalSpend = (expenses || []).reduce((acc, e) => acc + (Number(e?.amount) || 0), 0);
+  const unpaidBills = (bills || []).filter(b => b && !b.isPaid);
+  const pendingGroceries = (groceries || []).filter(g => g && !g.isPurchased);
+  const expiringDocs = (documents || []).filter(d => {
+    if (!d?.expiryDate) return false;
     const days = Math.ceil((new Date(d.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     return days <= 60;
   });

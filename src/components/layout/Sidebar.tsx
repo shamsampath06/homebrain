@@ -179,13 +179,13 @@ export const Sidebar: React.FC = () => {
           title="Open User Profile"
         >
           <div className="flex items-center gap-2.5 min-w-0">
-            <InitialAvatar name={currentUser.name} className="w-8 h-8 text-xs shrink-0 ring-1 ring-cyan-400/40" />
+            <InitialAvatar name={currentUser?.name || 'User'} className="w-8 h-8 text-xs shrink-0 ring-1 ring-cyan-400/40" />
             <div className="min-w-0">
               <p className="text-xs font-black text-slate-900 dark:text-white truncate group-hover:text-brand-700 dark:group-hover:text-cyan-300 transition-colors">
-                {currentUser.name}
+                {currentUser?.name || 'User'}
               </p>
               <p className="text-[10px] text-slate-400 truncate">
-                {currentUser.relation || 'Member'} • <span className="text-brand-600 dark:text-cyan-400 font-bold">{currentUser.role}</span>
+                {currentUser?.relation || 'Member'} • <span className="text-brand-600 dark:text-cyan-400 font-bold">{currentUser?.role || 'Member'}</span>
               </p>
             </div>
           </div>

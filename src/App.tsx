@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { HomeBrainProvider, useHomeBrain } from './context/HomeBrainContext';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { MobileNav } from './components/layout/MobileNav';
@@ -268,9 +269,13 @@ const AppContent: React.FC = () => {
 
 export function App() {
   return (
-    <HomeBrainProvider>
-      <AppContent />
-    </HomeBrainProvider>
+    <ErrorBoundary>
+      <HomeBrainProvider>
+        <ErrorBoundary>
+          <AppContent />
+        </ErrorBoundary>
+      </HomeBrainProvider>
+    </ErrorBoundary>
   );
 }
 

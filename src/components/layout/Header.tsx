@@ -91,7 +91,7 @@ export const Header: React.FC = () => {
               title="Open Family Hub & Manage Members"
             >
               <Users className="w-3.5 h-3.5 text-brand-500" />
-              <span className="truncate max-w-[120px]">{currentUser.familyName || 'Family Hub'}</span>
+              <span className="truncate max-w-[120px]">{currentUser?.familyName || 'Family Hub'}</span>
             </button>
 
             {/* Spotlight Command Palette Trigger */}
@@ -209,7 +209,7 @@ export const Header: React.FC = () => {
               onClick={() => navigateToSubScreen('user-profile')}
               className="flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-slate-700 hover:opacity-80 transition-opacity"
             >
-              <InitialAvatar name={currentUser.name} className="w-9 h-9 ring-2 ring-brand-500/30" />
+              <InitialAvatar name={currentUser?.name || 'User'} className="w-9 h-9 ring-2 ring-brand-500/30" />
             </button>
           </div>
         </div>

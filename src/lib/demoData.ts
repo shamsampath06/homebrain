@@ -82,22 +82,23 @@ export const DEMO_FAMILY_MEMBERS: Array<Omit<FamilyMember, 'id'>> = [
   }
 ];
 
-export const isDemoItem = (item: { id?: string; title?: string; name?: string; notes?: string; description?: string }): boolean => {
-  return (
-    (item.id && item.id.startsWith('00000000-0000-4000-8000-000000000')) ||
-    (item.title && item.title.includes(DEMO_TAG)) ||
-    (item.name && item.name.includes(DEMO_TAG)) ||
-    (item.notes && item.notes.includes(DEMO_TAG)) ||
-    (item.description && item.description.includes(DEMO_TAG)) ||
-    false
+export const isDemoItem = (item?: { id?: string; title?: string; name?: string; notes?: string; description?: string } | null): boolean => {
+  if (!item) return false;
+  return Boolean(
+    (item.id && String(item.id).startsWith('00000000-0000-4000-8000-000000000')) ||
+    (item.title && String(item.title).includes(DEMO_TAG)) ||
+    (item.name && String(item.name).includes(DEMO_TAG)) ||
+    (item.notes && String(item.notes).includes(DEMO_TAG)) ||
+    (item.description && String(item.description).includes(DEMO_TAG))
   );
 };
 
-export const isDemoMember = (m: FamilyMember): boolean => {
+export const isDemoMember = (m?: FamilyMember | null): boolean => {
+  if (!m) return false;
   const email = (m.email || '').toLowerCase().trim();
   const name = (m.name || '').toLowerCase().trim();
   return Boolean(
-    (m.id && m.id.startsWith('00000000-0000-4000-8000-000000000')) ||
+    (m.id && String(m.id).startsWith('00000000-0000-4000-8000-000000000')) ||
     email.includes('homebrain.app') ||
     email.includes('homebrain.test') ||
     email.includes('homebrain.internal') ||

@@ -171,15 +171,16 @@ Standard Single-Doc RAG        & 78.4\\% & 14.1\\% & 0.741 & Unenforced \\\\
 
   // 5. Member Graph Association Map
   const membersWithData = useMemo(() => {
-    const members = familyMembers.length > 0
+    const members = (familyMembers && familyMembers.length > 0)
       ? familyMembers
-      : [{ id: currentUser.id || 'default_user', name: currentUser.name || 'Primary User', role: currentUser.role || 'Member' }];
+      : [{ id: currentUser?.id || 'default_user', name: currentUser?.name || 'Primary User', role: currentUser?.role || 'Member' }];
 
     return members.map(m => {
-      const memberMeds = medicines.filter(med => med.personName?.toLowerCase() === m.name.toLowerCase());
-      const memberReminders = reminders.filter(r => r.assignedMemberName?.toLowerCase() === m.name.toLowerCase());
-      const memberKnowledge = knowledgeList.filter(k => k.relatedMemberName?.toLowerCase() === m.name.toLowerCase());
-      const memberDocs = documents.filter(d => d.uploaderName?.toLowerCase() === m.name.toLowerCase());
+      const memberName = (m?.name || '').toLowerCase();
+      const memberMeds = (medicines || []).filter(med => (med?.personName || '').toLowerCase() === memberName);
+      const memberReminders = (reminders || []).filter(r => (r?.assignedMemberName || '').toLowerCase() === memberName);
+      const memberKnowledge = (knowledgeList || []).filter(k => (k?.relatedMemberName || '').toLowerCase() === memberName);
+      const memberDocs = (documents || []).filter(d => (d?.uploaderName || '').toLowerCase() === memberName);
       return {
         ...m,
         medicines: memberMeds,
