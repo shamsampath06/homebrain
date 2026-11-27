@@ -94,10 +94,16 @@ export const isDemoItem = (item: { id?: string; title?: string; name?: string; n
 };
 
 export const isDemoMember = (m: FamilyMember): boolean => {
+  const email = (m.email || '').toLowerCase().trim();
+  const name = (m.name || '').toLowerCase().trim();
   return Boolean(
     (m.id && m.id.startsWith('00000000-0000-4000-8000-000000000')) ||
-    (m.email && m.email.endsWith('.demo@homebrain.test')) ||
-    ((m.name === 'Father' || m.name === 'Mother' || m.name === 'Sneha' || m.name === 'Sham') && m.phone?.startsWith('+91 98765 4321'))
+    email.includes('homebrain.app') ||
+    email.includes('homebrain.test') ||
+    email.includes('homebrain.internal') ||
+    email.startsWith('member@') ||
+    ['sarah', 'rajesh', 'priya', 'sarah kumar', 'priya kumar', 'rajesh kumar'].includes(name) ||
+    ((name === 'father' || name === 'mother' || name === 'sneha' || name === 'sham') && (m.phone?.includes('98400') || m.phone?.includes('98765')))
   );
 };
 

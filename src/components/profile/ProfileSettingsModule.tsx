@@ -5,6 +5,7 @@ import { InitialAvatar } from '../common/InitialAvatar';
 import { PageHeader } from '../layout/PageHeader';
 import { FamilyHubModule } from '../modules/FamilyHubModule';
 import { seedDemoFamilyData, removeDemoFamilyData, checkDemoSeedStatus } from '../../lib/demoData';
+import { dedupeMembers } from '../../lib/supabase';
 import { User, Users, Settings, Shield, Plus, Trash2, Check, Lock, Sun, Moon, LogOut, X, Bell, Download, FileSpreadsheet, Sparkles, Database, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export const ProfileSettingsShell: React.FC = () => {
@@ -307,7 +308,7 @@ const FamilyMembersPanel: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {familyMembers.map(m => (
+        {dedupeMembers(familyMembers).map(m => (
           <div
             key={m.id}
             className="p-4 rounded-3xl bg-white dark:bg-slate-800 shadow-card border border-slate-200/80 dark:border-slate-700 flex items-center justify-between"

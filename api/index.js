@@ -4269,13 +4269,10 @@ async function syncToCloudStore() {
 }
 serverHouseholdStore.set("demo-family-kumar", {
   id: "demo-family-kumar",
-  name: "Kumar Household",
+  name: "Family Household",
   inviteCode: "HB-849201",
-  createdBy: "usr-sampth",
-  members: [
-    { id: "m-shamsampath", userId: "usr-shamsampath", name: "Shamsampth06", relation: "Brother", role: "Member", email: "shamsampth06@gmail.com" },
-    { id: "m-sampth", userId: "usr-sampth", name: "sampth", relation: "Father", role: "Admin", email: "sham.s.2023.aids@ritchennai.edu.in" }
-  ],
+  createdBy: "",
+  members: [],
   events: [],
   groceries: [],
   expenses: [],
@@ -4337,35 +4334,25 @@ function findHousehold(familyId, inviteCode) {
   return serverHouseholdStore.get("demo-family-kumar");
 }
 void syncFromCloudStore();
-var defaultMembers = [
-  { id: "usr-shamsampath", name: "Shamsampth06", email: "shamsampth06@gmail.com", role: "Member", relation: "Brother" },
-  { id: "usr-sampth", name: "sampth", email: "sham.s.2023.aids@ritchennai.edu.in", role: "Admin", relation: "Father" }
-];
-for (const m of defaultMembers) {
-  serverRegisteredUsers.set(m.email.toLowerCase(), {
-    id: m.id,
-    email: m.email.toLowerCase(),
-    name: m.name,
-    avatar: "\u{1F468}\u200D\u{1F4BC}",
-    role: m.role,
-    relation: m.relation,
-    familyId: "demo-family-kumar",
-    familyName: "Kumar Household",
-    inviteCode: "HB-849201"
-  });
-}
+var defaultMembers = [];
 function dedupeServerMembers(members) {
   const seenEmails = /* @__PURE__ */ new Set();
   const seenIds = /* @__PURE__ */ new Set();
+  const seenNames = /* @__PURE__ */ new Set();
   const result = [];
   for (const m of members) {
     if (!m) continue;
     const emailKey = m.email ? String(m.email).trim().toLowerCase() : "";
     const idKey = m.id ? String(m.id).trim() : m.userId ? String(m.userId).trim() : "";
+    const nameKey = m.name ? String(m.name).trim().toLowerCase() : "";
+    if (emailKey.includes("homebrain.app") || emailKey.includes("homebrain.test") || emailKey.includes("homebrain.internal") || emailKey.startsWith("member@")) continue;
+    if (["sarah", "rajesh", "priya"].includes(nameKey) && (!emailKey || emailKey.includes("homebrain"))) continue;
     if (emailKey && seenEmails.has(emailKey)) continue;
     if (idKey && seenIds.has(idKey)) continue;
+    if (nameKey && seenNames.has(nameKey)) continue;
     if (emailKey) seenEmails.add(emailKey);
     if (idKey) seenIds.add(idKey);
+    if (nameKey) seenNames.add(nameKey);
     result.push(m);
   }
   return result;
@@ -4408,14 +4395,7 @@ var authenticateUser = async (req, res, next) => {
       }
     } catch {
     }
-    req.user = {
-      id: "usr-sess-member",
-      email: "member@homebrain.app",
-      name: "Family Member",
-      familyId: "demo-family-kumar",
-      role: "Member"
-    };
-    next();
+    res.status(401).json({ error: "Session expired or invalid. Please sign in again." });
     return;
   }
   if (token === "demo-token" || token === SUPABASE_ANON_KEY || req.body?.isDemo || req.body?.familyId || req.body?.senderName) {
@@ -5204,6 +5184,94 @@ app.post("/api/auth/login", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message || "Login failed." });
+  }
+});
+app.post("/api/auth/google", async (req, res) => {
+  try {
+    await syncFromCloudStore();
+    const { email, name, inviteCode, relation = "Member", role = "Member", mode = "create" } = req.body;
+    if (!email) {
+      res.status(400).json({ error: "Google account email is required." });
+      return;
+    }
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanName = String(name || cleanEmail.split("@")[0]).trim();
+    const cleanCode = inviteCode ? String(inviteCode).trim().toUpperCase() : "";
+    let user = serverRegisteredUsers.get(cleanEmail);
+    let household;
+    if (user) {
+      household = findHousehold(user.familyId, user.inviteCode);
+    } else {
+      if (mode === "join" && cleanCode) {
+        household = findHousehold(void 0, cleanCode);
+      } else {
+        const targetFamilyId = "fam-" + crypto.randomUUID().slice(0, 8);
+        const targetFamilyName = `${cleanName}'s Household`;
+        const finalInviteCode = "HB-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+        household = {
+          id: targetFamilyId,
+          name: targetFamilyName,
+          inviteCode: finalInviteCode,
+          createdBy: cleanEmail,
+          members: []
+        };
+        serverHouseholdStore.set(targetFamilyId, household);
+      }
+      const userId = "usr-" + crypto.randomUUID().slice(0, 8);
+      user = {
+        id: userId,
+        email: cleanEmail,
+        name: cleanName,
+        avatar: "\u{1F468}\u200D\u{1F4BC}",
+        role: mode === "create" || !cleanCode ? "Admin" : role,
+        relation: relation || (mode === "create" || !cleanCode ? "Father" : "Member"),
+        familyId: household.id,
+        familyName: household.name,
+        inviteCode: household.inviteCode
+      };
+      serverRegisteredUsers.set(cleanEmail, user);
+    }
+    const existingIdx = household.members.findIndex((m) => m.email?.toLowerCase() === cleanEmail);
+    const memberRecord = {
+      id: "m-" + user.id,
+      userId: user.id,
+      name: user.name,
+      relation: user.relation,
+      role: user.role,
+      email: cleanEmail,
+      phone: ""
+    };
+    if (existingIdx >= 0) {
+      household.members[existingIdx] = { ...household.members[existingIdx], ...memberRecord };
+    } else {
+      household.members.push(memberRecord);
+    }
+    household.members = dedupeServerMembers(household.members);
+    const token = generateSessionToken(user);
+    serverSessions.set(token, {
+      token,
+      user,
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1e3
+    });
+    await syncToCloudStore();
+    res.json({
+      success: true,
+      token,
+      access_token: token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        role: user.role,
+        relation: user.relation,
+        familyId: user.familyId,
+        familyName: user.familyName,
+        inviteCode: user.inviteCode
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Google authentication failed." });
   }
 });
 app.get("/api/auth/me", authenticateUser, (req, res) => {

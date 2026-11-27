@@ -45,6 +45,23 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undef
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
+const APP_STORAGE_VERSION = 'hb_v7_clean_purge';
+if (typeof window !== 'undefined') {
+  try {
+    if (localStorage.getItem('homebrain_app_version') !== APP_STORAGE_VERSION) {
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('homebrain_') || k.startsWith('sb-'))) {
+          toRemove.push(k);
+        }
+      }
+      toRemove.forEach(k => localStorage.removeItem(k));
+      localStorage.setItem('homebrain_app_version', APP_STORAGE_VERSION);
+    }
+  } catch { }
+}
+
 interface StoredSession {
   access_token?: string;
   refresh_token?: string;
@@ -155,24 +172,26 @@ export const mergeById = <T extends { id: string }>(primary: T[] = [], secondary
 export const dedupeMembers = (members: FamilyMember[] = []): FamilyMember[] => {
   const seenEmails = new Set<string>();
   const seenIds = new Set<string>();
-  const seenNameRel = new Set<string>();
+  const seenNames = new Set<string>();
   const result: FamilyMember[] = [];
 
   for (const m of members) {
     if (!m) continue;
     const emailKey = m.email ? m.email.trim().toLowerCase() : '';
     const idKey = m.id ? String(m.id).trim() : '';
-    const nameRelKey = (m.name && m.relation)
-      ? `${m.name.trim().toLowerCase()}_${m.relation.trim().toLowerCase()}`
-      : '';
+    const nameKey = m.name ? m.name.trim().toLowerCase() : '';
+
+    // Filter out dummy demo accounts
+    if (emailKey.includes('homebrain.app') || emailKey.includes('homebrain.test') || emailKey.includes('homebrain.internal') || emailKey.startsWith('member@')) continue;
+    if (['sarah', 'rajesh', 'priya', 'sarah kumar', 'priya kumar', 'rajesh kumar'].includes(nameKey) && (!emailKey || emailKey.includes('homebrain'))) continue;
 
     if (emailKey && seenEmails.has(emailKey)) continue;
     if (idKey && seenIds.has(idKey)) continue;
-    if (nameRelKey && seenNameRel.has(nameRelKey)) continue;
+    if (nameKey && seenNames.has(nameKey)) continue;
 
     if (emailKey) seenEmails.add(emailKey);
     if (idKey) seenIds.add(idKey);
-    if (nameRelKey) seenNameRel.add(nameRelKey);
+    if (nameKey) seenNames.add(nameKey);
     result.push(m);
   }
 
@@ -378,42 +397,7 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
 export const signInWithPassword = async (email: string, password: string): Promise<User> => {
   const cleanEmail = email.trim().toLowerCase();
 
-  // 1. Attempt direct Supabase sign-in if configured
-  if (isSupabaseConfigured && supabaseUrl) {
-    try {
-      const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password })
-      });
-      if (response.ok) {
-        const session = (await response.json()) as { access_token: string; refresh_token?: string };
-        storeSession(session);
-        const profile = await getAuthenticatedProfile();
-        if (profile) {
-          if (typeof window !== 'undefined') localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
-          return profile;
-        }
-      } else {
-        const body = await response.text();
-        let parsed: any = null;
-        try { parsed = JSON.parse(body); } catch { }
-        if (
-          body.includes('invalid_credentials') ||
-          body.includes('Invalid login credentials') ||
-          parsed?.error_code === 'invalid_credentials' ||
-          parsed?.msg === 'Invalid login credentials'
-        ) {
-          throw new Error('Incorrect email or password. Please verify your password and try again.');
-        }
-      }
-    } catch (sbErr: any) {
-      if (sbErr.message && sbErr.message.includes('Incorrect email or password')) throw sbErr;
-      console.warn('Supabase auth network unreachable, falling over to HomeBrain backend authentication:', sbErr);
-    }
-  }
-
-  // 2. Fallback to HomeBrain Backend Auth (/api/auth/login)
+  // 1. Primary: HomeBrain Backend Authentication (/api/auth/login)
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -433,7 +417,7 @@ export const signInWithPassword = async (email: string, password: string): Promi
         role: data.user.role || 'Member',
         relation: data.user.relation || 'Member',
         familyId: data.user.familyId || 'demo-family-kumar',
-        familyName: data.user.familyName || 'Kumar Household',
+        familyName: data.user.familyName || 'Family Household',
         inviteCode: data.user.inviteCode || 'HB-849201'
       };
       if (typeof window !== 'undefined') {
@@ -445,32 +429,32 @@ export const signInWithPassword = async (email: string, password: string): Promi
       throw new Error(errJson.error || 'Login failed. Please check your credentials.');
     }
   } catch (backendErr: any) {
-    if (backendErr.message && backendErr.message.includes('password')) throw backendErr;
-    // 3. Fallback to pre-seeded local family accounts
-    const sampleAccounts = [
-      { name: 'Sarah', relation: 'Daughter / Admin', email: 'sarah.kumar@homebrain.app', role: 'Admin' },
-      { name: 'Rajesh', relation: 'Father', email: 'dad.rajesh@homebrain.app', role: 'Co-Admin' },
-      { name: 'Priya', relation: 'Mother', email: 'mom.priya@homebrain.app', role: 'Co-Admin' },
-      { name: 'Sneha', relation: 'Sister', email: 'sister.sneha@homebrain.app', role: 'Member' },
-      { name: 'Sham', relation: 'Brother', email: 'brother.sham@homebrain.app', role: 'Member' }
-    ];
-    const match = sampleAccounts.find(s => s.email.toLowerCase() === cleanEmail);
-    const localProfile: User = {
-      id: match ? `demo-user-${match.name.toLowerCase()}` : ensureValidUUID(),
-      name: match ? match.name : cleanEmail.split('@')[0],
-      email: cleanEmail,
-      avatar: '👨‍💼',
-      role: (match?.role as User['role']) || 'Member',
-      relation: match ? match.relation : 'Member',
-      familyId: 'demo-family-kumar',
-      familyName: 'Kumar Household',
-      inviteCode: 'HB-849201'
-    };
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('homebrain_active_user', JSON.stringify(localProfile));
+    if (backendErr.message && !backendErr.message.includes('fetch')) {
+      throw backendErr;
     }
-    return localProfile;
   }
+
+  // 2. Fallback to Supabase if configured and valid
+  if (isSupabaseConfigured && supabaseUrl && !supabaseUrl.includes('fkkfivwjvenyktfbsbqa')) {
+    try {
+      const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password })
+      });
+      if (response.ok) {
+        const session = (await response.json()) as { access_token: string; refresh_token?: string };
+        storeSession(session);
+        const profile = await getAuthenticatedProfile();
+        if (profile) {
+          if (typeof window !== 'undefined') localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
+          return profile;
+        }
+      }
+    } catch { }
+  }
+
+  throw new Error('Incorrect email or password. Please verify your credentials and try again.');
 };
 
 export interface SignUpOptions {
@@ -492,8 +476,6 @@ export const signUpWithPassword = async (
   inviteCodeArg?: string,
   relationArg?: string
 ): Promise<User> => {
-  if (!isSupabaseConfigured || !supabaseUrl) throw new Error('Supabase is not configured.');
-
   let email: string;
   let password: string;
   let name: string;
@@ -523,99 +505,21 @@ export const signUpWithPassword = async (
     role = mode === 'join' ? 'Member' : 'Admin';
   }
 
-  let targetFamilyId: string | null = null;
-  let targetFamilyName = familyName;
-  let finalInviteCode = inviteCode;
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = name.trim();
+  const cleanInvite = inviteCode ? inviteCode.trim().toUpperCase() : '';
 
-  // If user is joining an existing family with an invite code:
-  if (mode === 'join' && inviteCode) {
-    try {
-      const fams = await request<JsonRecord[]>(`families?invite_code=eq.${encodeURIComponent(inviteCode)}&select=*`);
-      if (fams && fams.length > 0) {
-        targetFamilyId = ensureValidUUID(String(fams[0].id));
-        targetFamilyName = String(fams[0].name || familyName);
-        finalInviteCode = String(fams[0].inviteCode || inviteCode);
-        role = 'Member';
-      } else {
-        throw new Error(`Household invitation code "${inviteCode}" not found. Please verify the code from your family administrator.`);
-      }
-    } catch (err: any) {
-      if (err.message && err.message.includes('not found')) throw err;
-      // If table query failed due to RLS or unauthenticated status, look up or attach fallback
-      const cachedFamStr = typeof window !== 'undefined' ? localStorage.getItem(`homebrain_family_invite_${inviteCode}`) : null;
-      if (cachedFamStr) {
-        try {
-          const cached = JSON.parse(cachedFamStr);
-          targetFamilyId = ensureValidUUID(cached.id);
-          targetFamilyName = cached.name || familyName;
-        } catch { }
-      }
-    }
-  }
-
-  // If creating a new family:
-  if (!targetFamilyId) {
-    if (!finalInviteCode) finalInviteCode = generateHouseholdInviteCode();
-    role = 'Admin';
-  }
-
-  // 1. Attempt direct Supabase signup if configured
-  if (isSupabaseConfigured && supabaseUrl) {
-    try {
-      const response = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-        method: 'POST',
-        headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          data: {
-            name,
-            family_name: targetFamilyName,
-            invite_code: finalInviteCode,
-            relation,
-            role
-          }
-        })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const userId = ensureValidUUID(result?.user?.id || result?.id);
-        const userFamilyId = targetFamilyId || userId;
-
-        if (result?.access_token) {
-          storeSession({ access_token: result.access_token, refresh_token: result.refresh_token });
-          const authProfile = await getAuthenticatedProfile();
-          if (authProfile) {
-            authProfile.id = ensureValidUUID(authProfile.id);
-            authProfile.familyId = targetFamilyId || ensureValidUUID(authProfile.familyId);
-            authProfile.familyName = targetFamilyName;
-            authProfile.relation = relation;
-            authProfile.role = role;
-            authProfile.inviteCode = finalInviteCode;
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('homebrain_active_user', JSON.stringify(authProfile));
-            }
-            return authProfile;
-          }
-        }
-      }
-    } catch (sbErr) {
-      console.warn('Supabase signup unreachable, failing over to HomeBrain backend authentication:', sbErr);
-    }
-  }
-
-  // 2. Call HomeBrain Backend Authentication (/api/auth/signup)
+  // 1. Primary: HomeBrain Backend Authentication (/api/auth/signup)
   try {
     const res = await fetch('/api/auth/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email,
+        email: cleanEmail,
         password,
-        name,
-        familyName: targetFamilyName,
-        inviteCode: finalInviteCode,
+        name: cleanName,
+        familyName,
+        inviteCode: cleanInvite,
         relation,
         role,
         mode
@@ -633,9 +537,9 @@ export const signUpWithPassword = async (
         avatar: data.user.avatar || '👨‍💼',
         role: data.user.role || (mode === 'join' ? 'Member' : 'Admin'),
         relation: data.user.relation || relation,
-        familyId: data.user.familyId || targetFamilyId || 'demo-family-kumar',
-        familyName: data.user.familyName || targetFamilyName,
-        inviteCode: data.user.inviteCode || finalInviteCode
+        familyId: data.user.familyId,
+        familyName: data.user.familyName || familyName,
+        inviteCode: data.user.inviteCode || cleanInvite
       };
       if (typeof window !== 'undefined') {
         localStorage.setItem('homebrain_active_user', JSON.stringify(userProfile));
@@ -645,71 +549,87 @@ export const signUpWithPassword = async (
       const errJson = await res.json().catch(() => ({}));
       throw new Error(errJson.error || 'Registration failed.');
     }
-  } catch (apiErr: any) {
-    if (apiErr.message && !apiErr.message.includes('fetch')) throw apiErr;
-  }
-
-  // 3. Fallback working profile for client offline / instant entry
-  const userId = ensureValidUUID();
-  const userFamilyId = targetFamilyId || (inviteCode ? 'demo-family-kumar' : userId);
-
-  const profile: User = {
-    id: userId,
-    name: name || 'HomeBrain User',
-    email: email,
-    avatar: '👨‍💼',
-    role: role,
-    relation: relation,
-    familyId: userFamilyId,
-    familyName: targetFamilyName,
-    inviteCode: finalInviteCode
-  };
-
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('homebrain_active_user', JSON.stringify(profile));
-    if (finalInviteCode) {
-      localStorage.setItem(`homebrain_family_invite_${finalInviteCode}`, JSON.stringify({
-        id: userFamilyId,
-        name: targetFamilyName,
-        inviteCode: finalInviteCode
-      }));
+  } catch (backendErr: any) {
+    if (backendErr.message && !backendErr.message.includes('fetch')) {
+      throw backendErr;
     }
   }
 
-  // Attempt to sync to profiles and family_members table in Supabase
-  try {
-    await request('profiles', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-      body: JSON.stringify(snakify({
-        id: userId,
-        name: profile.name,
-        email: profile.email,
-        avatarUrl: profile.avatar,
-        role: profile.role,
-        relation: profile.relation,
-        familyId: profile.familyId,
-        familyName: profile.familyName
-      }))
-    });
-  } catch { }
+  // 2. Fallback to Supabase if configured and valid
+  if (isSupabaseConfigured && supabaseUrl && !supabaseUrl.includes('fkkfivwjvenyktfbsbqa')) {
+    try {
+      const response = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+        method: 'POST',
+        headers: { apikey: supabaseAnonKey || '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          password,
+          data: { name: cleanName, family_name: familyName, invite_code: cleanInvite, relation, role }
+        })
+      });
+      if (response.ok) {
+        const result = await response.json();
+        if (result?.access_token) {
+          storeSession({ access_token: result.access_token, refresh_token: result.refresh_token });
+          const authProfile = await getAuthenticatedProfile();
+          if (authProfile) return authProfile;
+        }
+      }
+    } catch { }
+  }
 
-  try {
-    await request('family_members', {
-      method: 'POST',
-      body: JSON.stringify(snakify({
-        familyId: profile.familyId,
-        name: profile.name,
-        relation: profile.relation,
-        role: profile.role,
-        email: profile.email,
-        avatar: profile.avatar,
-        phone: ''
-      }))
-    });
-  } catch { }
+  throw new Error('Unable to complete registration. Please check your connection and details.');
+};
 
-  return profile;
+export const signInWithGoogleAccount = async (options: {
+  email: string;
+  name?: string;
+  relation?: string;
+  role?: User['role'];
+  inviteCode?: string;
+  mode?: 'create' | 'join';
+}): Promise<User> => {
+  const cleanEmail = options.email.trim().toLowerCase();
+  const cleanName = options.name?.trim() || cleanEmail.split('@')[0];
+  const cleanCode = options.inviteCode ? options.inviteCode.trim().toUpperCase() : '';
+
+  const res = await fetch('/api/auth/google', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: cleanEmail,
+      name: cleanName,
+      relation: options.relation || 'Member',
+      role: options.role || (options.mode === 'create' ? 'Admin' : 'Member'),
+      inviteCode: cleanCode,
+      mode: options.mode || (cleanCode ? 'join' : 'create')
+    })
+  });
+
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({}));
+    throw new Error(errJson.error || 'Google account sign-in failed.');
+  }
+
+  const data = await res.json();
+  if (data.token) {
+    storeSession({ access_token: data.token });
+  }
+  const userProfile: User = {
+    id: data.user.id,
+    name: data.user.name,
+    email: data.user.email,
+    avatar: data.user.avatar || '👨‍💼',
+    role: data.user.role || 'Member',
+    relation: data.user.relation || options.relation || 'Member',
+    familyId: data.user.familyId,
+    familyName: data.user.familyName,
+    inviteCode: data.user.inviteCode
+  };
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('homebrain_active_user', JSON.stringify(userProfile));
+  }
+  return userProfile;
 };
 
 export const joinFamilyWithInviteCode = async (

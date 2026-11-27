@@ -32,6 +32,7 @@ import {
   listFamilyProfiles,
   signUpWithPassword,
   signInWithPassword,
+  signInWithGoogleAccount,
   signOut,
   updatePassword,
   updateRow,
@@ -236,6 +237,14 @@ interface HomeBrainContextType {
   isAuthenticated: boolean;
   enterDemoMode: () => void;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: (options: {
+    email: string;
+    name?: string;
+    relation?: string;
+    role?: User['role'];
+    inviteCode?: string;
+    mode?: 'create' | 'join';
+  }) => Promise<void>;
   signUp: (
     email: string,
     password: string,
@@ -524,6 +533,27 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const profile = await signInWithPassword(email, password);
     profile.familyId = ensureValidUUID(profile.familyId);
     profile.id = ensureValidUUID(profile.id);
+    setAIMessages([]);
+    await hydrateAccountData(profile);
+    setCurrentUser(profile);
+    setIsAuthenticated(true);
+    setDataError(null);
+    setIsDataLoading(false);
+  };
+
+  const signInWithGoogle = async (options: {
+    email: string;
+    name?: string;
+    relation?: string;
+    role?: User['role'];
+    inviteCode?: string;
+    mode?: 'create' | 'join';
+  }) => {
+    authGeneration.current += 1;
+    const profile = await signInWithGoogleAccount(options);
+    profile.familyId = ensureValidUUID(profile.familyId);
+    profile.id = ensureValidUUID(profile.id);
+    setDemoEnabledForFamily(profile.familyId, false);
     setAIMessages([]);
     await hydrateAccountData(profile);
     setCurrentUser(profile);
@@ -2519,6 +2549,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         isAuthenticated,
         enterDemoMode,
         signIn,
+        signInWithGoogle,
         signUp,
         signOut: handleSignOut,
         updatePassword: (currentPassword: string, password: string) =>

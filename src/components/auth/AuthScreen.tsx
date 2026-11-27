@@ -15,9 +15,19 @@ import {
   KeyRound,
   CheckCircle2,
   Share2,
-  Copy
+  Copy,
+  X
 } from 'lucide-react';
 import { UserRole } from '../../types';
+
+export interface GoogleAuthOptions {
+  email: string;
+  name?: string;
+  relation?: string;
+  role?: UserRole;
+  inviteCode?: string;
+  mode?: 'create' | 'join';
+}
 
 interface AuthScreenProps {
   onSignedIn: (email: string, password: string) => Promise<void>;
@@ -31,7 +41,7 @@ interface AuthScreenProps {
     role?: UserRole,
     mode?: 'create' | 'join'
   ) => Promise<void>;
-  onGoogleSignIn?: () => void;
+  onGoogleSignIn?: (options: GoogleAuthOptions) => Promise<void>;
   onEnterDemo?: () => void;
   canGoBack?: boolean;
   onGoBack?: () => void;
@@ -60,6 +70,56 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Google Account Quick Sign-In Modal States
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googleName, setGoogleName] = useState('');
+  const [googleRelation, setGoogleRelation] = useState('Father / Dad');
+  const [googleMode, setGoogleMode] = useState<'create' | 'join'>('create');
+  const [googleInviteCode, setGoogleInviteCode] = useState('');
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+
+  const handleOpenGoogleModal = () => {
+    setGoogleEmail(email.trim());
+    setGoogleName(name.trim() || (email ? email.split('@')[0] : ''));
+    setGoogleInviteCode(inviteCode.trim().toUpperCase());
+    setGoogleMode(regMode);
+    setGoogleError(null);
+    setShowGoogleModal(true);
+  };
+
+  const handleGoogleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleEmail.trim()) {
+      setGoogleError('Please enter your Google account email.');
+      return;
+    }
+    if (googleMode === 'join' && !googleInviteCode.trim()) {
+      setGoogleError('Please enter your family invitation code to join.');
+      return;
+    }
+    setGoogleSubmitting(true);
+    setGoogleError(null);
+    try {
+      if (onGoogleSignIn) {
+        await onGoogleSignIn({
+          email: googleEmail.trim(),
+          name: googleName.trim() || googleEmail.split('@')[0],
+          relation: googleRelation,
+          role: googleMode === 'create' ? 'Admin' : 'Member',
+          inviteCode: googleInviteCode.trim().toUpperCase(),
+          mode: googleMode
+        });
+        setShowGoogleModal(false);
+      }
+    } catch (err: any) {
+      setGoogleError(formatAuthError(err));
+    } finally {
+      setGoogleSubmitting(false);
+    }
+  };
 
   // Auto-detect invite code from URL parameters or hash on mount
   useEffect(() => {
@@ -444,8 +504,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           <div className="space-y-2 pt-1">
             <button
               type="button"
-              onClick={onGoogleSignIn}
-              className="w-full py-2.5 px-4 rounded-2xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border-2 border-[#eadfbe] dark:border-slate-700 hover:border-brand-400 dark:hover:border-slate-600 text-slate-800 dark:text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-3 transition-all hover:scale-[1.01] shadow-sm"
+              onClick={handleOpenGoogleModal}
+              className="w-full py-2.5 px-4 rounded-2xl bg-white dark:bg-[#141C2E] hover:bg-brand-50 dark:hover:bg-[#1A243B] border-2 border-[#eadfbe] dark:border-slate-700 hover:border-brand-400 dark:hover:border-slate-600 text-slate-800 dark:text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-3 transition-all hover:scale-[1.01] shadow-sm cursor-pointer"
             >
               <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                 <path
@@ -476,6 +536,156 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           <span>PostgreSQL Row-Level Security · Multi-Family Data Isolation</span>
         </div>
       </div>
+
+      {/* Google Account Quick Sign-In Modal */}
+      {showGoogleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-md bg-[#fffdf7] dark:bg-[#0D1220] border border-[#eadfbe] dark:border-white/10 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <h3 className="font-black text-sm text-slate-900 dark:text-white">Sign In with Google Account</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGoogleModal(false)}
+                className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {googleError && (
+              <div className="p-3 text-xs rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 font-medium">
+                {googleError}
+              </div>
+            )}
+
+            <form onSubmit={handleGoogleSubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                  Google Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                  <input
+                    type="email"
+                    required
+                    value={googleEmail}
+                    onChange={e => setGoogleEmail(e.target.value)}
+                    placeholder="e.g. father.homebrain@gmail.com"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#141C2E] text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                  Your Full Name
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={googleName}
+                    onChange={e => setGoogleName(e.target.value)}
+                    placeholder="e.g. Rajesh Kumar or Father"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#141C2E] text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                  Household Relationship
+                </label>
+                <select
+                  value={googleRelation}
+                  onChange={e => setGoogleRelation(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#141C2E] text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="Father / Dad">Father / Dad</option>
+                  <option value="Son">Son</option>
+                  <option value="Mother / Mom">Mother / Mom</option>
+                  <option value="Daughter">Daughter</option>
+                  <option value="Brother">Brother</option>
+                  <option value="Sister">Sister</option>
+                  <option value="Member">Family Member</option>
+                </select>
+              </div>
+
+              {/* Mode Selection */}
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                  Household Action
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGoogleMode('create')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      googleMode === 'create'
+                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Home className="w-3.5 h-3.5" />
+                    <span>Create Family</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGoogleMode('join')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      googleMode === 'join'
+                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Join with Code</span>
+                  </button>
+                </div>
+              </div>
+
+              {googleMode === 'join' && (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                    Family Invitation Code
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={googleInviteCode}
+                    onChange={e => setGoogleInviteCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. HB-849201"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#141C2E] font-mono font-bold text-xs text-brand-700 dark:text-brand-400 uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={googleSubmitting}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-brand-600 to-amber-600 hover:from-brand-700 hover:to-amber-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                {googleSubmitting ? (
+                  <span>Signing in with Google...</span>
+                ) : (
+                  <>
+                    <span>{googleMode === 'create' ? 'Create Household as Admin' : 'Join Household as Member'}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 };

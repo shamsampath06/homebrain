@@ -20,7 +20,7 @@ import { EmergencyModeModal } from './components/modules/EmergencyModeModal';
 import { RemindersScreen, ReminderForm } from './components/dashboard/RemindersScreen';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { CommandPaletteModal } from './components/common/CommandPaletteModal';
-import { isSupabaseConfigured, signInWithGoogle } from './lib/supabase';
+import { isSupabaseConfigured } from './lib/supabase';
 import { parseHash, buildHash } from './lib/navigation';
 
 const AppContent: React.FC = () => {
@@ -38,6 +38,7 @@ const AppContent: React.FC = () => {
     isAuthenticated,
     enterDemoMode,
     signIn,
+    signInWithGoogle,
     signUp
   } = useHomeBrain();
 
@@ -89,7 +90,10 @@ const AppContent: React.FC = () => {
           await signUp(email, password, name, familyName, inviteCode, relation, role, mode);
           setActiveSubScreen('none');
         }}
-        onGoogleSignIn={signInWithGoogle}
+        onGoogleSignIn={async (options) => {
+          await signInWithGoogle(options);
+          setActiveSubScreen('none');
+        }}
         onEnterDemo={() => {
           enterDemoMode();
           setActiveSubScreen('none');
