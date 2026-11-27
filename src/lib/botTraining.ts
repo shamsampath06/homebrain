@@ -32,7 +32,14 @@ export function matchHomeBrainTrainedDialogue(
   const clean = qTrim.toLowerCase().replace(/^[?!.,\s]+|[?!.,\s]+$/g, '').trim();
 
   // Never intercept mutation commands (add, create, schedule, remind, mark, paid, spent, bought, remove, delete, update, change, move, cancel, log, record, remember, save a note, etc.)
-  // unless it is a specific Document Vault upload/delete prompt.
+  // or Calendar queries (handled dynamically with live DB synchronization by the Cognitive Action Engine)
+  const isCalendarOrActionTopic =
+    /\b(?:calendar|schedule|schedules|scheduled|event|events|free\s+this|everyone\s+free|who\s+is\s+free|suitable\s+time|meeting\s+time|who\s+created|who\s+added|events\s+did|exam|exams|test|tests|doing\s+tomorrow|doing\s+today|doing\s+on)\b/i.test(clean);
+
+  if (isCalendarOrActionTopic) {
+    return null;
+  }
+
   const isNonDocumentMutation =
     /\b(?:grocery|groceries|shopping\s*list|pantry|milk|rice|tomato|onion|oil|egg|vegetable|bread|butter|curd|paneer|sugar|water\s*can|bill|electricity|eb\b|expense|spent|petrol|salary|income|budget|birthday|bday|anniversary|meeting|appointment|doctor|housewarming|ceremony|trip|dinner|lunch|remind|reminder|alarm|snooze|task|assignment|medicine|medication|tablet|capsule|dose|dolo|paracetamol|allergic|allergy|prefer|note|knowledge|gas\s*cylinder|ac\s*service|bike\s*service|meter\s*reading)\b/i.test(clean) &&
     !/\b(?:aadhaar|aadhar|pan\s*card|passport|licen[cs]e|marksheet|degree\s*certificate|voter\s*id|birth\s*certificate|document\s*vault|uploaded\s*files|my\s*pdfs)\b/i.test(clean);

@@ -29,7 +29,7 @@ function clearPendingAction(sessionKey) {
   pendingActionStore.delete(sessionKey);
 }
 var BIRTHDAY_REGEX = /\b(?:birth\s*days?|b['’]?days?|birhtdays?|birtdays?|brithdays?|bithdays?|bdays?|dob|born)\b/i;
-var CALENDAR_TOPIC_REGEX = /\b(?:birth\s*days?|b['’]?days?|birhtdays?|birtdays?|brithdays?|bithdays?|bdays?|dob|born|anniversary|anniversaries|meeting|meetings|doctor|appointment|appointments|checkup|checkups|housewarming|trip|trips|tour|outing|vacation|holiday|holidays|festival|pongal|diwali|christmas|new\s*year|ramzan|eid|onam|ugadi|holi|navaratri|puja|pooja|function|functions|marriage|wedding|reception|engagement|ceremony|party|dinner|lunch|reunion|exam|exams|interview|calendar|schedule|events?)\b/i;
+var CALENDAR_TOPIC_REGEX = /\b(?:birth\s*days?|b['’]?days?|birhtdays?|birtdays?|brithdays?|bithdays?|bdays?|dob|born|anniversary|anniversaries|meeting|meetings|doctor|appointment|appointments|checkup|checkups|housewarming|trip|trips|tour|outing|vacation|holiday|holidays|festival|pongal|diwali|christmas|new\s*year|ramzan|eid|onam|ugadi|holi|navaratri|puja|pooja|function|functions|marriage|wedding|reception|engagement|ceremony|party|dinner|lunch|breakfast|reunion|exam|exams|interview|calendar|schedule|schedules|scheduled|events?|free\s+this|everyone\s+free|who\s+created|who\s+added|events\s+did\s+.*?\s+add|suitable\s+time|meeting\s+time|doing\s+tomorrow|doing\s+today|doing\s+on)\b/i;
 var COMMON_GROCERY_ITEMS_REGEX = /\b(?:milk|curd|yogurt|butter|paneer|cheese|ghee|bread|eggs?|rice|basmati|wheat|atta|flour|dal|toor\s*dal|moong\s*dal|chana\s*dal|urad\s*dal|sugar|salt|jaggery|oil|cooking\s*oil|sunflower\s*oil|olive\s*oil|mustard\s*oil|coconut\s*oil|tea|coffee|biscuits?|cookies?|snacks?|noodles?|pasta|oats|cornflakes|tomato(?:es)?|onions?|potato(?:es)?|garlic|ginger|chillies|chilli|coriander|mint|curry\s*leaves|carrots?|beans|peas|spinach|cabbage|cauliflower|brinjal|okra|ladies\s*finger|cucumber|lemons?|apples?|bananas?|oranges?|mangoes?|grapes|pomegranate|papaya|watermelon|chicken|mutton|fish|prawns|meat|soap|shampoo|toothpaste|detergent|dishwash(?:ing)?|cleaner|handwash|sanitizer|tissues?|toilet\s*paper|water\s*can|vegetables?|veggies|fruits?|spices?|turmeric|chilli\s*powder|garam\s*masala|pepper|cumin|mustard|almonds?|cashews?|raisins?|walnuts?|dates|honey|jam|ketchup|sauce|vinegar|mayonnaise|arisi|paruppu)\b/i;
 function inferGroceryCategory(itemName) {
   const lower = (itemName || "").toLowerCase();
@@ -134,6 +134,9 @@ function isEventForCelebrant(e, person, eventType) {
   if (p === "sister") {
     return title.includes("sister") || title.includes("sneha");
   }
+  if (p === "son" || p === "sha") {
+    return title.includes("son") || title.includes("sha") || members.includes("son") || members.includes("sha");
+  }
   if (p === "brother") {
     return title.includes("brother") || title.includes("sham");
   }
@@ -144,6 +147,32 @@ function isEventForCelebrant(e, person, eventType) {
     return title.includes("grandmother") || title.includes("grandma") || title.includes("paati");
   }
   return title.includes(p) || desc.includes(p) || members.includes(p);
+}
+function matchesMemberIdentifier(str, target) {
+  if (!str) return false;
+  const s = str.toLowerCase();
+  const t = (target || "").toLowerCase();
+  if (t === "dad" || t === "father" || t === "appa") {
+    return s.includes("dad") || s.includes("father") || s.includes("appa") || s.includes("sham");
+  }
+  if (t === "son" || t === "sha" || t === "shamsampth06") {
+    return s.includes("son") || s.includes("sha") || s.includes("shamsampth06");
+  }
+  if (t === "sister" || t === "sneha") {
+    return s.includes("sister") || s.includes("sneha");
+  }
+  if (t === "mom" || t === "mother" || t === "amma") {
+    return s.includes("mom") || s.includes("mother") || s.includes("amma") || s.includes("priya");
+  }
+  return s.includes(t);
+}
+function isEventInvolvingPerson(e, target) {
+  const members = Array.isArray(e.members_involved || e.membersInvolved) ? e.members_involved || e.membersInvolved : [];
+  if (members.some((m) => matchesMemberIdentifier(m, target) || m.toLowerCase() === "family")) return true;
+  if (matchesMemberIdentifier(e.createdByName, target)) return true;
+  if (matchesMemberIdentifier(e.title, target)) return true;
+  if (matchesMemberIdentifier(e.description, target)) return true;
+  return false;
 }
 function extractCustomPersonName(cleanQuery) {
   const stopWords = /* @__PURE__ */ new Set([
@@ -579,11 +608,12 @@ function classifyIntentAndExtractEntities(rawQuery) {
     { pattern: /\b(mother|mom|amma|mothers?)\b/i, normalized: "Mother" },
     { pattern: /\b(grandfather|grandpa|thatha)\b/i, normalized: "Grandfather" },
     { pattern: /\b(grandmother|grandma|paati)\b/i, normalized: "Grandmother" },
+    { pattern: /\b(son|sha|shamsampth06)\b/i, normalized: "Son" },
+    { pattern: /\b(sister|sneha)\b/i, normalized: "Sister" },
     { pattern: /\b(sarah)\b/i, normalized: "Sarah" },
     { pattern: /\b(sneha)\b/i, normalized: "Sneha" },
     { pattern: /\b(sham)\b/i, normalized: "Sham" },
     { pattern: /\b(brother)\b/i, normalized: "Brother" },
-    { pattern: /\b(sister)\b/i, normalized: "Sister" },
     { pattern: /\b(parents)\b/i, normalized: "Parents" }
   ];
   for (const pm of personMatches) {
@@ -961,7 +991,7 @@ function classifyIntentAndExtractEntities(rawQuery) {
   }
   const isOtherModuleExplicit = /\b(?:grocery|groceries|shopping\s*list|milk|rice|tomato|onion|oil|egg|vegetable|bread|water\s*can|sugar|bill|electricity|eb|water\s*bill|internet\s*bill|wifi\s*bill|expense|petrol|salary|budget|rs|inr|aadhaar|pan\s*card|pan|passport|licen[cs]e|dl|marksheet|certificate|degree|voter|insurance|bank\s*statement|property|document|pdf|vault|task|assignment|to-do|todo|snooze|alarm|wi-fi\s*password|wifi\s*password|gas\s*cylinder|meter\s*reading|household\s*inventory)\b|₹/i.test(clean);
   const isDateBasedCalendarCommand = !isOtherModuleExplicit && !!dateInfo.date && /^(?:add|schedule|plan|create|set|book|change|move|reschedule|postpone|update|cancel|delete|remove)\b/i.test(clean);
-  const isCalendarTopic = CALENDAR_TOPIC_REGEX.test(clean) && !/\b(?:grocery|groceries|bread|milk|bill|eb|expense)\b/i.test(clean) || isDateBasedCalendarCommand || clean.includes("appa birthday") || clean.includes("meeting add pannunga") || /\bac\s+service\s+on\b/i.test(clean);
+  const isCalendarTopic = CALENDAR_TOPIC_REGEX.test(clean) && !/\b(?:grocery|groceries|bread|milk|bill|eb|expense)\b/i.test(clean) || isDateBasedCalendarCommand || /\b(?:what\s+(?:is|are)\s+.*?\s+doing|doing\s+tomorrow|doing\s+today|doing\s+on)\b/i.test(clean) || /\b(?:is\s+everyone\s+free|are\s+we\s+all\s+free|who\s+is\s+free)\b/i.test(clean) || /\b(?:suitable\s+time|find\s+a\s+time|recommend\s+a\s+time)\b/i.test(clean) || /\b(?:who\s+created|who\s+added|events\s+did\s+.*?\s+add)\b/i.test(clean) || /\b(?:when\s+is\s+.*?\s+exam)\b/i.test(clean) || /\b(?:family\s+schedule|today['’]?s\s+family\s+schedule)\b/i.test(clean) || clean.includes("appa birthday") || clean.includes("meeting add pannunga") || /\bac\s+service\s+on\b/i.test(clean);
   if (isCalendarTopic) {
     module = "calendar";
     if (BIRTHDAY_REGEX.test(clean)) entities.eventType = "birthday";
@@ -1704,17 +1734,48 @@ ${lines}
         const reply2 = `\u{1F4C5} **${eventTitle}** is scheduled in your Family Calendar on **${formatted2}** (${targetDate}) at **${targetTime}**.`;
         return { reply: reply2, text: reply2, actionsExecuted, sources: ["Family Calendar"], handled: true };
       }
+      const isFamilyWide = /\b(?:family\s+dinner|family\s+meeting|family\s+gathering|for\s+(?:all|everyone|family)|dinner\s+with\s+family)\b/i.test(clean);
+      const membersInvolvedList = isFamilyWide ? ["Family", "Dad", "Son", "Sister"] : entities.person ? [entities.person] : [user.name || "Family"];
+      const priority = /\b(?:urgent|emergency)\b/i.test(clean) ? "Urgent" : /\b(?:important|high\s+priority|critical)\b/i.test(clean) ? "High" : "Medium";
+      const conflictEv = events.find((e) => {
+        if (e.date !== targetDate) return false;
+        if (e.time && targetTime && e.time === targetTime) {
+          const evMems = Array.isArray(e.members_involved || e.membersInvolved) ? e.members_involved || e.membersInvolved : ["Family"];
+          return evMems.some((em) => membersInvolvedList.some((nm) => nm.toLowerCase() === em.toLowerCase() || em === "Family" || nm === "Family"));
+        }
+        return false;
+      });
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const rsvps = {};
+      membersInvolvedList.forEach((m) => {
+        rsvps[m] = m.toLowerCase() === (user.name || "").toLowerCase() ? "accepted" : "pending";
+      });
       const payload = {
         title: eventTitle,
         date: targetDate,
         time: targetTime,
         category: eventCategory,
+        priority,
         recurring: eventCategory === "Birthday" || eventCategory === "Holiday" ? "Yearly" : clean.includes("weekly") ? "Weekly" : clean.includes("monthly") ? "Monthly" : "None",
         reminder: true,
         location: eventLoc || "",
         description: eventDesc || `${eventTitle} scheduled on ${targetDate}`,
-        members_involved: [entities.person || user.name || "Family"],
-        membersInvolved: [entities.person || user.name || "Family"],
+        members_involved: membersInvolvedList,
+        membersInvolved: membersInvolvedList,
+        userId: user.id,
+        createdByName: user.name,
+        createdByRole: user.role,
+        createdAt: nowIso,
+        rsvps,
+        history: [
+          {
+            action: "created",
+            byName: user.name,
+            byRole: user.role,
+            timestamp: nowIso,
+            details: `Scheduled via HomeBrain AI`
+          }
+        ],
         family_id: user.familyId
       };
       const saved = await dbMethods.insertFamilyData("events", payload, token);
@@ -1729,12 +1790,15 @@ ${lines}
         status: "success"
       });
       const formatted = formatDateHuman(payload.date);
+      const conflictNotice = conflictEv ? `
+
+\u26A0\uFE0F **Notice**: A schedule overlap exists with **"${(conflictEv.title || "").replace(/\[DEMO\]\s*/g, "")}"** (${conflictEv.time}) on this date.` : "";
       const reply = `\u2705 **Added to Family Calendar**
 
 Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${payload.time}**.
 
-\u2022 **${payload.date} at ${payload.time}**: ${payload.title} (${payload.category}) - Members: ${payload.members_involved.join(", ")}${payload.location ? `
-\u2022 **Location**: ${payload.location}` : ""}`;
+\u2022 **${payload.date} at ${payload.time}**: ${payload.title} (${payload.category}) - Members: ${payload.members_involved.join(", ")} [Priority: ${priority}]${payload.location ? `
+\u2022 **Location**: ${payload.location}` : ""}${conflictNotice}`;
       return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
     }
     if (operation === "UPDATE") {
@@ -1803,7 +1867,12 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
         const meetingEv = events.find((e) => /meeting/i.test(e.title || "") || (e.category || "").toLowerCase() === "meeting");
         if (meetingEv) {
           const cleanTitle = (meetingEv.title || "Family Meeting").replace(/\[DEMO\]\s*/g, "");
-          const patch = {};
+          const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+          const patch = {
+            lastModifiedByName: user.name,
+            lastModifiedByRole: user.role,
+            lastModifiedAt: nowIso
+          };
           if (requestedTime) {
             meetingEv.time = requestedTime;
             patch.time = requestedTime;
@@ -1812,6 +1881,18 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
             meetingEv.date = requestedDate;
             patch.date = requestedDate;
           }
+          meetingEv.lastModifiedByName = user.name;
+          meetingEv.lastModifiedByRole = user.role;
+          meetingEv.lastModifiedAt = nowIso;
+          meetingEv.history = meetingEv.history || [];
+          meetingEv.history.push({
+            action: "rescheduled",
+            byName: user.name,
+            byRole: user.role,
+            timestamp: nowIso,
+            details: `Rescheduled to ${meetingEv.date} at ${meetingEv.time || "15:00"}`
+          });
+          patch.history = meetingEv.history;
           if (meetingEv.id) {
             await dbMethods.updateFamilyData("events", meetingEv.id, patch, token);
           }
@@ -1918,7 +1999,12 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
         );
         if (apptEv) {
           const cleanTitle = (apptEv.title || "Doctor Appointment").replace(/\[DEMO\]\s*/g, "");
-          const patch = {};
+          const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+          const patch = {
+            lastModifiedByName: user.name,
+            lastModifiedByRole: user.role,
+            lastModifiedAt: nowIso
+          };
           if (requestedDate) {
             apptEv.date = requestedDate;
             patch.date = requestedDate;
@@ -1932,6 +2018,18 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
             apptEv.location = newLocMatch[1].replace(/^(?:to|at)\s+/i, "").trim();
             patch.location = apptEv.location;
           }
+          apptEv.lastModifiedByName = user.name;
+          apptEv.lastModifiedByRole = user.role;
+          apptEv.lastModifiedAt = nowIso;
+          apptEv.history = apptEv.history || [];
+          apptEv.history.push({
+            action: "rescheduled",
+            byName: user.name,
+            byRole: user.role,
+            timestamp: nowIso,
+            details: `Rescheduled to ${apptEv.date} at ${apptEv.time || "10:00"}`
+          });
+          patch.history = apptEv.history;
           if (apptEv.id) {
             await dbMethods.updateFamilyData("events", apptEv.id, patch, token);
           }
@@ -1953,7 +2051,12 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
       });
       if (matchedEvent) {
         const cleanTitle = (matchedEvent.title || targetTitle).replace(/\[DEMO\]\s*/g, "");
-        const patch = {};
+        const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+        const patch = {
+          lastModifiedByName: user.name,
+          lastModifiedByRole: user.role,
+          lastModifiedAt: nowIso
+        };
         if (requestedDate) {
           matchedEvent.date = requestedDate;
           patch.date = requestedDate;
@@ -1962,6 +2065,18 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
           matchedEvent.time = requestedTime;
           patch.time = requestedTime;
         }
+        matchedEvent.lastModifiedByName = user.name;
+        matchedEvent.lastModifiedByRole = user.role;
+        matchedEvent.lastModifiedAt = nowIso;
+        matchedEvent.history = matchedEvent.history || [];
+        matchedEvent.history.push({
+          action: "rescheduled",
+          byName: user.name,
+          byRole: user.role,
+          timestamp: nowIso,
+          details: `Rescheduled to ${matchedEvent.date} at ${matchedEvent.time || "10:00"}`
+        });
+        patch.history = matchedEvent.history;
         if (matchedEvent.id) {
           await dbMethods.updateFamilyData("events", matchedEvent.id, patch, token);
         }
@@ -1996,6 +2111,16 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
         return false;
       });
       if (matched) {
+        const isOwner = matched.userId === user.id || matched.createdByName === user.name;
+        const isAdmin = user.role === "Admin" || user.role === "Parent" || user.role === "Co-Admin";
+        if (matched.isPersonal && !isOwner) {
+          const reply2 = `\u26D4 **Permission Denied**: You cannot delete private personal events belonging to another family member.`;
+          return { reply: reply2, text: reply2, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+        if (!isOwner && !isAdmin) {
+          const reply2 = `\u26D4 **Permission Denied**: Only the event creator or a household Admin can delete this shared event.`;
+          return { reply: reply2, text: reply2, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
         const cleanTitle = (matched.title || "").replace(/\[DEMO\]\s*/g, "");
         setPendingAction(sessionKey, {
           sessionKey,
@@ -2019,6 +2144,248 @@ Scheduled **"${payload.title}"** on **${formatted}** (${payload.date}) at **${pa
     if (operation === "SEARCH" || operation === "READ") {
       let person = entities.person;
       const isBirthday = entities.eventType === "birthday";
+      if (/\b(?:who\s+(?:created|added|scheduled)\s+(?:this\s+event|the\s+event|.*?)|who\s+created\s+it|event\s+creator)\b/i.test(clean)) {
+        const { title: targetTitle } = extractCalendarEventDetails(rawQuery, entities);
+        const targetEv = events.find((e) => {
+          if (!targetTitle || targetTitle === "Family Event") return true;
+          const t = (e.title || "").replace(/\[DEMO\]\s*/g, "").toLowerCase();
+          return t.includes(targetTitle.toLowerCase()) || targetTitle.toLowerCase().includes(t);
+        }) || events[0];
+        if (targetEv) {
+          const cleanT = (targetEv.title || "Event").replace(/\[DEMO\]\s*/g, "");
+          const creator = targetEv.createdByName || "Family Member";
+          const role = targetEv.createdByRole || (creator.toLowerCase() === "sham" ? "Admin" : "Member");
+          const createdTime = targetEv.createdAt ? formatDateHuman(targetEv.createdAt.split("T")[0]) : targetEv.date;
+          const modifierInfo = targetEv.lastModifiedByName ? `
+\u2022 **Last Modified By**: ${targetEv.lastModifiedByName} (${targetEv.lastModifiedByRole || "Member"})${targetEv.lastModifiedAt ? ` on ${formatDateHuman(targetEv.lastModifiedAt.split("T")[0])}` : ""}` : "";
+          const reply = `\u{1F464} **Event Origin & Change Log**:
+
+\u2022 **Event**: "${cleanT}"
+\u2022 **Created By**: ${creator} (${role})
+\u2022 **Created On**: ${createdTime}
+\u2022 **Scheduled Date**: ${formatDateHuman(targetEv.date)} at ${targetEv.time || "10:00"}${modifierInfo}`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        } else {
+          const reply = `I couldn't find any events in the calendar to check creator information.`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+      }
+      const whoAddedMatch = clean.match(/\b(?:what\s+events?\s+did\s+(.*?)\s+(?:add|create|schedule))\b/i);
+      if (whoAddedMatch) {
+        const queryPerson = whoAddedMatch[1].trim();
+        const addedEvents = events.filter((e) => {
+          const isCreator = matchesMemberIdentifier(e.createdByName, queryPerson);
+          if (!isCreator) return false;
+          if (clean.includes("today")) {
+            const todayIST2 = getKolkataDateString();
+            const createdDate = (e.createdAt || "").split("T")[0];
+            return createdDate === todayIST2 || e.date === todayIST2;
+          }
+          return true;
+        });
+        if (addedEvents.length > 0) {
+          const reply = `\u{1F4C5} **Events Added by ${queryPerson.charAt(0).toUpperCase() + queryPerson.slice(1)}**:
+
+` + addedEvents.map((e) => {
+            const cleanT = (e.title || "").replace(/\[DEMO\]\s*/g, "");
+            const dStr = formatDateHuman(e.date);
+            const members = (Array.isArray(e.members_involved || e.membersInvolved) ? e.members_involved || e.membersInvolved : [user.name]).join(", ");
+            return `\u2022 **${cleanT}** (${e.category || "General"}) [Priority: ${e.priority || "Medium"}]
+  \u{1F4C5} ${dStr} (${e.date}) at ${e.time || "10:00"} | Assigned: ${members}`;
+          }).join("\n\n");
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        } else {
+          const reply = `\u{1F4C5} **${queryPerson.charAt(0).toUpperCase() + queryPerson.slice(1)}** hasn't added any events ${clean.includes("today") ? "today" : "yet"}.`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+      }
+      if (/\b(?:is\s+everyone\s+free|are\s+we\s+all\s+free|who\s+is\s+free|free\s+this|free\s+on)\b/i.test(clean)) {
+        let targetDate = entities.date;
+        if (!targetDate) {
+          if (clean.includes("sunday")) {
+            const now = /* @__PURE__ */ new Date();
+            const targetDay = 0;
+            let diff = targetDay - now.getDay();
+            if (diff <= 0) diff += 7;
+            const d = new Date(now);
+            d.setDate(d.getDate() + diff);
+            targetDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          } else if (clean.includes("tomorrow")) {
+            targetDate = getKolkataDateString(1);
+          } else {
+            targetDate = getKolkataDateString(0);
+          }
+        }
+        const dateEvents = events.filter((e) => e.date === targetDate);
+        const formatted = formatDateHuman(targetDate);
+        if (dateEvents.length === 0) {
+          const reply = `\u{1F389} **Everyone is completely free on ${formatted} (${targetDate})!**
+
+There are no events, appointments, or conflicts scheduled for any family member on this day.`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        } else {
+          const busySummary = dateEvents.map((e) => {
+            const cleanT = (e.title || "").replace(/\[DEMO\]\s*/g, "");
+            const mems = (Array.isArray(e.members_involved || e.membersInvolved) ? e.members_involved || e.membersInvolved : ["Family"]).join(", ");
+            return `\u2022 **${cleanT}** at ${e.time || "10:00"} (${e.category || "General"}) - Busy: ${mems}`;
+          }).join("\n");
+          const reply = `\u{1F4C5} **Family Availability for ${formatted} (${targetDate})**:
+
+Not everyone is free all day. Here are the scheduled events:
+
+${busySummary}
+
+\u{1F4A1} **Free Time**: The family has open availability outside of these scheduled event windows.`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+      }
+      if (/\b(?:find\s+(?:a\s+)?suitable\s+time|recommend\s+(?:a\s+)?(?:meeting\s+)?time|best\s+time\s+for\s+(?:a\s+)?(?:family\s+)?meeting|suitable\s+meeting\s+time)\b/i.test(clean)) {
+        const candidateSlots = ["10:00", "15:00", "18:30", "20:00"];
+        const recommendations = [];
+        for (let i = 1; i <= 3; i++) {
+          const dateCandidate = getKolkataDateString(i);
+          const evOnDate = events.filter((e) => e.date === dateCandidate);
+          for (const slot of candidateSlots) {
+            const hasOverlap = evOnDate.some((e) => {
+              if (!e.time) return false;
+              const [h1] = e.time.split(":").map(Number);
+              const [h2] = slot.split(":").map(Number);
+              return Math.abs(h1 - h2) < 2;
+            });
+            if (!hasOverlap) {
+              const dStr = formatDateHuman(dateCandidate);
+              recommendations.push(`\u2022 **${dStr} (${dateCandidate}) at ${slot}** (All family members free)`);
+              if (recommendations.length >= 3) break;
+            }
+          }
+          if (recommendations.length >= 3) break;
+        }
+        const reply = `\u{1F552} **Smart Scheduling Recommendations for Family Meeting**:
+
+Based on real-time calendar availability across all family members, here are the best conflict-free slots:
+
+${recommendations.join("\n")}
+
+Would you like me to schedule a family meeting at any of these times?`;
+        return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+      }
+      if (/\b(?:important\s+events?|urgent\s+events?|high\s+priority\s+events?|critical\s+events?)\b/i.test(clean)) {
+        const todayIST2 = getKolkataDateString();
+        const nextWeekIST = getKolkataDateString(7);
+        const importantEvents = events.filter((e) => {
+          if (e.date < todayIST2 || e.date > nextWeekIST) return false;
+          const isHighPriority = e.priority === "Urgent" || e.priority === "High";
+          const isCriticalCat = (e.category || "").toLowerCase() === "appointment" || (e.category || "").toLowerCase() === "school" || /exam|doctor|hospital/i.test(e.title || "");
+          return isHighPriority || isCriticalCat;
+        }).sort((a, b) => a.date.localeCompare(b.date));
+        if (importantEvents.length > 0) {
+          const reply = `\u26A1 **Important & High-Priority Family Events This Week (${importantEvents.length} found)**:
+
+` + importantEvents.map((e) => {
+            const cleanT = (e.title || "").replace(/\[DEMO\]\s*/g, "");
+            const dStr = formatDateHuman(e.date);
+            const p = e.priority || "High";
+            const pIcon = p === "Urgent" ? "\u{1F6A8} URGENT" : "\u26A1 HIGH";
+            const members = (Array.isArray(e.members_involved || e.membersInvolved) ? e.members_involved || e.membersInvolved : [user.name]).join(", ");
+            return `\u2022 **[${pIcon}] ${cleanT}** (${e.category || "Event"})
+  \u{1F4C5} **Date & Time**: ${dStr} (${e.date}) at ${e.time || "10:00"}
+  \u{1F465} **Members**: ${members}${e.location ? `
+  \u{1F4CD} **Location**: ${e.location}` : ""}`;
+          }).join("\n\n");
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        } else {
+          const reply = `\u26A1 **Important Family Events**: There are no urgent or high-priority events scheduled for this week. All upcoming events are routine.`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+      }
+      if (/\b(?:when\s+is\s+.*?(?:exam|test|finals?)|next\s+(?:exam|test|finals?)|exam\s+schedule)\b/i.test(clean)) {
+        const todayIST2 = getKolkataDateString();
+        const examEvents = events.filter((e) => {
+          if (e.date < todayIST2) return false;
+          const isExam = (e.category || "").toLowerCase() === "school" || (e.category || "").toLowerCase() === "exam" || /\b(?:exam|test|finals?|midterms?)\b/i.test(`${e.title || ""} ${e.description || ""}`);
+          if (!isExam) return false;
+          if (clean.includes("sister") || clean.includes("sneha")) {
+            return isEventInvolvingPerson(e, "Sister");
+          }
+          if (clean.includes("son") || clean.includes("sha")) {
+            return isEventInvolvingPerson(e, "Son");
+          }
+          return true;
+        }).sort((a, b) => a.date.localeCompare(b.date));
+        if (examEvents.length > 0) {
+          const nextExam = examEvents[0];
+          const cleanT = (nextExam.title || "Exam").replace(/\[DEMO\]\s*/g, "");
+          const dStr = formatDateHuman(nextExam.date);
+          const reply = `\u{1F4DA} **Next Scheduled Exam**:
+
+\u2022 **${cleanT}**
+\u2022 **Date & Time**: ${dStr} (${nextExam.date}) at ${nextExam.time || "09:30"}
+\u2022 **Student**: ${(Array.isArray(nextExam.members_involved || nextExam.membersInvolved) ? nextExam.members_involved || nextExam.membersInvolved : ["Sister"]).join(", ")}${nextExam.description ? `
+\u2022 **Details**: ${nextExam.description}` : ""}`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        } else {
+          const targetName = clean.includes("sister") ? "Sister's" : "your family's";
+          const reply = `\u{1F4DA} There are no upcoming exams or school tests recorded in ${targetName} calendar.`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+      }
+      const doingMatch = clean.match(/\b(?:what\s+(?:is|are)\s+(?:my\s+)?(dad|father|appa|mom|mother|amma|son|brother|sister|sneha|sha|sham)\s+(?:doing|having|scheduled|up\s+to)|schedule\s+(?:for|of)\s+(?:my\s+)?(dad|father|appa|mom|mother|amma|son|brother|sister|sneha|sha|sham))\b/i) || (person && (entities.date || /\b(?:tomorrow|today|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i.test(clean)) && !isBirthday ? [null, person, person] : null);
+      if (doingMatch) {
+        const targetMember = doingMatch[1] || doingMatch[2] || person || "Dad";
+        let targetDate = entities.date;
+        if (!targetDate) {
+          if (clean.includes("tomorrow")) targetDate = getKolkataDateString(1);
+          else if (clean.includes("today")) targetDate = getKolkataDateString(0);
+          else targetDate = getKolkataDateString(1);
+        }
+        const memberEvents = events.filter((e) => {
+          if (e.date !== targetDate) return false;
+          return isEventInvolvingPerson(e, targetMember);
+        }).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+        const dStr = formatDateHuman(targetDate);
+        const memberDisplayName = targetMember.charAt(0).toUpperCase() + targetMember.slice(1);
+        if (memberEvents.length > 0) {
+          const reply = `\u{1F4C5} **${memberDisplayName}'s Schedule for ${dStr} (${targetDate})**:
+
+` + memberEvents.map((e) => {
+            const cleanT = (e.title || "").replace(/\[DEMO\]\s*/g, "");
+            const p = e.priority ? ` [Priority: ${e.priority}]` : "";
+            return `\u2022 **${e.time || "10:00"}**: ${cleanT} (${e.category || "General"})${p}${e.location ? ` at ${e.location}` : ""}`;
+          }).join("\n");
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        } else {
+          const reply = `\u{1F4C5} **${memberDisplayName}'s Schedule for ${dStr} (${targetDate})**:
+
+**${memberDisplayName}** has no events scheduled for this day.`;
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+      }
+      if (/\b(?:give\s+me\s+(?:today['’]?s\s+)?(?:family\s+)?schedule|today['’]?s\s+(?:family\s+)?schedule|what\s+is\s+today['’]?s\s+schedule)\b/i.test(clean)) {
+        const todayIST2 = getKolkataDateString();
+        const todayEvents = events.filter((e) => e.date === todayIST2).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+        const formatted = formatDateHuman(todayIST2);
+        if (todayEvents.length > 0) {
+          const reply = `\u{1F4C5} **Today's Family Schedule (${formatted})**:
+
+` + todayEvents.map((e) => {
+            const cleanT = (e.title || "").replace(/\[DEMO\]\s*/g, "");
+            const members = (Array.isArray(e.members_involved || e.membersInvolved) ? e.members_involved || e.membersInvolved : [user.name]).join(", ");
+            const p = e.priority ? ` [Priority: ${e.priority}]` : "";
+            return `\u2022 **${e.time || "10:00"}**: ${cleanT} (${e.category || "General"})${p} - Members: ${members}${e.location ? `
+  \u{1F4CD} ${e.location}` : ""}`;
+          }).join("\n");
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        } else {
+          const futureEvents = events.filter((e) => e.date > todayIST2).sort((a, b) => a.date.localeCompare(b.date));
+          const nextEv = futureEvents[0];
+          const reply = `\u{1F4C5} **Today's Family Schedule (${formatted})**:
+
+There are **no calendar events scheduled for today**.
+
+` + (nextEv ? `*(Your next upcoming event is **${(nextEv.title || "").replace(/\[DEMO\]\s*/g, "")}** on **${formatDateHuman(nextEv.date)}** at ${nextEv.time || "10:00"}).*` : "");
+          return { reply, text: reply, actionsExecuted, sources: ["Family Calendar"], handled: true };
+        }
+      }
       if (/\b(?:medical|doctor|dentist|appointment|clinic|hospital|checkup)\b/i.test(clean)) {
         const medicalEvents = events.filter(
           (e) => (e.category || "").toLowerCase() === "appointment" || /\b(?:medical|doctor|dentist|appointment|clinic|hospital|checkup)\b/i.test(`${e.title || ""} ${e.description || ""}`)
@@ -3565,6 +3932,10 @@ function matchHomeBrainTrainedDialogue(rawQuery, effectiveDocuments, user, _effe
   const qTrim = (rawQuery || "").trim();
   if (!qTrim) return null;
   const clean = qTrim.toLowerCase().replace(/^[?!.,\s]+|[?!.,\s]+$/g, "").trim();
+  const isCalendarOrActionTopic = /\b(?:calendar|schedule|schedules|scheduled|event|events|free\s+this|everyone\s+free|who\s+is\s+free|suitable\s+time|meeting\s+time|who\s+created|who\s+added|events\s+did|exam|exams|test|tests|doing\s+tomorrow|doing\s+today|doing\s+on)\b/i.test(clean);
+  if (isCalendarOrActionTopic) {
+    return null;
+  }
   const isNonDocumentMutation = /\b(?:grocery|groceries|shopping\s*list|pantry|milk|rice|tomato|onion|oil|egg|vegetable|bread|butter|curd|paneer|sugar|water\s*can|bill|electricity|eb\b|expense|spent|petrol|salary|income|budget|birthday|bday|anniversary|meeting|appointment|doctor|housewarming|ceremony|trip|dinner|lunch|remind|reminder|alarm|snooze|task|assignment|medicine|medication|tablet|capsule|dose|dolo|paracetamol|allergic|allergy|prefer|note|knowledge|gas\s*cylinder|ac\s*service|bike\s*service|meter\s*reading)\b/i.test(clean) && !/\b(?:aadhaar|aadhar|pan\s*card|passport|licen[cs]e|marksheet|degree\s*certificate|voter\s*id|birth\s*certificate|document\s*vault|uploaded\s*files|my\s*pdfs)\b/i.test(clean);
   if (isNonDocumentMutation) {
     return null;
@@ -5562,10 +5933,64 @@ app.post("/api/family/item", authenticateUser, async (req, res) => {
   }
   const targetArray = household[normTable];
   const existingIdx = targetArray.findIndex((x) => x.id === item.id);
-  if (existingIdx >= 0) {
-    targetArray[existingIdx] = { ...targetArray[existingIdx], ...item };
+  if (normTable === "events") {
+    if (existingIdx >= 0) {
+      const existingEv = targetArray[existingIdx];
+      if (existingEv.isPersonal && existingEv.userId !== user.id && existingEv.createdByName !== user.name) {
+        res.status(403).json({ error: "Unauthorized: Cannot modify a private personal event belonging to another family member." });
+        return;
+      }
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      item.lastModifiedByName = user.name;
+      item.lastModifiedByRole = user.role;
+      item.lastModifiedAt = nowIso;
+      const changeAction = item.date !== existingEv.date || item.time !== existingEv.time ? "rescheduled" : "updated";
+      const existingHistory = Array.isArray(existingEv.history) ? existingEv.history : [];
+      item.history = [
+        ...existingHistory,
+        {
+          action: changeAction,
+          byName: user.name,
+          byRole: user.role,
+          timestamp: nowIso,
+          details: `${changeAction === "rescheduled" ? "Rescheduled" : "Updated"} by ${user.name} (${user.role})`
+        }
+      ];
+      if (existingEv.rsvps) {
+        item.rsvps = { ...existingEv.rsvps, ...item.rsvps || {} };
+      }
+      targetArray[existingIdx] = { ...existingEv, ...item };
+    } else {
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      item.userId = item.userId || user.id;
+      item.createdByName = item.createdByName || user.name;
+      item.createdByRole = item.createdByRole || user.role;
+      item.createdAt = item.createdAt || nowIso;
+      item.priority = item.priority || "Medium";
+      if (!item.rsvps) {
+        item.rsvps = {};
+        const membersList = Array.isArray(item.membersInvolved) ? item.membersInvolved : [user.name];
+        membersList.forEach((m) => {
+          item.rsvps[m] = m.toLowerCase() === user.name.toLowerCase() ? "accepted" : "pending";
+        });
+      }
+      item.history = [
+        {
+          action: "created",
+          byName: user.name,
+          byRole: user.role,
+          timestamp: nowIso,
+          details: `Event created by ${user.name} (${user.role})`
+        }
+      ];
+      targetArray.unshift(item);
+    }
   } else {
-    targetArray.unshift(item);
+    if (existingIdx >= 0) {
+      targetArray[existingIdx] = { ...targetArray[existingIdx], ...item };
+    } else {
+      targetArray.unshift(item);
+    }
   }
   await syncToCloudStore();
   res.json({ success: true, item });
@@ -5587,8 +6012,23 @@ app.delete("/api/family/item", authenticateUser, async (req, res) => {
     return;
   }
   const normTable = normalizeTableName(table);
-  deletedItemIds.add(id);
   const targetArray = household[normTable];
+  if (normTable === "events" && targetArray) {
+    const targetEvent = targetArray.find((x) => x.id === id);
+    if (targetEvent) {
+      const isOwner = targetEvent.userId === user.id || targetEvent.createdByName === user.name;
+      const isAdmin = user.role === "Admin" || user.role === "Parent" || user.role === "Co-Admin";
+      if (targetEvent.isPersonal && !isOwner) {
+        res.status(403).json({ error: "Permission denied: Cannot delete private events belonging to another family member." });
+        return;
+      }
+      if (!isOwner && !isAdmin) {
+        res.status(403).json({ error: "Permission denied: Only the event creator or a household Admin can delete this event." });
+        return;
+      }
+    }
+  }
+  deletedItemIds.add(id);
   if (targetArray) {
     const idx = targetArray.findIndex((x) => x.id === id);
     if (idx >= 0) {
@@ -5604,6 +6044,9 @@ app.post("/api/family/sync", authenticateUser, async (req, res) => {
   await syncFromCloudStore();
   const household = findHousehold(familyId, req.body?.inviteCode || user.inviteCode);
   const cleanMembers = dedupeServerMembers(household?.members || []);
+  const userEvents = (household.events || []).filter(
+    (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+  );
   res.json({
     success: true,
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -5615,7 +6058,7 @@ app.post("/api/family/sync", authenticateUser, async (req, res) => {
     groceries: household.groceries || [],
     expenses: household.expenses || [],
     reminders: household.reminders || [],
-    events: household.events || [],
+    events: userEvents,
     bills: household.bills || [],
     documents: household.documents || [],
     memories: household.memories || [],
@@ -5759,7 +6202,10 @@ app.post("/api/ai/query", authenticateUser, async (req, res) => {
       fetchFamilyData("documents", user.familyId, token, "limit=40"),
       fetchFamilyData("family_memories", user.familyId, token, "order=year.desc,date.desc&limit=30")
     ]);
-    const effectiveEvents = isExplicitNonDemo ? Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : events || [] : events && events.length > 0 ? events : sharedFallbackEvents;
+    const rawEvents = isExplicitNonDemo ? Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : events || [] : events && events.length > 0 ? events : sharedFallbackEvents;
+    const effectiveEvents = rawEvents.filter(
+      (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+    );
     const effectiveGroceries = isExplicitNonDemo ? Array.isArray(clientState?.groceries) ? normalizeClientGroceries(clientState.groceries) : groceries || [] : groceries && groceries.length > 0 ? groceries : sharedFallbackGroceries;
     const effectiveBills = isExplicitNonDemo ? Array.isArray(clientState?.bills) ? normalizeClientBills(clientState.bills) : bills || [] : bills && bills.length > 0 ? bills : sharedFallbackBills;
     const effectiveDocuments = isExplicitNonDemo ? Array.isArray(clientState?.documents) ? normalizeClientDocuments(clientState.documents) : documents || [] : documents && documents.length > 0 ? documents : sharedFallbackDocuments;

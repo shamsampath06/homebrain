@@ -1677,10 +1677,79 @@ app.post('/api/family/item', authenticateUser, async (req: Request, res: Respons
 
   const targetArray = (household as any)[normTable] as any[];
   const existingIdx = targetArray.findIndex((x: any) => x.id === item.id);
-  if (existingIdx >= 0) {
-    targetArray[existingIdx] = { ...targetArray[existingIdx], ...item };
+
+  // Calendar Event Specific RBAC & Metadata Auditing
+  if (normTable === 'events') {
+    if (existingIdx >= 0) {
+      const existingEv = targetArray[existingIdx];
+      // Privacy check: Cannot modify someone else's personal/private event
+      if (existingEv.isPersonal && existingEv.userId !== user.id && existingEv.createdByName !== user.name) {
+        res.status(403).json({ error: 'Unauthorized: Cannot modify a private personal event belonging to another family member.' });
+        return;
+      }
+
+      // Record modifier metadata & audit history
+      const nowIso = new Date().toISOString();
+      item.lastModifiedByName = user.name;
+      item.lastModifiedByRole = user.role;
+      item.lastModifiedAt = nowIso;
+
+      const changeAction = item.date !== existingEv.date || item.time !== existingEv.time ? 'rescheduled' : 'updated';
+      const existingHistory = Array.isArray(existingEv.history) ? existingEv.history : [];
+      item.history = [
+        ...existingHistory,
+        {
+          action: changeAction,
+          byName: user.name,
+          byRole: user.role,
+          timestamp: nowIso,
+          details: `${changeAction === 'rescheduled' ? 'Rescheduled' : 'Updated'} by ${user.name} (${user.role})`
+        }
+      ];
+
+      // Merge RSVPs if member is updating their attendance
+      if (existingEv.rsvps) {
+        item.rsvps = { ...existingEv.rsvps, ...(item.rsvps || {}) };
+      }
+
+      targetArray[existingIdx] = { ...existingEv, ...item };
+    } else {
+      // New Event Creation
+      const nowIso = new Date().toISOString();
+      item.userId = item.userId || user.id;
+      item.createdByName = item.createdByName || user.name;
+      item.createdByRole = item.createdByRole || user.role;
+      item.createdAt = item.createdAt || nowIso;
+      item.priority = item.priority || 'Medium';
+
+      // Initialize RSVP map
+      if (!item.rsvps) {
+        item.rsvps = {};
+        const membersList = Array.isArray(item.membersInvolved) ? item.membersInvolved : [user.name];
+        membersList.forEach((m: string) => {
+          item.rsvps[m] = m.toLowerCase() === user.name.toLowerCase() ? 'accepted' : 'pending';
+        });
+      }
+
+      // Initialize Change History
+      item.history = [
+        {
+          action: 'created',
+          byName: user.name,
+          byRole: user.role,
+          timestamp: nowIso,
+          details: `Event created by ${user.name} (${user.role})`
+        }
+      ];
+
+      targetArray.unshift(item);
+    }
   } else {
-    targetArray.unshift(item);
+    if (existingIdx >= 0) {
+      targetArray[existingIdx] = { ...targetArray[existingIdx], ...item };
+    } else {
+      targetArray.unshift(item);
+    }
   }
 
   await syncToCloudStore();
@@ -1708,8 +1777,26 @@ app.delete('/api/family/item', authenticateUser, async (req: Request, res: Respo
   }
 
   const normTable = normalizeTableName(table);
-  deletedItemIds.add(id);
   const targetArray = (household as any)[normTable] as any[];
+
+  // RBAC & Privacy enforcement for Calendar Events
+  if (normTable === 'events' && targetArray) {
+    const targetEvent = targetArray.find((x: any) => x.id === id);
+    if (targetEvent) {
+      const isOwner = targetEvent.userId === user.id || targetEvent.createdByName === user.name;
+      const isAdmin = user.role === 'Admin' || user.role === 'Parent' || user.role === 'Co-Admin';
+      if (targetEvent.isPersonal && !isOwner) {
+        res.status(403).json({ error: 'Permission denied: Cannot delete private events belonging to another family member.' });
+        return;
+      }
+      if (!isOwner && !isAdmin) {
+        res.status(403).json({ error: 'Permission denied: Only the event creator or a household Admin can delete this event.' });
+        return;
+      }
+    }
+  }
+
+  deletedItemIds.add(id);
   if (targetArray) {
     const idx = targetArray.findIndex((x: any) => x.id === id);
     if (idx >= 0) {
@@ -1721,7 +1808,7 @@ app.delete('/api/family/item', authenticateUser, async (req: Request, res: Respo
   res.json({ success: true, id });
 });
 
-// POST /api/family/sync: Multi-device delta synchronization
+// POST /api/family/sync: Multi-device delta synchronization with privacy isolation
 app.post('/api/family/sync', authenticateUser, async (req: Request, res: Response): Promise<void> => {
   const user = req.user!;
   const familyId = req.body?.familyId || user.familyId;
@@ -1729,6 +1816,11 @@ app.post('/api/family/sync', authenticateUser, async (req: Request, res: Respons
   await syncFromCloudStore();
   const household = findHousehold(familyId, req.body?.inviteCode || user.inviteCode);
   const cleanMembers = dedupeServerMembers(household?.members || []);
+
+  // Enforce privacy: never leak another member's private events across devices or accounts
+  const userEvents = (household.events || []).filter((e: any) =>
+    !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+  );
 
   res.json({
     success: true,
@@ -1741,7 +1833,7 @@ app.post('/api/family/sync', authenticateUser, async (req: Request, res: Respons
     groceries: household.groceries || [],
     expenses: household.expenses || [],
     reminders: household.reminders || [],
-    events: household.events || [],
+    events: userEvents,
     bills: household.bills || [],
     documents: household.documents || [],
     memories: household.memories || [],
@@ -1891,9 +1983,14 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
       fetchFamilyData('family_memories', user.familyId, token, 'order=year.desc,date.desc&limit=30')
     ]);
 
-    const effectiveEvents = isExplicitNonDemo
+    const rawEvents = isExplicitNonDemo
       ? (Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : (events || []))
       : ((events && events.length > 0) ? events : sharedFallbackEvents);
+
+    // Enforce privacy: never expose another member's private events to the AI chatbot
+    const effectiveEvents = rawEvents.filter((e: any) =>
+      !e.isPersonal || e.userId === user.id || e.createdByName === user.name
+    );
     const effectiveGroceries = isExplicitNonDemo
       ? (Array.isArray(clientState?.groceries) ? normalizeClientGroceries(clientState.groceries) : (groceries || []))
       : ((groceries && groceries.length > 0) ? groceries : sharedFallbackGroceries);

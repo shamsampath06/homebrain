@@ -27,7 +27,17 @@ export interface FamilyMember {
   preferences?: string;
 }
 
-export type EventCategory = 'Birthday' | 'Appointment' | 'Holiday' | 'School' | 'Bill' | 'General';
+export type EventCategory = 'Birthday' | 'Appointment' | 'Holiday' | 'School' | 'Bill' | 'General' | 'Meeting' | 'Family';
+
+export type EventPriority = 'Urgent' | 'High' | 'Medium' | 'Low';
+
+export interface EventChangeHistory {
+  action: 'created' | 'updated' | 'rescheduled' | 'cancelled';
+  byName: string;
+  byRole: string;
+  timestamp: string;
+  details?: string;
+}
 
 export interface FamilyEvent {
   id: string;
@@ -35,13 +45,25 @@ export interface FamilyEvent {
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
   category: EventCategory;
+  priority?: EventPriority;
+  location?: string;
   description?: string;
   membersInvolved: string[]; // Member names or IDs
   reminder: boolean;
+  reminderMinutesBefore?: number;
   recurring: 'None' | 'Daily' | 'Weekly' | 'Monthly' | 'Yearly';
   isPersonal?: boolean;
   userId?: string;
   createdByName?: string;
+  createdByRole?: string;
+  createdAt?: string;
+  lastModifiedByName?: string;
+  lastModifiedByRole?: string;
+  lastModifiedAt?: string;
+  rsvps?: Record<string, 'pending' | 'accepted' | 'declined'>; // Map of memberName -> RSVP status
+  history?: EventChangeHistory[];
+  familyId?: string;
+  status?: 'confirmed' | 'cancelled' | 'tentative';
 }
 
 export interface ReminderItem {

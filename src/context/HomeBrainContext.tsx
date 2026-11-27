@@ -856,22 +856,84 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [events, setEvents] = useState<FamilyEvent[]>(() => getInitialCachedData<FamilyEvent>('events'));
 
   const addEvent = (event: Omit<FamilyEvent, 'id'>) => {
+    const nowIso = new Date().toISOString();
+    const rsvps = event.rsvps ? { ...event.rsvps } : {};
+    (event.membersInvolved || ['Family']).forEach(m => {
+      if (!rsvps[m]) {
+        rsvps[m] = m.toLowerCase() === (currentUser.name || '').toLowerCase() ? 'accepted' : 'pending';
+      }
+    });
+
     const newEvt: FamilyEvent = {
+      priority: 'Medium',
+      rsvps,
+      history: [
+        {
+          action: 'created',
+          byName: currentUser.name || 'Member',
+          byRole: currentUser.role || 'Member',
+          timestamp: nowIso,
+          details: `Created event "${event.title}"`
+        }
+      ],
       ...event,
       id: crypto.randomUUID(),
       userId: event.userId || currentUser.id,
-      createdByName: event.createdByName || currentUser.name
+      createdByName: event.createdByName || currentUser.name,
+      createdByRole: event.createdByRole || currentUser.role,
+      createdAt: event.createdAt || nowIso
     };
     setEvents(prev => [...prev, newEvt]);
     void persist(() => insertRow('events', currentUser.familyId, newEvt).then(() => undefined));
   };
 
   const updateEvent = (id: string, updated: Partial<FamilyEvent>) => {
-    setEvents(prev => prev.map(e => (e.id === id ? { ...e, ...updated } : e)));
-    void persist(() => updateRow('events', currentUser.familyId, id, updated));
+    const nowIso = new Date().toISOString();
+    setEvents(prev => prev.map(e => {
+      if (e.id === id) {
+        const history = updated.history || [
+          ...(e.history || []),
+          {
+            action: 'updated' as const,
+            byName: currentUser.name,
+            byRole: currentUser.role,
+            timestamp: nowIso,
+            details: `Updated event details`
+          }
+        ];
+        return {
+          ...e,
+          ...updated,
+          lastModifiedByName: currentUser.name,
+          lastModifiedByRole: currentUser.role,
+          lastModifiedAt: nowIso,
+          history
+        };
+      }
+      return e;
+    }));
+    void persist(() => updateRow('events', currentUser.familyId, id, {
+      ...updated,
+      lastModifiedByName: currentUser.name,
+      lastModifiedByRole: currentUser.role,
+      lastModifiedAt: nowIso
+    }));
   };
 
   const deleteEvent = (id: string) => {
+    const target = events.find(e => e.id === id);
+    if (target) {
+      const isOwner = target.userId === currentUser.id || target.createdByName === currentUser.name;
+      const isAdmin = currentUser.role === 'Admin' || currentUser.role === 'Parent' || currentUser.role === 'Co-Admin';
+      if (target.isPersonal && !isOwner) {
+        console.warn('Cannot delete private event of another member');
+        return;
+      }
+      if (!isOwner && !isAdmin) {
+        console.warn('Only creator or household Admin can delete this event');
+        return;
+      }
+    }
     setEvents(prev => prev.filter(e => e.id !== id));
     void persist(() => deleteRow('events', currentUser.familyId, id));
   };
@@ -2104,6 +2166,7 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (/\b(?:mother|mom|amma|mothers?)\b/i.test(q)) return 'Mother';
         if (/\b(?:grandfather|grandpa|thatha)\b/i.test(q)) return 'Grandfather';
         if (/\b(?:grandmother|grandma|paati)\b/i.test(q)) return 'Grandmother';
+        if (/\b(?:son|sha|shamsampth06)\b/i.test(q)) return 'Son';
         if (/\bsarah\b/i.test(q)) return 'Sarah';
         if (/\bsneha\b/i.test(q)) return 'Sneha';
         if (/\bsham\b/i.test(q)) return 'Sham';
