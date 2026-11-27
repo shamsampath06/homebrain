@@ -1256,9 +1256,36 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
     let household: HouseholdStoreItem;
 
     if (user) {
-      household = findHousehold(user.familyId, user.inviteCode);
+      if (cleanCode && (mode === 'join' || user.inviteCode !== cleanCode)) {
+        household = findHousehold(undefined, cleanCode);
+        user.familyId = household.id;
+        user.familyName = household.name;
+        user.inviteCode = household.inviteCode;
+        if (relation) user.relation = relation;
+        if (role) user.role = role as UserRole;
+      } else if (mode === 'create') {
+        const targetFamilyId = 'fam-' + crypto.randomUUID().slice(0, 8);
+        const targetFamilyName = `${cleanName}'s Household`;
+        const finalInviteCode = 'HB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        household = {
+          id: targetFamilyId,
+          name: targetFamilyName,
+          inviteCode: finalInviteCode,
+          createdBy: cleanEmail,
+          members: []
+        };
+        serverHouseholdStore.set(targetFamilyId, household);
+        user.familyId = household.id;
+        user.familyName = household.name;
+        user.inviteCode = household.inviteCode;
+        user.role = 'Admin';
+        if (relation) user.relation = relation;
+      } else {
+        household = findHousehold(user.familyId, user.inviteCode);
+      }
+      if (name) user.name = cleanName;
     } else {
-      if (mode === 'join' && cleanCode) {
+      if (cleanCode) {
         household = findHousehold(undefined, cleanCode);
       } else {
         const targetFamilyId = 'fam-' + crypto.randomUUID().slice(0, 8);
@@ -1280,8 +1307,8 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
         email: cleanEmail,
         name: cleanName,
         avatar: '👨‍💼',
-        role: (mode === 'create' || !cleanCode) ? 'Admin' : (role as UserRole),
-        relation: relation || ((mode === 'create' || !cleanCode) ? 'Father' : 'Member'),
+        role: (cleanCode ? (role as UserRole || 'Member') : 'Admin'),
+        relation: relation || (cleanCode ? 'Member' : 'Father'),
         familyId: household.id,
         familyName: household.name,
         inviteCode: household.inviteCode

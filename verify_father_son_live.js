@@ -136,11 +136,12 @@ async function main() {
     date: new Date().toISOString().split('T')[0],
     status: 'Paid'
   };
-  await fetch(`${BASE}/api/family/item`, {
+  const expRes = await fetch(`${BASE}/api/family/item`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sonToken}` },
     body: JSON.stringify({ table: 'expenses', item: expensePayload, familyId: householdId })
   });
+  console.log('   Son expense post response:', expRes.status, await expRes.text());
 
   const groceryPayload = {
     id: 'groc-' + Date.now(),
@@ -152,11 +153,12 @@ async function main() {
     completed: false,
     added_by: 'Sham (Son)'
   };
-  await fetch(`${BASE}/api/family/item`, {
+  const grocRes = await fetch(`${BASE}/api/family/item`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sonToken}` },
     body: JSON.stringify({ table: 'groceries', item: groceryPayload, familyId: householdId })
   });
+  console.log('   Son grocery post response:', grocRes.status, await grocRes.text());
   console.log('✅ Son added Expense and Grocery successfully!\n');
 
   // Step 7: Father syncs and retrieves Son's updates
@@ -170,6 +172,7 @@ async function main() {
     body: JSON.stringify({ familyId: householdId })
   });
   const fatherSync = await fatherSyncRes.json();
+  console.log('   fatherSync householdId:', fatherSync.familyId, 'expenses count:', fatherSync.expenses?.length, 'groceries count:', fatherSync.groceries?.length);
   const foundExp = (fatherSync.expenses || []).find(e => e.id === expensePayload.id);
   const foundGroc = (fatherSync.groceries || []).find(g => g.id === groceryPayload.id);
 
