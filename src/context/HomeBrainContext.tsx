@@ -304,6 +304,34 @@ const getInitialAuthStatus = (): boolean => {
   return false;
 };
 
+const CLEAN_SLATE_KEY = 'homebrain_clean_slate_v20261128_clean_all';
+if (typeof window !== 'undefined') {
+  try {
+    if (localStorage.getItem(CLEAN_SLATE_KEY) !== 'done') {
+      const keysToClear = [
+        'homebrain_events',
+        'homebrain_groceries',
+        'homebrain_grocery_history',
+        'homebrain_expenses',
+        'homebrain_bills',
+        'homebrain_medicines',
+        'homebrain_medicine_logs',
+        'homebrain_documents',
+        'homebrain_reminders',
+        'homebrain_memories',
+        'homebrain_knowledgeList',
+        'homebrain_knowledgeFiles',
+        'homebrain_family_cache_3a131e95-0000-4000-8000-3a131e953a13',
+        'homebrain_family_cache_demo-family-kumar'
+      ];
+      keysToClear.forEach(k => {
+        try { localStorage.removeItem(k); } catch {}
+      });
+      localStorage.setItem(CLEAN_SLATE_KEY, 'done');
+    }
+  } catch {}
+}
+
 const getInitialCachedData = <T,>(key: string): T[] => {
   if (typeof window !== 'undefined') {
     try {
@@ -445,65 +473,51 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     let nextMembers = dedupeMembers([
       ...(remote.familyMembers || []),
-      ...(cached.familyMembers || []),
+      ...(demoEnabled ? (cached.familyMembers || []) : []),
       ...(demoSnapshot ? demoSnapshot.familyMembers : [])
     ]);
-    let nextEvents = mergeById<FamilyEvent>(
-      remote.events || [],
-      mergeById<FamilyEvent>(cached.events || [], demoSnapshot ? demoSnapshot.events : [])
-    );
-    let nextReminders = mergeById<ReminderItem>(
-      remote.reminders || [],
-      mergeById<ReminderItem>(cached.reminders || [], demoSnapshot ? demoSnapshot.reminders : [])
-    );
-    let nextDocuments = mergeById<DocumentItem>(
-      remote.documents || [],
-      mergeById<DocumentItem>(cached.documents || [], demoSnapshot ? demoSnapshot.documents : [])
-    );
-    let nextGroceries = mergeById<GroceryItem>(
-      remote.groceries || [],
-      mergeById<GroceryItem>(cached.groceries || [], demoSnapshot ? demoSnapshot.groceries : [])
-    );
-    let nextGroceryHistory = mergeById<GroceryHistoryItem>(
-      remote.groceryHistory || [],
-      mergeById<GroceryHistoryItem>(cached.groceryHistory || [], demoSnapshot ? demoSnapshot.groceryHistory : [])
-    );
-    let nextMedicines = mergeById<MedicineItem>(
-      remote.medicines || [],
-      mergeById<MedicineItem>(cached.medicines || [], demoSnapshot ? demoSnapshot.medicines : [])
-    );
-    let nextMedicineLogs = mergeById<MedicineLog>(
-      remote.medicineLogs || [],
-      mergeById<MedicineLog>(cached.medicineLogs || [], demoSnapshot ? demoSnapshot.medicineLogs : [])
-    );
-    let nextExpenses = mergeById<ExpenseItem>(
-      remote.expenses || [],
-      mergeById<ExpenseItem>(cached.expenses || [], demoSnapshot ? demoSnapshot.expenses : [])
-    );
-    let nextBills = mergeById<BillItem>(
-      remote.bills || [],
-      mergeById<BillItem>(cached.bills || [], demoSnapshot ? demoSnapshot.bills : [])
-    );
-    let nextKnowledgeList = mergeById<FamilyKnowledge>(
-      remote.knowledgeList || [],
-      mergeById<FamilyKnowledge>(cached.knowledgeList || [], demoSnapshot ? demoSnapshot.knowledgeList : [])
-    );
-    let nextKnowledgeFiles = mergeById<FamilyKnowledgeFile>(
-      cached.knowledgeFiles || [],
-      remote.knowledgeFiles || []
-    );
-    let nextContacts = mergeById<EmergencyContact>(
-      cached.emergencyContacts || [],
-      mergeById<EmergencyContact>(remote.emergencyContacts as EmergencyContact[] || [], demoSnapshot ? demoSnapshot.emergencyContacts : [])
-    );
-    let nextEmergencyLogs = mergeById<EmergencyAlertLog>(
-      cached.emergencyLogs || [],
-      mergeById<EmergencyAlertLog>(remote.emergencyLogs as EmergencyAlertLog[] || [], demoSnapshot ? demoSnapshot.emergencyLogs : [])
-    );
-    let nextMemories = mergeById<FamilyMemory>(
-      cached.memories || [],
-      mergeById<FamilyMemory>(remote.memories || [], demoSnapshot ? demoSnapshot.memories : [])
-    );
+    let nextEvents = demoEnabled
+      ? mergeById<FamilyEvent>(remote.events || [], mergeById<FamilyEvent>(cached.events || [], demoSnapshot ? demoSnapshot.events : []))
+      : (remote.events || []);
+    let nextReminders = demoEnabled
+      ? mergeById<ReminderItem>(remote.reminders || [], mergeById<ReminderItem>(cached.reminders || [], demoSnapshot ? demoSnapshot.reminders : []))
+      : (remote.reminders || []);
+    let nextDocuments = demoEnabled
+      ? mergeById<DocumentItem>(remote.documents || [], mergeById<DocumentItem>(cached.documents || [], demoSnapshot ? demoSnapshot.documents : []))
+      : (remote.documents || []);
+    let nextGroceries = demoEnabled
+      ? mergeById<GroceryItem>(remote.groceries || [], mergeById<GroceryItem>(cached.groceries || [], demoSnapshot ? demoSnapshot.groceries : []))
+      : (remote.groceries || []);
+    let nextGroceryHistory = demoEnabled
+      ? mergeById<GroceryHistoryItem>(remote.groceryHistory || [], mergeById<GroceryHistoryItem>(cached.groceryHistory || [], demoSnapshot ? demoSnapshot.groceryHistory : []))
+      : (remote.groceryHistory || []);
+    let nextMedicines = demoEnabled
+      ? mergeById<MedicineItem>(remote.medicines || [], mergeById<MedicineItem>(cached.medicines || [], demoSnapshot ? demoSnapshot.medicines : []))
+      : (remote.medicines || []);
+    let nextMedicineLogs = demoEnabled
+      ? mergeById<MedicineLog>(remote.medicineLogs || [], mergeById<MedicineLog>(cached.medicineLogs || [], demoSnapshot ? demoSnapshot.medicineLogs : []))
+      : (remote.medicineLogs || []);
+    let nextExpenses = demoEnabled
+      ? mergeById<ExpenseItem>(remote.expenses || [], mergeById<ExpenseItem>(cached.expenses || [], demoSnapshot ? demoSnapshot.expenses : []))
+      : (remote.expenses || []);
+    let nextBills = demoEnabled
+      ? mergeById<BillItem>(remote.bills || [], mergeById<BillItem>(cached.bills || [], demoSnapshot ? demoSnapshot.bills : []))
+      : (remote.bills || []);
+    let nextKnowledgeList = demoEnabled
+      ? mergeById<FamilyKnowledge>(remote.knowledgeList || [], mergeById<FamilyKnowledge>(cached.knowledgeList || [], demoSnapshot ? demoSnapshot.knowledgeList : []))
+      : (remote.knowledgeList || []);
+    let nextKnowledgeFiles = demoEnabled
+      ? mergeById<FamilyKnowledgeFile>(cached.knowledgeFiles || [], remote.knowledgeFiles || [])
+      : (remote.knowledgeFiles || []);
+    let nextContacts = demoEnabled
+      ? mergeById<EmergencyContact>(cached.emergencyContacts || [], mergeById<EmergencyContact>(remote.emergencyContacts as EmergencyContact[] || [], demoSnapshot ? demoSnapshot.emergencyContacts : []))
+      : (remote.emergencyContacts as EmergencyContact[] || []);
+    let nextEmergencyLogs = demoEnabled
+      ? mergeById<EmergencyAlertLog>(cached.emergencyLogs || [], mergeById<EmergencyAlertLog>(remote.emergencyLogs as EmergencyAlertLog[] || [], demoSnapshot ? demoSnapshot.emergencyLogs : []))
+      : (remote.emergencyLogs as EmergencyAlertLog[] || []);
+    let nextMemories = demoEnabled
+      ? mergeById<FamilyMemory>(cached.memories || [], mergeById<FamilyMemory>(remote.memories || [], demoSnapshot ? demoSnapshot.memories : []))
+      : (remote.memories || []);
 
     // Strictly isolate non-demo accounts from any [DEMO] items unless explicitly loaded from Settings
     if (!demoEnabled) {
@@ -549,7 +563,15 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       localStorage.setItem(`homebrain_family_cache_${familyId}`, JSON.stringify({
         ...cached,
-        familyMembers: nextMembers
+        familyMembers: nextMembers,
+        events: nextEvents,
+        groceries: nextGroceries,
+        expenses: nextExpenses,
+        bills: nextBills,
+        medicines: nextMedicines,
+        documents: nextDocuments,
+        reminders: nextReminders,
+        memories: nextMemories
       }));
     } catch { }
 

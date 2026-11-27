@@ -340,7 +340,7 @@ export const CalendarScreen: React.FC = () => {
                         </span>
                       )}
                     </div>
-                    <span className="text-xs text-slate-400">{evt.recurring !== 'None' ? `🔄 ${evt.recurring}` : ''}</span>
+                    <span className="text-xs text-slate-400">{evt.recurring && evt.recurring !== 'None' ? `🔄 ${evt.recurring}` : ''}</span>
                   </div>
 
                   <h3 className="font-bold text-base text-slate-900 dark:text-white mt-1">{evt.title}</h3>

@@ -108,7 +108,23 @@ const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || 'vercel_blob_
 let blobCdnUrl = 'https://zomgqcorwpqvikyh.public.blob.vercel-storage.com/homebrain-data.json';
 
 let lastLocalWrite = 0;
-const deletedItemIds = new Set<string>();
+const SEED_TOMBSTONE_IDS = [
+  "evt-1795797208707","test-evt-1795804539030","evt-1795788863682","test-evt-1795805055197",
+  "19dab16b-fee1-42fc-a32a-fa048a99af2a","priv-evt-1795804541544","priv-evt-1795804246634",
+  "d3617b13-6cda-4476-b131-7c1bcd552f92","priv-evt-1795801022899","exam-evt-1",
+  "priv-evt-1795800706566","evt-1795788158356","evt-1795788333211","evt-1795795976614",
+  "evt-1795796169944","meet-evt-1","a994070b-b421-4f7f-ade0-d3fd3e8f9651","priv-evt-1795805056963",
+  "757383b3-5585-43d4-8472-28313d742c8c","77325e09-e025-4651-923e-3a598b52ca5f",
+  "d6ca01e4-3f96-4776-b36e-e22483e778b4","groc-1795788156029-3","groc-1795788156029-1",
+  "groc-1795788330558-3","groc-1795788330558-1","groc-1795788863682-milk","groc-live-1795772680232",
+  "groc-1795795974230-3","groc-1795795974230-1","groc-1795796169944-milk","groc-1795797208707-milk",
+  "groc-1795797327499-apples","groc-1795797327499-milk","fb613161-a176-4c0f-a330-839e49914870",
+  "exp-1795796169944","exp-1795788333680","exp-1795788863682","exp-1795795977390","exp-1795797208707",
+  "med-1795796169944","med-1795795980416","med-1795788335313","med-1795797208707",
+  "doc-1795796169944","doc-1795788334181","doc-1795788863682","doc-1795795977928","doc-1795797208707",
+  "rem-1795788334780","rem-1795795978648","rem-1795796169944","rem-1795797208707"
+];
+const deletedItemIds = new Set<string>(SEED_TOMBSTONE_IDS);
 
 function mergeWithTombstones<T extends { id?: string }>(local: T[] = [], incoming: T[] = []): T[] {
   const map = new Map<string, T>();
@@ -127,13 +143,9 @@ function mergeWithTombstones<T extends { id?: string }>(local: T[] = [], incomin
 
 export async function syncFromCloudStore(): Promise<void> {
   try {
-    const res = await fetch(blobCdnUrl + '?t=' + Date.now(), { cache: 'no-store' });
+    const res = await fetch(blobCdnUrl + '?download=1', { cache: 'no-store' });
     if (!res.ok) return;
     const storeData: any = await res.json();
-
-    if (storeData && storeData.updatedAt && lastLocalWrite > 0 && storeData.updatedAt < lastLocalWrite) {
-      // The fetched cloud blob is older than our local in-memory modifications; only merge new items without overwriting
-    }
 
     if (storeData && Array.isArray(storeData.deletedItemIds)) {
       for (const id of storeData.deletedItemIds) {
@@ -145,22 +157,40 @@ export async function syncFromCloudStore(): Promise<void> {
 
     if (storeData && storeData.households) {
       for (const [k, v] of Object.entries(storeData.households)) {
+        if (k === 'demo-family-kumar' || k === '00000000-0000-4000-8000-000000000001') {
+          continue;
+        }
         const incoming = v as HouseholdStoreItem;
-        const targetKey = (k === 'demo-family-kumar' || k === '00000000-0000-4000-8000-000000000001')
-          ? PRIMARY_HOUSEHOLD_ID
-          : k;
+        const targetKey = k;
         const existing = serverHouseholdStore.get(targetKey) || { ...primaryHousehold };
 
-        existing.members = dedupeServerMembers([...(existing.members || []), ...(incoming.members || [])]);
-
-        existing.groceries = mergeWithTombstones(existing.groceries, incoming.groceries);
-        existing.expenses = mergeWithTombstones(existing.expenses, incoming.expenses);
-        existing.events = mergeWithTombstones(existing.events, incoming.events);
-        existing.documents = mergeWithTombstones(existing.documents, incoming.documents);
-        existing.bills = mergeWithTombstones(existing.bills, incoming.bills);
-        existing.reminders = mergeWithTombstones(existing.reminders, incoming.reminders);
-        existing.memories = mergeWithTombstones(existing.memories, incoming.memories);
-        existing.medicines = mergeWithTombstones(existing.medicines, incoming.medicines);
+        if (targetKey === PRIMARY_HOUSEHOLD_ID) {
+          existing.id = PRIMARY_HOUSEHOLD_ID;
+          existing.name = 'Family Household';
+          existing.inviteCode = PRIMARY_INVITE_CODE;
+          existing.events = (incoming.events || []).filter((e: any) => e?.id && !deletedItemIds.has(e.id));
+          existing.groceries = (incoming.groceries || []).filter((g: any) => g?.id && !deletedItemIds.has(g.id));
+          existing.expenses = (incoming.expenses || []).filter((x: any) => x?.id && !deletedItemIds.has(x.id));
+          existing.bills = (incoming.bills || []).filter((b: any) => b?.id && !deletedItemIds.has(b.id));
+          existing.medicines = (incoming.medicines || []).filter((m: any) => m?.id && !deletedItemIds.has(m.id));
+          existing.documents = (incoming.documents || []).filter((d: any) => d?.id && !deletedItemIds.has(d.id));
+          existing.reminders = (incoming.reminders || []).filter((r: any) => r?.id && !deletedItemIds.has(r.id));
+          existing.memories = (incoming.memories || []).filter((m: any) => m?.id && !deletedItemIds.has(m.id));
+          const safeMembers = (incoming.members && incoming.members.length > 0 ? incoming.members : existing.members || []).filter((m: any) =>
+            !m.name?.toLowerCase().includes('stranger') && !m.email?.toLowerCase().includes('stranger')
+          );
+          existing.members = dedupeServerMembers(safeMembers);
+        } else {
+          existing.members = dedupeServerMembers([...(existing.members || []), ...(incoming.members || [])]);
+          existing.groceries = mergeWithTombstones(existing.groceries, incoming.groceries);
+          existing.expenses = mergeWithTombstones(existing.expenses, incoming.expenses);
+          existing.events = mergeWithTombstones(existing.events, incoming.events);
+          existing.documents = mergeWithTombstones(existing.documents, incoming.documents);
+          existing.bills = mergeWithTombstones(existing.bills, incoming.bills);
+          existing.reminders = mergeWithTombstones(existing.reminders, incoming.reminders);
+          existing.memories = mergeWithTombstones(existing.memories, incoming.memories);
+          existing.medicines = mergeWithTombstones(existing.medicines, incoming.medicines);
+        }
 
         if (targetKey !== PRIMARY_HOUSEHOLD_ID && incoming.name) existing.name = incoming.name;
         if (targetKey !== PRIMARY_HOUSEHOLD_ID && incoming.inviteCode) existing.inviteCode = incoming.inviteCode;
@@ -171,6 +201,7 @@ export async function syncFromCloudStore(): Promise<void> {
     if (storeData && storeData.users) {
       for (const [k, v] of Object.entries(storeData.users)) {
         const key = k.toLowerCase();
+        if (key.includes('stranger')) continue;
         if (!serverRegisteredUsers.has(key)) {
           serverRegisteredUsers.set(key, v as ServerUser);
         }
@@ -188,17 +219,36 @@ export async function syncToCloudStore(): Promise<void> {
 
     for (const [k, localH] of serverHouseholdStore.entries()) {
       if (k === 'demo-family-kumar') continue;
+      const cleanMembers = dedupeServerMembers(localH.members || []);
+      const cleanEvents = (localH.events || []).filter((e: any) => e?.id && !deletedItemIds.has(e.id));
+      const cleanGroceries = (localH.groceries || []).filter((g: any) => g?.id && !deletedItemIds.has(g.id));
+      const cleanExpenses = (localH.expenses || []).filter((x: any) => x?.id && !deletedItemIds.has(x.id));
+      const cleanBills = (localH.bills || []).filter((b: any) => b?.id && !deletedItemIds.has(b.id));
+      const cleanMedicines = (localH.medicines || []).filter((m: any) => m?.id && !deletedItemIds.has(m.id));
+      const cleanDocuments = (localH.documents || []).filter((d: any) => d?.id && !deletedItemIds.has(d.id));
+      const cleanReminders = (localH.reminders || []).filter((r: any) => r?.id && !deletedItemIds.has(r.id));
+      const cleanMemories = (localH.memories || []).filter((m: any) => m?.id && !deletedItemIds.has(m.id));
+
       householdsObj[k] = {
         ...localH,
         id: k,
         inviteCode: k === PRIMARY_HOUSEHOLD_ID ? PRIMARY_INVITE_CODE : localH.inviteCode,
         name: k === PRIMARY_HOUSEHOLD_ID ? 'Family Household' : localH.name,
-        members: dedupeServerMembers(localH.members || [])
+        members: cleanMembers,
+        events: cleanEvents,
+        groceries: cleanGroceries,
+        expenses: cleanExpenses,
+        bills: cleanBills,
+        medicines: cleanMedicines,
+        documents: cleanDocuments,
+        reminders: cleanReminders,
+        memories: cleanMemories
       };
     }
 
     const usersObj: Record<string, ServerUser> = {};
     for (const [k, v] of serverRegisteredUsers.entries()) {
+      if (k.includes('stranger')) continue;
       usersObj[k.toLowerCase()] = v;
     }
 
@@ -206,6 +256,7 @@ export async function syncToCloudStore(): Promise<void> {
       households: householdsObj,
       users: usersObj,
       deletedItemIds: Array.from(deletedItemIds),
+      cleanVersion: 2026112801,
       updatedAt: Date.now()
     };
 
@@ -250,6 +301,15 @@ const primaryHousehold: HouseholdStoreItem = {
       role: 'Member',
       email: 'shamsampth06@gmail.com',
       phone: ''
+    },
+    {
+      id: 'm-sister-sneha',
+      userId: 'usr-sister-sneha',
+      name: 'sneha',
+      relation: 'Sister',
+      role: 'Member',
+      email: 'sister.sneha@gmail.com',
+      phone: ''
     }
   ],
   events: [],
@@ -286,6 +346,18 @@ serverRegisteredUsers.set('shamsampth06@gmail.com', {
   avatar: '👦',
   role: 'Member',
   relation: 'Son',
+  familyId: PRIMARY_HOUSEHOLD_ID,
+  familyName: 'Family Household',
+  inviteCode: PRIMARY_INVITE_CODE
+});
+
+serverRegisteredUsers.set('sister.sneha@gmail.com', {
+  id: 'usr-sister-sneha',
+  email: 'sister.sneha@gmail.com',
+  name: 'sneha',
+  avatar: '👧',
+  role: 'Member',
+  relation: 'Sister',
   familyId: PRIMARY_HOUSEHOLD_ID,
   familyName: 'Family Household',
   inviteCode: PRIMARY_INVITE_CODE
@@ -375,7 +447,8 @@ function dedupeServerMembers(members: any[]): any[] {
     const idKey = m.id ? String(m.id).trim() : (m.userId ? String(m.userId).trim() : '');
     const nameKey = m.name ? String(m.name).trim().toLowerCase() : '';
 
-    // Filter out dummy demo accounts
+    // Filter out dummy demo accounts and unauthorized accounts
+    if (nameKey.includes('stranger') || emailKey.includes('stranger')) continue;
     if (emailKey.includes('homebrain.app') || emailKey.includes('homebrain.test') || emailKey.includes('homebrain.internal') || emailKey.startsWith('member@')) continue;
     if (['sarah', 'rajesh', 'priya'].includes(nameKey) && (!emailKey || emailKey.includes('homebrain'))) continue;
 
@@ -2059,9 +2132,12 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
       }
     });
 
+    const isUserDemo = Boolean(req.body?.isDemo) || user.familyId === 'demo-family-kumar' || user.inviteCode === 'HB-849201';
+    const isExplicitNonDemo = req.body?.isDemo === false || !isUserDemo;
+
     const rawEvents = isExplicitNonDemo
       ? (Array.isArray(clientState?.events) ? normalizeClientEvents(clientState.events) : mergedEvents)
-      : (mergedEvents.length > 0 ? mergedEvents : sharedFallbackEvents);
+      : (mergedEvents.length > 0 ? mergedEvents : (isUserDemo ? sharedFallbackEvents : []));
 
     // Enforce privacy: never expose another member's private events to the AI chatbot
     const effectiveEvents = rawEvents.filter((e: any) =>
@@ -2069,28 +2145,28 @@ app.post('/api/ai/query', authenticateUser, async (req: Request, res: Response):
     );
     const effectiveGroceries = isExplicitNonDemo
       ? (Array.isArray(clientState?.groceries) ? normalizeClientGroceries(clientState.groceries) : (groceries || []))
-      : ((groceries && groceries.length > 0) ? groceries : sharedFallbackGroceries);
+      : ((groceries && groceries.length > 0) ? groceries : (isUserDemo ? sharedFallbackGroceries : []));
     const effectiveBills = isExplicitNonDemo
       ? (Array.isArray(clientState?.bills) ? normalizeClientBills(clientState.bills) : (bills || []))
-      : ((bills && bills.length > 0) ? bills : sharedFallbackBills);
+      : ((bills && bills.length > 0) ? bills : (isUserDemo ? sharedFallbackBills : []));
     const effectiveDocuments = isExplicitNonDemo
       ? (Array.isArray(clientState?.documents) ? normalizeClientDocuments(clientState.documents) : (documents || []))
-      : ((documents && documents.length > 0) ? documents : sharedFallbackDocuments);
+      : ((documents && documents.length > 0) ? documents : (isUserDemo ? sharedFallbackDocuments : []));
     const effectiveExpenses = isExplicitNonDemo
       ? (Array.isArray(clientState?.expenses) ? normalizeClientExpenses(clientState.expenses) : (expenses || []))
-      : ((expenses && expenses.length > 0) ? expenses : sharedFallbackExpenses);
+      : ((expenses && expenses.length > 0) ? expenses : (isUserDemo ? sharedFallbackExpenses : []));
     const effectiveReminders = isExplicitNonDemo
       ? (Array.isArray(clientState?.reminders) ? normalizeClientReminders(clientState.reminders) : (reminders || []))
-      : ((reminders && reminders.length > 0) ? reminders : sharedFallbackReminders);
+      : ((reminders && reminders.length > 0) ? reminders : (isUserDemo ? sharedFallbackReminders : []));
     const effectiveMedicines = isExplicitNonDemo
       ? (Array.isArray(clientState?.medicines) ? normalizeClientMedicines(clientState.medicines) : (medicines || []))
-      : ((medicines && medicines.length > 0) ? medicines : sharedFallbackMedicines);
+      : ((medicines && medicines.length > 0) ? medicines : (isUserDemo ? sharedFallbackMedicines : []));
     const effectiveMedicineLogs = isExplicitNonDemo
       ? (Array.isArray(clientState?.medicineLogs) ? normalizeClientMedicineLogs(clientState.medicineLogs) : (medicineLogs || []))
-      : ((medicineLogs && medicineLogs.length > 0) ? medicineLogs : sharedFallbackMedicineLogs);
+      : ((medicineLogs && medicineLogs.length > 0) ? medicineLogs : (isUserDemo ? sharedFallbackMedicineLogs : []));
     const effectiveKnowledge = isExplicitNonDemo
       ? (Array.isArray(clientState?.knowledgeList) ? normalizeClientKnowledge(clientState.knowledgeList) : (knowledgeList || []))
-      : ((knowledgeList && knowledgeList.length > 0) ? knowledgeList : sharedFallbackKnowledge);
+      : ((knowledgeList && knowledgeList.length > 0) ? knowledgeList : (isUserDemo ? sharedFallbackKnowledge : []));
 
     // Track grounding sources consulted
     const groundingSources: string[] = [];
