@@ -874,22 +874,17 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
       let remoteFamilyId = profile.familyId || '3a131e95-0000-4000-8000-3a131e953a13';
       let mergedMembers: FamilyMember[] = [];
 
-      const [syncRes, hubRes] = await Promise.all([
-        fetch('/api/family/sync', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            familyId,
-            inviteCode: remoteInviteCode
-          })
-        }).catch(() => null),
-        fetch('/api/family/hub', {
-          headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => null)
-      ]);
+      const syncRes = await fetch('/api/family/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          familyId,
+          inviteCode: remoteInviteCode
+        })
+      }).catch(() => null);
 
       let syncGroceries: GroceryItem[] = [];
       let syncExpenses: ExpenseItem[] = [];
@@ -903,26 +898,6 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
 
       if (!syncRes || !syncRes.ok) {
         throw new Error(`Cloud sync temporarily unavailable (${syncRes?.status || 'network'})`);
-      }
-
-      if (hubRes && hubRes.ok) {
-        try {
-          const hubData = await hubRes.json();
-          if (hubData?.inviteCode) remoteInviteCode = hubData.inviteCode;
-          if (hubData?.familyName) remoteFamilyName = hubData.familyName;
-          if (hubData?.familyId) remoteFamilyId = hubData.familyId;
-          if (hubData?.members && Array.isArray(hubData.members)) {
-            mergedMembers = hubData.members.map((m: any) => ({
-              id: m.id || m.userId || ensureValidUUID(m.email),
-              name: m.name || 'Family Member',
-              relation: m.relation || 'Member',
-              role: m.role || 'Member',
-              avatar: m.avatar || '👨‍💼',
-              phone: m.phone || '',
-              email: m.email || ''
-            }));
-          }
-        } catch { }
       }
 
       if (syncRes && syncRes.ok) {

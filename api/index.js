@@ -4759,6 +4759,13 @@ function mergeRemoteWithLocal(remote, local) {
 async function syncToCloudStore() {
   lastLocalWrite = Date.now();
   let payloadCore = buildLocalPayload();
+  if (!lastStrongEtag || lastStrongEtag.startsWith("W/") || !cachedStoreData) {
+    const remote = await readCloudStoreFresh(true, true);
+    if (remote) {
+      payloadCore = mergeRemoteWithLocal(remote, payloadCore);
+      applyStoreData({ ...payloadCore, deletedItemIds: Array.from(deletedItemIds) });
+    }
+  }
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const payload = {
       ...payloadCore,
@@ -4767,14 +4774,18 @@ async function syncToCloudStore() {
       updatedAt: Date.now()
     };
     try {
-      const useIfMatch = Boolean(lastStrongEtag && !lastStrongEtag.startsWith("W/"));
+      const hasStrongEtag = Boolean(lastStrongEtag && !lastStrongEtag.startsWith("W/"));
+      if (!hasStrongEtag && cachedStoreData) {
+        console.warn("Skipping cloud write because strong ETag could not be obtained.");
+        return false;
+      }
       const blobResult = await put(BLOB_FILE_NAME, JSON.stringify(payload), {
         access: "public",
         addRandomSuffix: false,
         contentType: "application/json",
         cacheControlMaxAge: 60,
         token: BLOB_READ_WRITE_TOKEN,
-        ...useIfMatch ? { ifMatch: lastStrongEtag } : { allowOverwrite: true }
+        ...hasStrongEtag ? { ifMatch: lastStrongEtag } : { allowOverwrite: true }
       });
       lastStrongEtag = blobResult.etag && !blobResult.etag.startsWith("W/") ? blobResult.etag : "";
       lastGetEtag = "";
@@ -5665,7 +5676,7 @@ app.post("/api/ai/reset-demo-state", (req, res) => {
 });
 app.post("/api/auth/signup", async (req, res) => {
   try {
-    await syncFromCloudStore();
+    await syncFromCloudStore(true, true);
     const { email, password, name, familyName = "Family Household", inviteCode, relation = "Member", role = "Member", mode = "join" } = req.body;
     if (!email || !name) {
       res.status(400).json({ error: "Name and email are required." });
@@ -5749,7 +5760,7 @@ app.post("/api/auth/signup", async (req, res) => {
 });
 app.post("/api/auth/login", async (req, res) => {
   try {
-    await syncFromCloudStore();
+    await syncFromCloudStore(true, true);
     const { email, password } = req.body;
     if (!email) {
       res.status(400).json({ error: "Email is required." });
@@ -5860,7 +5871,7 @@ app.post("/api/auth/login", async (req, res) => {
 });
 app.post("/api/auth/google", async (req, res) => {
   try {
-    await syncFromCloudStore();
+    await syncFromCloudStore(true, true);
     const { email, name, inviteCode, relation = "Member", role = "Member", mode = "create" } = req.body;
     if (!email) {
       res.status(400).json({ error: "Google account email is required." });
@@ -6025,30 +6036,31 @@ app.get("/api/auth/me", authenticateUser, (req, res) => {
 });
 app.get("/api/family/hub", authenticateUser, async (req, res) => {
   const user = req.user;
-  const token = req.authToken;
   try {
-    await syncFromCloudStore();
+    await syncFromCloudStore(true, false);
     let household = findHousehold(user.familyId, req.query?.code || user.inviteCode);
     const cleanUserEmail = user.email ? user.email.toLowerCase() : "";
     if (cleanUserEmail && household) {
-      const existingIdx = household.members.findIndex((m) => m.email.toLowerCase() === cleanUserEmail);
-      const userEntry = {
-        id: "m-" + user.id,
-        userId: user.id,
-        name: user.name,
-        relation: user.relation || (existingIdx >= 0 ? household.members[existingIdx].relation : "Member"),
-        role: user.role || (existingIdx >= 0 ? household.members[existingIdx].role : "Member"),
-        email: cleanUserEmail
-      };
-      if (existingIdx >= 0) {
-        household.members[existingIdx] = { ...household.members[existingIdx], ...userEntry };
-      } else {
-        household.members.push(userEntry);
+      const existingIdx = household.members.findIndex((m) => m.email?.toLowerCase() === cleanUserEmail);
+      if (existingIdx < 0) {
+        await syncFromCloudStore(true, true);
+        household = findHousehold(user.familyId, req.query?.code || user.inviteCode);
+        if (!household.members.some((m) => m.email?.toLowerCase() === cleanUserEmail)) {
+          household.members.push({
+            id: "m-" + user.id,
+            userId: user.id,
+            name: user.name,
+            relation: user.relation || "Member",
+            role: user.role || "Member",
+            email: cleanUserEmail
+          });
+          household.members = dedupeServerMembers(household.members);
+          await syncToCloudStore();
+        }
       }
-      household.members = dedupeServerMembers(household.members);
-      await syncToCloudStore();
     }
     const cleanMembers = dedupeServerMembers(household.members);
+    res.setHeader("Cache-Control", "no-store");
     res.json({
       success: true,
       familyId: household.id,
@@ -6079,7 +6091,7 @@ app.post("/api/family/join", authenticateUser, async (req, res) => {
     return;
   }
   const cleanCode = String(inviteCode).trim().toUpperCase();
-  await syncFromCloudStore();
+  await syncFromCloudStore(true, true);
   const household = findHousehold(void 0, cleanCode);
   const existingIdx = household.members.findIndex((m) => m.email?.toLowerCase() === user.email?.toLowerCase());
   const memberEntry = {
@@ -6112,7 +6124,7 @@ app.patch("/api/family/member-role", authenticateUser, async (req, res) => {
     res.status(403).json({ error: "Only Family Admins can manage household roles." });
     return;
   }
-  await syncFromCloudStore();
+  await syncFromCloudStore(true, true);
   const fam = findHousehold(user.familyId);
   if (fam) {
     const member = fam.members.find((m) => m.id === memberId || m.userId === memberId);
@@ -6643,7 +6655,6 @@ ${familyContext}`;
         }
       );
       if (pendingResult.handled) {
-        await syncToCloudStore();
         const updatedHousehold = findHousehold(user.familyId, user.inviteCode);
         const liveHouseholdEvents = (updatedHousehold?.events || []).filter(
           (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
@@ -6700,7 +6711,6 @@ ${familyContext}`;
         }
       );
       if (cognitiveResult.handled) {
-        await syncToCloudStore();
         const updatedHousehold = findHousehold(user.familyId, user.inviteCode);
         const liveHouseholdEvents = (updatedHousehold?.events || []).filter(
           (e) => !e.isPersonal || e.userId === user.id || e.createdByName === user.name
