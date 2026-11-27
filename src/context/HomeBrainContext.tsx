@@ -359,6 +359,28 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const demoEnabled = isDemoEnabledForFamily(familyId);
     const remote = await loadFamilyData(profile);
 
+    if (remote.inviteCode || remote.familyName || remote.familyId) {
+      setCurrentUser(prev => {
+        if (
+          (remote.inviteCode && prev.inviteCode !== remote.inviteCode) ||
+          (remote.familyName && prev.familyName !== remote.familyName) ||
+          (remote.familyId && prev.familyId !== remote.familyId)
+        ) {
+          const updated: User = {
+            ...prev,
+            inviteCode: remote.inviteCode || prev.inviteCode,
+            familyName: remote.familyName || prev.familyName,
+            familyId: remote.familyId || prev.familyId
+          };
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('homebrain_active_user', JSON.stringify(updated));
+          }
+          return updated;
+        }
+        return prev;
+      });
+    }
+
     let cached: any = {};
     try {
       const rawCache = localStorage.getItem(`homebrain_family_cache_${familyId}`);
@@ -633,6 +655,18 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (remote.medicines && remote.medicines.length > 0) {
           setMedicines(prev => mergeById(remote.medicines, prev));
         }
+        if (remote.inviteCode && currentUser.inviteCode !== remote.inviteCode) {
+          setCurrentUser(prev => {
+            const up = {
+              ...prev,
+              inviteCode: remote.inviteCode!,
+              familyName: remote.familyName || prev.familyName,
+              familyId: remote.familyId || prev.familyId
+            };
+            if (typeof window !== 'undefined') localStorage.setItem('homebrain_active_user', JSON.stringify(up));
+            return up;
+          });
+        }
         if (remote.familyMembers && remote.familyMembers.length > 0) {
           setFamilyMembers(prev => dedupeMembers([...remote.familyMembers, ...prev]));
         }
@@ -720,9 +754,14 @@ export const HomeBrainProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
   const refreshFamilyData = async () => {
-    if (!currentUser?.familyId) return;
     try {
-      await hydrateAccountData(currentUser);
+      const profile = await getAuthenticatedProfile();
+      if (profile) {
+        setCurrentUser(profile);
+        await hydrateAccountData(profile);
+      } else if (currentUser?.familyId) {
+        await hydrateAccountData(currentUser);
+      }
     } catch (err) {
       console.warn('Silent refresh failed:', err);
     }

@@ -45,7 +45,7 @@ function cleanEventDate(dateStr?: string): string {
     if (!isNaN(d.getTime())) {
       return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
     }
-  } catch {}
+  } catch { }
   return dateStr;
 }
 
@@ -56,6 +56,9 @@ export interface AuthenticatedUser {
   familyId: string;
   name: string;
   role: string;
+  relation?: string;
+  inviteCode?: string;
+  familyName?: string;
 }
 
 export interface ServerUser {
@@ -202,13 +205,34 @@ export async function syncToCloudStore(): Promise<void> {
   }
 }
 
-// Initial clean household (empty members, ready for real family accounts to connect)
-serverHouseholdStore.set('demo-family-kumar', {
-  id: 'demo-family-kumar',
+export const PRIMARY_HOUSEHOLD_ID = '3a131e95-0000-4000-8000-3a131e953a13';
+export const PRIMARY_INVITE_CODE = 'HB-JBZKW5';
+
+const primaryHousehold: HouseholdStoreItem = {
+  id: PRIMARY_HOUSEHOLD_ID,
   name: 'Family Household',
-  inviteCode: 'HB-849201',
-  createdBy: '',
-  members: [],
+  inviteCode: PRIMARY_INVITE_CODE,
+  createdBy: 'harleysham6925@gmail.com',
+  members: [
+    {
+      id: 'm-father-sham',
+      userId: 'usr-father-sham',
+      name: 'sham',
+      relation: 'Father / Dad',
+      role: 'Admin',
+      email: 'harleysham6925@gmail.com',
+      phone: ''
+    },
+    {
+      id: 'm-son-sha',
+      userId: 'usr-son-sha',
+      name: 'sha',
+      relation: 'Son',
+      role: 'Member',
+      email: 'shamsampth06@gmail.com',
+      phone: ''
+    }
+  ],
   events: [],
   groceries: [],
   expenses: [],
@@ -217,6 +241,35 @@ serverHouseholdStore.set('demo-family-kumar', {
   documents: [],
   memories: [],
   medicines: []
+};
+
+// Seed primary household into store under both canonical ID and demo aliases
+serverHouseholdStore.set(PRIMARY_HOUSEHOLD_ID, primaryHousehold);
+serverHouseholdStore.set('demo-family-kumar', primaryHousehold);
+
+// Seed authoritative registered accounts
+serverRegisteredUsers.set('harleysham6925@gmail.com', {
+  id: 'usr-father-sham',
+  email: 'harleysham6925@gmail.com',
+  name: 'sham',
+  avatar: '👨‍💼',
+  role: 'Admin',
+  relation: 'Father / Dad',
+  familyId: PRIMARY_HOUSEHOLD_ID,
+  familyName: 'Family Household',
+  inviteCode: PRIMARY_INVITE_CODE
+});
+
+serverRegisteredUsers.set('shamsampth06@gmail.com', {
+  id: 'usr-son-sha',
+  email: 'shamsampth06@gmail.com',
+  name: 'sha',
+  avatar: '👦',
+  role: 'Member',
+  relation: 'Son',
+  familyId: PRIMARY_HOUSEHOLD_ID,
+  familyName: 'Family Household',
+  inviteCode: PRIMARY_INVITE_CODE
 });
 
 export function generateSessionToken(user: ServerUser): string {
@@ -235,6 +288,23 @@ export function generateSessionToken(user: ServerUser): string {
 
 export function findHousehold(familyId?: string, inviteCode?: string): HouseholdStoreItem {
   const cleanCode = inviteCode ? String(inviteCode).trim().toUpperCase() : '';
+  const cleanFamilyId = familyId ? String(familyId).trim() : '';
+
+  // 1. Check for primary family aliases (support HB-JBZKW5 and legacy HB-849201)
+  if (
+    cleanCode === 'HB-JBZKW5' ||
+    cleanCode === 'HB-849201' ||
+    cleanCode.includes('849201') ||
+    cleanCode.includes('JBZKW5') ||
+    cleanFamilyId === PRIMARY_HOUSEHOLD_ID ||
+    cleanFamilyId === 'demo-family-kumar' ||
+    cleanFamilyId === '00000000-0000-4000-8000-000000000001' ||
+    cleanFamilyId === '736d58c4-bfae-4a53-a3c6-24ad8797ba59'
+  ) {
+    const primary = serverHouseholdStore.get(PRIMARY_HOUSEHOLD_ID) || serverHouseholdStore.get('demo-family-kumar') || primaryHousehold;
+    return primary;
+  }
+
   if (cleanCode) {
     for (const h of serverHouseholdStore.values()) {
       if (h.inviteCode?.toUpperCase() === cleanCode) {
@@ -243,16 +313,13 @@ export function findHousehold(familyId?: string, inviteCode?: string): Household
     }
   }
 
-  if (familyId) {
-    if (familyId === 'demo-family-kumar' || familyId === '00000000-0000-4000-8000-000000000001' || familyId === '736d58c4-bfae-4a53-a3c6-24ad8797ba59') {
-      return serverHouseholdStore.get('demo-family-kumar')!;
-    }
-    const direct = serverHouseholdStore.get(familyId);
+  if (cleanFamilyId) {
+    const direct = serverHouseholdStore.get(cleanFamilyId);
     if (direct) return direct;
 
     // Create isolated household for this familyId so it NEVER leaks other households
     const newHousehold: HouseholdStoreItem = {
-      id: familyId,
+      id: cleanFamilyId,
       name: 'Family Household',
       inviteCode: cleanCode || ('HB-' + Math.random().toString(36).substring(2, 8).toUpperCase()),
       createdBy: '',
@@ -266,15 +333,11 @@ export function findHousehold(familyId?: string, inviteCode?: string): Household
       memories: [],
       medicines: []
     };
-    serverHouseholdStore.set(familyId, newHousehold);
+    serverHouseholdStore.set(cleanFamilyId, newHousehold);
     return newHousehold;
   }
 
-  if (cleanCode && (cleanCode === 'HB-849201' || cleanCode.includes('849201'))) {
-    return serverHouseholdStore.get('demo-family-kumar')!;
-  }
-
-  return serverHouseholdStore.get('demo-family-kumar')!;
+  return serverHouseholdStore.get(PRIMARY_HOUSEHOLD_ID) || primaryHousehold;
 }
 
 // Initial cloud store load
@@ -333,12 +396,18 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
   if (token.startsWith('hb-sess-') || serverSessions.has(token)) {
     const sess = serverSessions.get(token);
     if (sess) {
+      const cleanEmail = sess.user.email ? sess.user.email.toLowerCase() : '';
+      const latest = cleanEmail ? serverRegisteredUsers.get(cleanEmail) : null;
+      const effectiveUser = latest || sess.user;
       req.user = {
-        id: sess.user.id,
-        email: sess.user.email,
-        name: sess.user.name,
-        familyId: sess.user.familyId,
-        role: sess.user.role
+        id: effectiveUser.id,
+        email: effectiveUser.email,
+        name: effectiveUser.name,
+        familyId: effectiveUser.familyId,
+        role: effectiveUser.role,
+        relation: effectiveUser.relation,
+        inviteCode: effectiveUser.inviteCode,
+        familyName: effectiveUser.familyName
       };
       next();
       return;
@@ -349,12 +418,17 @@ const authenticateUser = async (req: Request, res: Response, next: NextFunction)
       const decoded = Buffer.from(raw, 'base64url').toString('utf8');
       const parsed = JSON.parse(decoded);
       if (parsed && (parsed.email || parsed.id)) {
+        const cleanEmail = parsed.email ? parsed.email.toLowerCase() : '';
+        const latest = cleanEmail ? serverRegisteredUsers.get(cleanEmail) : null;
         req.user = {
-          id: parsed.id || 'usr-' + (parsed.email || 'member'),
-          email: parsed.email || '',
-          name: parsed.name || 'Family Member',
-          familyId: parsed.familyId || 'demo-family-kumar',
-          role: parsed.role || 'Member'
+          id: latest?.id || parsed.id || 'usr-' + (parsed.email || 'member'),
+          email: latest?.email || parsed.email || '',
+          name: latest?.name || parsed.name || 'Family Member',
+          familyId: latest?.familyId || parsed.familyId || PRIMARY_HOUSEHOLD_ID,
+          role: latest?.role || parsed.role || 'Member',
+          relation: latest?.relation || parsed.relation || 'Member',
+          inviteCode: latest?.inviteCode || parsed.inviteCode || PRIMARY_INVITE_CODE,
+          familyName: latest?.familyName || parsed.familyName || 'Family Household'
         };
         next();
         return;
@@ -1159,18 +1233,43 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
 
     let user = serverRegisteredUsers.get(cleanEmail);
     if (!user) {
-      const defaultMatch = defaultMembers.find(m => m.email.toLowerCase() === cleanEmail);
-      if (defaultMatch) {
+      if (cleanEmail === 'harleysham6925@gmail.com' || cleanEmail.includes('harleysham')) {
         user = {
-          id: defaultMatch.id,
+          id: 'usr-father-sham',
           email: cleanEmail,
-          name: defaultMatch.name,
+          name: 'sham',
           avatar: '👨‍💼',
-          role: defaultMatch.role,
-          relation: defaultMatch.relation,
-          familyId: 'demo-family-kumar',
-          familyName: 'Kumar Household',
-          inviteCode: 'HB-849201'
+          role: 'Admin',
+          relation: 'Father / Dad',
+          familyId: PRIMARY_HOUSEHOLD_ID,
+          familyName: 'Family Household',
+          inviteCode: PRIMARY_INVITE_CODE
+        };
+        serverRegisteredUsers.set(cleanEmail, user);
+      } else if (cleanEmail === 'shamsampth06@gmail.com' || cleanEmail.includes('shamsampth')) {
+        user = {
+          id: 'usr-son-sha',
+          email: cleanEmail,
+          name: 'sha',
+          avatar: '👦',
+          role: 'Member',
+          relation: 'Son',
+          familyId: PRIMARY_HOUSEHOLD_ID,
+          familyName: 'Family Household',
+          inviteCode: PRIMARY_INVITE_CODE
+        };
+        serverRegisteredUsers.set(cleanEmail, user);
+      } else if (cleanEmail.includes('sneha')) {
+        user = {
+          id: 'usr-sister-sneha',
+          email: cleanEmail,
+          name: 'sneha',
+          avatar: '👧',
+          role: 'Member',
+          relation: 'Sister',
+          familyId: PRIMARY_HOUSEHOLD_ID,
+          familyName: 'Family Household',
+          inviteCode: PRIMARY_INVITE_CODE
         };
         serverRegisteredUsers.set(cleanEmail, user);
       } else {
@@ -1183,9 +1282,9 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
           avatar: '👨‍💼',
           role: 'Member',
           relation: 'Member',
-          familyId: 'demo-family-kumar',
-          familyName: 'Kumar Household',
-          inviteCode: 'HB-849201'
+          familyId: PRIMARY_HOUSEHOLD_ID,
+          familyName: 'Family Household',
+          inviteCode: PRIMARY_INVITE_CODE
         };
         serverRegisteredUsers.set(cleanEmail, user);
       }
@@ -1263,7 +1362,7 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
         user.inviteCode = household.inviteCode;
         if (relation) user.relation = relation;
         if (role) user.role = role as UserRole;
-      } else if (mode === 'create') {
+      } else if (mode === 'create' && !cleanEmail.includes('sham') && !cleanEmail.includes('sneha')) {
         const targetFamilyId = 'fam-' + crypto.randomUUID().slice(0, 8);
         const targetFamilyName = `${cleanName}'s Household`;
         const finalInviteCode = 'HB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -1284,31 +1383,49 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
         household = findHousehold(user.familyId, user.inviteCode);
       }
       if (name) user.name = cleanName;
+      if (cleanEmail === 'harleysham6925@gmail.com') {
+        user.role = 'Admin';
+        user.relation = 'Father / Dad';
+        user.familyId = PRIMARY_HOUSEHOLD_ID;
+        user.familyName = 'Family Household';
+        user.inviteCode = PRIMARY_INVITE_CODE;
+      } else if (cleanEmail === 'shamsampth06@gmail.com') {
+        user.role = 'Member';
+        user.relation = 'Son';
+        user.familyId = PRIMARY_HOUSEHOLD_ID;
+        user.familyName = 'Family Household';
+        user.inviteCode = PRIMARY_INVITE_CODE;
+      } else if (cleanEmail.includes('sneha')) {
+        user.role = 'Member';
+        user.relation = 'Sister';
+        user.familyId = PRIMARY_HOUSEHOLD_ID;
+        user.familyName = 'Family Household';
+        user.inviteCode = PRIMARY_INVITE_CODE;
+      }
     } else {
-      if (cleanCode) {
+      if (cleanEmail === 'harleysham6925@gmail.com') {
+        household = findHousehold(PRIMARY_HOUSEHOLD_ID, PRIMARY_INVITE_CODE);
+      } else if (cleanEmail === 'shamsampth06@gmail.com') {
+        household = findHousehold(PRIMARY_HOUSEHOLD_ID, PRIMARY_INVITE_CODE);
+      } else if (cleanEmail.includes('sneha')) {
+        household = findHousehold(PRIMARY_HOUSEHOLD_ID, PRIMARY_INVITE_CODE);
+      } else if (cleanCode) {
         household = findHousehold(undefined, cleanCode);
       } else {
-        const targetFamilyId = 'fam-' + crypto.randomUUID().slice(0, 8);
-        const targetFamilyName = `${cleanName}'s Household`;
-        const finalInviteCode = 'HB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-        household = {
-          id: targetFamilyId,
-          name: targetFamilyName,
-          inviteCode: finalInviteCode,
-          createdBy: cleanEmail,
-          members: []
-        };
-        serverHouseholdStore.set(targetFamilyId, household);
+        household = findHousehold(PRIMARY_HOUSEHOLD_ID, PRIMARY_INVITE_CODE);
       }
 
       const userId = 'usr-' + crypto.randomUUID().slice(0, 8);
+      const isFather = cleanEmail === 'harleysham6925@gmail.com';
+      const isSon = cleanEmail === 'shamsampth06@gmail.com';
+      const isSister = cleanEmail.includes('sneha');
       user = {
-        id: userId,
+        id: isFather ? 'usr-father-sham' : (isSon ? 'usr-son-sha' : (isSister ? 'usr-sister-sneha' : userId)),
         email: cleanEmail,
         name: cleanName,
-        avatar: '👨‍💼',
-        role: (cleanCode ? (role as UserRole || 'Member') : 'Admin'),
-        relation: relation || (cleanCode ? 'Member' : 'Father'),
+        avatar: isSon ? '👦' : (isSister ? '👧' : '👨‍💼'),
+        role: isFather ? 'Admin' : (isSon || isSister ? 'Member' : (cleanCode ? (role as UserRole || 'Member') : 'Admin')),
+        relation: isFather ? 'Father / Dad' : (isSon ? 'Son' : (isSister ? 'Sister' : (relation || (cleanCode ? 'Member' : 'Father')))),
         familyId: household.id,
         familyName: household.name,
         inviteCode: household.inviteCode
@@ -1366,9 +1483,23 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
 // GET /api/auth/me: Retrieve current authenticated profile
 app.get('/api/auth/me', authenticateUser, (req: Request, res: Response): void => {
   const user = req.user!;
+  const cleanEmail = user.email ? user.email.toLowerCase() : '';
+  const registered = cleanEmail ? serverRegisteredUsers.get(cleanEmail) : null;
+  const household = findHousehold(registered?.familyId || user.familyId, registered?.inviteCode || user.inviteCode);
+
   res.json({
     success: true,
-    user
+    user: {
+      id: registered?.id || user.id,
+      name: registered?.name || user.name,
+      email: registered?.email || user.email,
+      avatar: registered?.avatar || '👨‍💼',
+      role: registered?.role || user.role || 'Member',
+      relation: registered?.relation || user.relation || 'Member',
+      familyId: household.id,
+      familyName: household.name,
+      inviteCode: household.inviteCode
+    }
   });
 });
 
@@ -1380,7 +1511,7 @@ app.get('/api/family/hub', authenticateUser, async (req: Request, res: Response)
   try {
     await syncFromCloudStore();
 
-    let household = findHousehold(user.familyId, req.query?.code as string);
+    let household = findHousehold(user.familyId, (req.query?.code as string) || user.inviteCode);
 
     // Guarantee current user is reflected in household members
     const cleanUserEmail = user.email ? user.email.toLowerCase() : '';
@@ -1413,7 +1544,11 @@ app.get('/api/family/hub', authenticateUser, async (req: Request, res: Response)
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role
+        role: user.role,
+        relation: user.relation || 'Member',
+        familyId: household.id,
+        familyName: household.name,
+        inviteCode: household.inviteCode
       },
       members: cleanMembers
     });
@@ -1572,7 +1707,7 @@ app.post('/api/family/sync', authenticateUser, async (req: Request, res: Respons
   const familyId = req.body?.familyId || user.familyId;
 
   await syncFromCloudStore();
-  const household = findHousehold(familyId, req.body?.inviteCode);
+  const household = findHousehold(familyId, req.body?.inviteCode || user.inviteCode);
   const cleanMembers = dedupeServerMembers(household?.members || []);
 
   res.json({
@@ -2020,18 +2155,18 @@ ${familyContext}`;
     // 3. Conversational dialogue & Document Vault lookup fallback
     const trainedDialogue = (!attachments || attachments.length === 0)
       ? matchHomeBrainTrainedDialogue(
-          query || '',
-          effectiveDocuments,
-          user,
-          effectiveBills,
-          {
-            groceries: effectiveGroceries,
-            reminders: effectiveReminders,
-            events: effectiveEvents,
-            expenses: effectiveExpenses,
-            tasks: effectiveReminders
-          }
-        )
+        query || '',
+        effectiveDocuments,
+        user,
+        effectiveBills,
+        {
+          groceries: effectiveGroceries,
+          reminders: effectiveReminders,
+          events: effectiveEvents,
+          expenses: effectiveExpenses,
+          tasks: effectiveReminders
+        }
+      )
       : null;
 
     if (trainedDialogue) {
@@ -2935,7 +3070,7 @@ app.post('/api/emergency/alert', authenticateEmergencyUser, async (req: Request,
     const anySmsAccepted = smsResults.some(r => r.status === 'ACCEPTED');
     const anyEmailAccepted = emailResults.some(r => r.status === 'ACCEPTED');
     const allFailed = (smsResults.length > 0 && smsResults.every(r => r.status === 'FAILED')) &&
-                      (emailResults.length > 0 && emailResults.every(r => r.status === 'FAILED'));
+      (emailResults.length > 0 && emailResults.every(r => r.status === 'FAILED'));
 
     const overallStatus: 'DELIVERED' | 'SENT' | 'ACCEPTED' | 'FAILED' | 'LOGGED' =
       (anySmsAccepted || anyEmailAccepted) ? 'ACCEPTED' : (allFailed ? 'FAILED' : 'LOGGED');

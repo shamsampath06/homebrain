@@ -51,8 +51,8 @@ export const FamilyHubModule: React.FC = () => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePhone, setInvitePhone] = useState('');
 
-  const currentInviteCode = currentUser.inviteCode || 'HB-849201';
-  const householdId = currentUser.familyId || 'demo-family-kumar';
+  const currentInviteCode = currentUser.inviteCode || 'HB-JBZKW5';
+  const householdId = currentUser.familyId || '3a131e95-0000-4000-8000-3a131e953a13';
   const householdName = currentUser.familyName || 'Family Household';
   const isAdmin = currentUser.role === 'Admin';
   const isCoAdmin = currentUser.role === 'Co-Admin';

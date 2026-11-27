@@ -200,11 +200,11 @@ export const dedupeMembers = (members: FamilyMember[] = []): FamilyMember[] => {
 
 export const ensureValidUUID = (id?: string | null): string => {
   if (!id) {
-    return '00000000-0000-4000-8000-000000000001';
+    return '3a131e95-0000-4000-8000-3a131e953a13';
   }
   const str = String(id).trim();
-  if (str === 'demo-family-kumar' || str === 'HB-849201' || str === 'demo-family-id') {
-    return '00000000-0000-4000-8000-000000000001';
+  if (str === 'demo-family-kumar' || str === 'HB-849201' || str === 'HB-JBZKW5' || str === 'demo-family-id') {
+    return '3a131e95-0000-4000-8000-3a131e953a13';
   }
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidRegex.test(str)) {
@@ -247,6 +247,9 @@ export interface SupabaseFamilyData {
   emergencySessions: EmergencySession[];
   emergencyNotifications: EmergencyNotification[];
   memories: FamilyMemory[];
+  inviteCode?: string;
+  familyName?: string;
+  familyId?: string;
 }
 
 const emptyData = (): SupabaseFamilyData => ({
@@ -285,7 +288,7 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
     if (localUserStr) {
       try {
         const parsed = JSON.parse(localUserStr) as User;
-        if (!parsed.inviteCode) parsed.inviteCode = 'HB-849201';
+        if (!parsed.inviteCode) parsed.inviteCode = 'HB-JBZKW5';
         if (!parsed.relation) parsed.relation = 'Member';
         return parsed;
       } catch { }
@@ -309,9 +312,9 @@ export const getAuthenticatedProfile = async (): Promise<User | null> => {
             avatar: data.user.avatar || '👨‍💼',
             role: data.user.role || 'Member',
             relation: data.user.relation || 'Member',
-            familyId: data.user.familyId || 'demo-family-kumar',
-            familyName: data.user.familyName || 'Kumar Household',
-            inviteCode: data.user.inviteCode || 'HB-849201'
+            familyId: data.user.familyId || '3a131e95-0000-4000-8000-3a131e953a13',
+            familyName: data.user.familyName || 'Family Household',
+            inviteCode: data.user.inviteCode || 'HB-JBZKW5'
           };
           if (typeof window !== 'undefined') {
             localStorage.setItem('homebrain_active_user', JSON.stringify(u));
@@ -871,6 +874,10 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
 
     // Backend API failover & real-time roster augmentation
     let hubMembers: FamilyMember[] = [];
+    let remoteInviteCode = profile.inviteCode || 'HB-JBZKW5';
+    let remoteFamilyName = profile.familyName || 'Family Household';
+    let remoteFamilyId = profile.familyId || '3a131e95-0000-4000-8000-3a131e953a13';
+
     try {
       const hubRes = await fetch('/api/family/hub', {
         headers: {
@@ -879,6 +886,9 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
       });
       if (hubRes.ok) {
         const hubData = await hubRes.json();
+        if (hubData?.inviteCode) remoteInviteCode = hubData.inviteCode;
+        if (hubData?.familyName) remoteFamilyName = hubData.familyName;
+        if (hubData?.familyId) remoteFamilyId = hubData.familyId;
         if (hubData?.members && Array.isArray(hubData.members)) {
           hubMembers = hubData.members.map((m: any) => ({
             id: m.id || m.userId || ensureValidUUID(m.email),
@@ -919,11 +929,14 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
         },
         body: JSON.stringify({
           familyId,
-          inviteCode: profile.inviteCode
+          inviteCode: remoteInviteCode || profile.inviteCode
         })
       });
       if (syncRes.ok) {
         const syncData = await syncRes.json();
+        if (syncData?.inviteCode) remoteInviteCode = syncData.inviteCode;
+        if (syncData?.familyName) remoteFamilyName = syncData.familyName;
+        if (syncData?.familyId) remoteFamilyId = syncData.familyId;
         if (syncData.members && Array.isArray(syncData.members)) {
           const syncMemberList: FamilyMember[] = syncData.members.map((m: any) => ({
             id: m.id || m.userId || ensureValidUUID(m.email),
@@ -964,7 +977,15 @@ export const loadFamilyData = async (profile: User): Promise<SupabaseFamilyData>
     } catch { }
 
     return {
-      user: profile,
+      user: {
+        ...profile,
+        inviteCode: remoteInviteCode,
+        familyName: remoteFamilyName,
+        familyId: remoteFamilyId
+      },
+      inviteCode: remoteInviteCode,
+      familyName: remoteFamilyName,
+      familyId: remoteFamilyId,
       familyMembers: dedupeMembers(mergedMembers),
       events: syncEvents,
       reminders: syncReminders,
